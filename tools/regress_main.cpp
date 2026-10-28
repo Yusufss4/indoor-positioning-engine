@@ -8,18 +8,22 @@
 
 namespace {
 constexpr const char* kUsage = R"(usage: ipe-regress --scenarios DIR (--baseline FILE | --no-baseline) [options]
+       ipe-regress --traces MANIFEST.json (--baseline FILE | --no-baseline) [options]
 
 Simulates every scenario, replays it through each filter preset and compares
 CEP50/CEP95 against the stored baseline. Exits 1 if any metric regressed.
+With --traces, recorded traces listed in the manifest are replayed instead
+(one run each) and results are grouped by the manifest's "group" field.
 
 options:
-  --seeds N           runs per scenario (default 3)
+  --seeds N           runs per scenario (default 3; ignored with --traces)
   --presets LIST      comma separated presets (default pf,pf-nomap,ekf,wcl)
   --update            overwrite the baseline with the current results
   --markdown FILE     write a markdown results table
   --json FILE         write the current results as JSON
   --tolerance REL     allowed relative increase (default 0.10)
   --serial            disable parallel execution
+  --config FILE       JSON merge patch file applied to every preset (before --set)
   --set JSON          merge patch applied to every preset, for A/B experiments
   --no-baseline       only print results, do not compare
 )";
@@ -48,9 +52,18 @@ int main(int argc, char** argv) {
     opts.seeds = std::stoi(args.get("seeds", "3"));
     opts.parallel = !args.has("serial");
     if (args.has("presets")) opts.presets = split_csv(args.get("presets"));
-    opts.config_patch = args.get("set");
+    if (args.has("config")) {
+      std::ifstream cfg(args.get("config"));
+      if (!cfg) throw std::runtime_error("cannot open " + args.get("config"));
+      std::stringstream text;
+      text << cfg.rdbuf();
+      opts.config_patches.push_back(text.str());
+    }
+    if (args.has("set")) opts.config_patches.push_back(args.get("set"));
 
-    const auto results = run_benchmark(args.require("scenarios"), opts);
+    if (args.has("traces")) opts.seeds = 1;
+    const auto results = args.has("traces") ? run_trace_benchmark(args.get("traces"), opts)
+                                            : run_benchmark(args.require("scenarios"), opts);
     const std::string table = benchmark_to_markdown(results);
     std::cout << table << "\n";
     if (args.has("markdown")) std::ofstream(args.get("markdown")) << table;

@@ -33,4 +33,13 @@ if(IPE_BUILD_TOOLS)
                    --baseline ${PROJECT_SOURCE_DIR}/tests/regression/baseline.json
                    --seeds ${IPE_REGRESSION_SEEDS})
   set_tests_properties(accuracy_regression PROPERTIES LABELS regression TIMEOUT 900)
+
+  # Real phone traces (docs/real_data.md). The data is not in the repository:
+  # the test is skipped until datasets/msil/fetch.sh and convert.py --wifi have run.
+  set(IPE_MSIL_MANIFEST ${PROJECT_SOURCE_DIR}/datasets/msil/out/manifest_holdout.json)
+  add_test(NAME real_data_regression
+           COMMAND sh -c "test -f \"$1\" || exit 77; exec \"$0\" --traces \"$1\" --presets pf,wcl --config \"$2\" --baseline \"$3\""
+                   $<TARGET_FILE:ipe-regress> ${IPE_MSIL_MANIFEST} ${PROJECT_SOURCE_DIR}/data/configs/msil_wifi.json
+                   ${PROJECT_SOURCE_DIR}/tests/regression/msil_baseline.json)
+  set_tests_properties(real_data_regression PROPERTIES LABELS "regression;realdata" SKIP_RETURN_CODE 77 TIMEOUT 1800)
 endif()

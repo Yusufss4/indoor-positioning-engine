@@ -1,0 +1,10 @@
+{
+  "rssi": {
+    "sigma_db": 8.0
+  },
+  "pf": {
+    "num_particles": 5000,
+    "init_proposal": true,
+    "recovery_proposal": true
+  }
+}

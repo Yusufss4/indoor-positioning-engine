@@ -104,7 +104,30 @@ gt,t,x,y,heading,level,z
 - `gt` rows are optional ground truth; replay scores the estimate at each one. `level` is the level index
   and `z` the walking-surface height in metres. Single-floor traces keep the short `gt,t,x,y,heading` form,
   and both forms are accepted.
-- A phone logger that writes this format can be replayed directly.
+- A phone logger that writes this format can be replayed directly. `datasets/msil/convert.py` is a
+  worked example: it rotates Android sensor data into the expected frame (see
+  [real_data.md](real_data.md#conversion-datasetsmsilconvertpy)).
+
+## Config patches (`data/configs/*.json`)
+
+JSON merge patches over a preset's engine config, the same shape as `--print-config` output.
+`ipe-replay` and `ipe-regress` take `--config FILE`. It is applied before any `--set`, and unknown keys
+are rejected.
+
+## Trace manifest (`ipe-regress --traces`)
+
+Replays recorded traces (one run each) instead of simulating scenarios:
+
+```json
+{"traces": [
+  {"name": "site1_F1_5d8f...", "group": "site1_F1", "venue": "site1/F1/venue.json",
+   "trace": "site1/F1/5d8f....csv"}
+]}
+```
+
+Paths are relative to the manifest. Results are reported per `group` plus an `all` group. They include
+the median and mean over traces of each trace's mean error, CEP50 and CEP95, and traces without ground
+truth after the warm-up are skipped. `--baseline` and `--update` work as for scenarios.
 
 ## Replay outputs
 

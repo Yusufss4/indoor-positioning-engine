@@ -6,5 +6,7 @@ __pycache__/
 *.pyc
 .venv/
 viz/output/
+datasets/msil/raw/
+datasets/msil/out/
 web/dist/
 .DS_Store

@@ -19,6 +19,9 @@ truth; a replay tool and a regression suite measure accuracy.
 - `data/venues`, `data/scenarios` - inputs. `tests/regression/baseline.json` - accepted accuracy.
 - `data/geojson`, `data/imdf` - generated from `data/venues` by `ipe-import`; a unit test fails when they
   are stale. `data/mappings` - GeoJSON property mapping tables.
+- `data/configs` - engine config patches for `--config` (e.g. `open_venue.json`, `msil_wifi.json`).
+- `datasets/msil` - fetch and convert scripts for the Microsoft Indoor Location sample. The raw data and
+  the converted `out/` are git-ignored; `tests/regression/msil_baseline.json` gates the held-out walks.
 - `viz/` - Python plotting; `web/` - Emscripten bindings and the browser demo.
 
 ## Build and test
@@ -29,6 +32,10 @@ cmake --build build -j
 ctest --test-dir build -LE regression --output-on-failure   # unit tests, ~1 s
 ctest --test-dir build -L regression --output-on-failure    # accuracy gate, ~3 s
 ```
+
+`-L regression` also runs `real_data_regression` (label `realdata`), which is skipped unless
+`datasets/msil/out/` exists (see [docs/real_data.md](docs/real_data.md)). Settings for real data are
+chosen on `manifest_tune.json` only; `manifest_holdout.json` is for reporting, not for tuning.
 
 Sanitizers: `-DIPE_SANITIZE=address,undefined` with `CMAKE_BUILD_TYPE=Debug`.
 

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
 #include <future>
 #include <map>
 #include <memory>
@@ -15,6 +16,17 @@
 
 namespace ipe::eval {
 namespace fs = std::filesystem;
+
+namespace {
+std::vector<EngineConfig> preset_configs(const BenchmarkOptions& opts) {
+  std::vector<EngineConfig> configs;
+  for (const auto& p : opts.presets) {
+    configs.push_back(preset_config(p));
+    for (const auto& patch : opts.config_patches) apply_config_overrides(configs.back(), patch);
+  }
+  return configs;
+}
+}  // namespace
 
 std::vector<BenchmarkCase> run_benchmark(const std::string& scenario_dir, const BenchmarkOptions& opts) {
   std::vector<fs::path> files;
@@ -32,11 +44,7 @@ std::vector<BenchmarkCase> run_benchmark(const std::string& scenario_dir, const 
     scenarios.push_back(std::move(sc));
   }
 
-  std::vector<EngineConfig> configs;
-  for (const auto& p : opts.presets) {
-    configs.push_back(preset_config(p));
-    if (!opts.config_patch.empty()) apply_config_overrides(configs.back(), opts.config_patch);
-  }
+  const std::vector<EngineConfig> configs = preset_configs(opts);
 
   // One job per (scenario, seed): simulate once, replay through every preset.
   struct JobResult {
@@ -102,6 +110,91 @@ std::vector<BenchmarkCase> run_benchmark(const std::string& scenario_dir, const 
       c.compute_us_per_update /= n;
       c.floor_accuracy /= n;
       c.floor_switch_latency_s = with_changes ? c.floor_switch_latency_s / with_changes : -1.0;
+      c.convergence_s = converged ? c.convergence_s / converged : -1.0;
+      cases.push_back(c);
+    }
+  }
+  return cases;
+}
+
+std::vector<BenchmarkCase> run_trace_benchmark(const std::string& manifest_path, const BenchmarkOptions& opts) {
+  std::ifstream in(manifest_path);
+  if (!in) throw std::runtime_error("cannot open manifest " + manifest_path);
+  const auto manifest = nlohmann::json::parse(in);
+  const fs::path root = fs::path(manifest_path).parent_path();
+
+  struct Entry {
+    std::string group;
+    std::string venue;
+    std::string trace;
+  };
+  std::vector<Entry> entries;
+  std::vector<std::string> groups;
+  std::map<std::string, std::shared_ptr<const Venue>> venues;
+  for (const auto& jt : manifest.at("traces")) {
+    Entry e{jt.value("group", std::string("traces")), (root / jt.at("venue").get<std::string>()).string(),
+            (root / jt.at("trace").get<std::string>()).string()};
+    if (std::find(groups.begin(), groups.end(), e.group) == groups.end()) groups.push_back(e.group);
+    if (!venues.count(e.venue)) venues[e.venue] = std::make_shared<Venue>(load_venue_file(e.venue));
+    entries.push_back(std::move(e));
+  }
+  if (entries.empty()) throw std::runtime_error("no traces in " + manifest_path);
+
+  const std::vector<EngineConfig> configs = preset_configs(opts);
+
+  auto job = [&](std::size_t i) {
+    const Venue& venue = *venues.at(entries[i].venue);
+    const Trace trace = read_trace_file(entries[i].trace);
+    std::vector<Metrics> per_preset;
+    for (const auto& cfg : configs) per_preset.push_back(replay(venue, trace, cfg, opts.replay).metrics);
+    return per_preset;
+  };
+  std::vector<std::vector<Metrics>> results(entries.size());
+  if (opts.parallel) {
+    std::vector<std::future<std::vector<Metrics>>> futures;
+    for (std::size_t i = 0; i < entries.size(); ++i) futures.push_back(std::async(std::launch::async, job, i));
+    for (std::size_t i = 0; i < entries.size(); ++i) results[i] = futures[i].get();
+  } else {
+    for (std::size_t i = 0; i < entries.size(); ++i) results[i] = job(i);
+  }
+
+  groups.push_back("all");
+  std::vector<BenchmarkCase> cases;
+  for (const auto& group : groups) {
+    for (std::size_t pi = 0; pi < configs.size(); ++pi) {
+      BenchmarkCase c;
+      c.scenario = group;
+      c.preset = opts.presets[pi];
+      c.recorded = true;
+      std::vector<double> means, cep50s, cep95s;
+      int converged = 0;
+      for (std::size_t i = 0; i < entries.size(); ++i) {
+        if (group != "all" && entries[i].group != group) continue;
+        const Metrics& m = results[i][pi];
+        // A walk shorter than the warm-up has no scored samples.
+        if (m.samples == 0) continue;
+        ++c.runs;
+        means.push_back(m.mean_m);
+        cep50s.push_back(m.cep50_m);
+        cep95s.push_back(m.cep95_m);
+        c.availability += m.availability;
+        c.compute_us_per_update += m.compute_us_per_update;
+        if (m.convergence_s >= 0.0) {
+          c.convergence_s += m.convergence_s;
+          ++converged;
+        } else {
+          ++c.unconverged_runs;
+        }
+      }
+      const double n = std::max(1, c.runs);
+      for (double v : means) c.mean_m += v / n;
+      for (double v : cep50s) c.cep50_m += v / n;
+      for (double v : cep95s) c.cep95_m += v / n;
+      c.median_mean_m = percentile(means, 0.5);
+      c.median_cep50_m = percentile(cep50s, 0.5);
+      c.median_cep95_m = percentile(cep95s, 0.5);
+      c.availability /= n;
+      c.compute_us_per_update /= n;
       c.convergence_s = converged ? c.convergence_s / converged : -1.0;
       cases.push_back(c);
     }
@@ -192,12 +285,31 @@ std::string benchmark_to_json(const std::vector<BenchmarkCase>& results, const B
       entry["floor_accuracy"] = round3(c.floor_accuracy);
       entry["floor_switch_latency_s"] = round3(c.floor_switch_latency_s);
     }
+    if (c.recorded) {
+      entry["traces"] = c.runs;
+      entry["median_mean_m"] = round3(c.median_mean_m);
+      entry["median_cep50_m"] = round3(c.median_cep50_m);
+      entry["median_cep95_m"] = round3(c.median_cep95_m);
+    }
   }
   return j.dump(indent);
 }
 
 std::string benchmark_to_markdown(const std::vector<BenchmarkCase>& results) {
   std::ostringstream out;
+  if (!results.empty() && results.front().recorded) {
+    out << "| Group | Filter | Traces | Median CEP50 [m] | Median CEP95 [m] | Mean CEP50 [m] | Mean CEP95 [m] | "
+           "Converged | us/update |\n";
+    out << "|---|---|---:|---:|---:|---:|---:|---:|---:|\n";
+    char buf[320];
+    for (const auto& c : results) {
+      std::snprintf(buf, sizeof(buf), "| %s | %s | %d | %.2f | %.2f | %.2f | %.2f | %d/%d | %.1f |\n",
+                    c.scenario.c_str(), c.preset.c_str(), c.runs, c.median_cep50_m, c.median_cep95_m, c.cep50_m,
+                    c.cep95_m, c.runs - c.unconverged_runs, c.runs, c.compute_us_per_update);
+      out << buf;
+    }
+    return out.str();
+  }
   out << "| Scenario | Filter | Mean [m] | CEP50 [m] | CEP95 [m] | Converged in [s] | Floor ok | Floor switch [s] | "
          "us/update |\n";
   out << "|---|---|---:|---:|---:|---:|---:|---:|---:|\n";

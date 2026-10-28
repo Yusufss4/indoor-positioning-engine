@@ -78,13 +78,17 @@ def load_particles(path: str | Path) -> dict[float, np.ndarray]:
     return {t: np.array(v) for t, v in snaps.items()}
 
 
-def draw_venue(ax, venue: Venue, beacon_labels: bool = True, highlight: dict[str, str] | None = None) -> None:
+def draw_venue(ax, venue: Venue, beacon_labels: bool = True, highlight: dict[str, str] | None = None,
+               background: str | Path | None = None, beacon_size: float = 55) -> None:
+    """`background` is an image stretched over the venue bounds (e.g. a floor plan raster)."""
     x0, y0, x1, y1 = venue.bounds
+    if background is not None:
+        ax.imshow(plt.imread(background), extent=(x0, x1, y0, y1), origin="upper", alpha=0.55, zorder=0)
     for w in venue.walls:
         ax.plot([w[0], w[2]], [w[1], w[3]], color="#555555", lw=2, solid_capstyle="round", zorder=1)
     for b in venue.beacons:
         color = (highlight or {}).get(b["id"], "#7f3fbf")
-        ax.scatter(b["x"], b["y"], marker="^", s=55, color=color, edgecolor="white", linewidth=0.8, zorder=4)
+        ax.scatter(b["x"], b["y"], marker="^", s=beacon_size, color=color, edgecolor="white", linewidth=0.8, zorder=4)
         if beacon_labels:
             ax.annotate(b["id"], (b["x"], b["y"]), textcoords="offset points", xytext=(4, 4), fontsize=7, color=color)
     pad = 1.0

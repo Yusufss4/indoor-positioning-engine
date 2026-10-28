@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <filesystem>
+#include <fstream>
 #include <stdexcept>
 
 #include "ipe/eval.hpp"
@@ -9,6 +11,7 @@
 
 using namespace ipe;
 using namespace ipe::eval;
+namespace fs = std::filesystem;
 
 TEST(Eval, PercentileInterpolates) {
   EXPECT_DOUBLE_EQ(percentile({}, 0.5), 0.0);
@@ -94,6 +97,38 @@ TEST(Eval, ReplayProducesOneRecordPerTruthSample) {
   EXPECT_GT(r.metrics.steps, 100u);
   // Sanity bound, not a tuning target: the regression suite owns accuracy.
   EXPECT_LT(r.metrics.cep50_m, 3.0);
+}
+
+TEST(Eval, TraceManifestGroupsRecordedTraces) {
+  const auto sc = sim::load_scenario_file(test::data_path("scenarios/office_nominal.json"));
+  const auto venue = load_venue_file(sc.venue_path);
+  const fs::path dir = fs::temp_directory_path() / "ipe_trace_manifest_test";
+  fs::create_directories(dir);
+  for (int k = 0; k < 3; ++k)
+    write_trace_file((dir / ("t" + std::to_string(k) + ".csv")).string(), sim::simulate(sc, venue, 200 + k));
+  std::ofstream(dir / "manifest.json") << R"({"traces": [
+    {"name": "a0", "group": "a", "venue": ")"
+                                       << sc.venue_path << R"(", "trace": "t0.csv"},
+    {"name": "a1", "group": "a", "venue": ")"
+                                       << sc.venue_path << R"(", "trace": "t1.csv"},
+    {"name": "b0", "group": "b", "venue": ")"
+                                       << sc.venue_path << R"(", "trace": "t2.csv"}]})";
+
+  BenchmarkOptions opts;
+  opts.presets = {"wcl"};
+  const auto cases = run_trace_benchmark((dir / "manifest.json").string(), opts);
+  ASSERT_EQ(cases.size(), 3u);
+  EXPECT_EQ(cases[0].scenario, "a");
+  EXPECT_EQ(cases[0].runs, 2);
+  EXPECT_EQ(cases[1].scenario, "b");
+  EXPECT_EQ(cases[1].runs, 1);
+  EXPECT_EQ(cases[2].scenario, "all");
+  EXPECT_EQ(cases[2].runs, 3);
+  EXPECT_TRUE(cases[2].recorded);
+  EXPECT_GT(cases[2].median_cep50_m, 0.0);
+  // One run: the median and the mean are the same number.
+  EXPECT_DOUBLE_EQ(cases[1].median_cep50_m, cases[1].cep50_m);
+  fs::remove_all(dir);
 }
 
 TEST(Eval, BaselineComparisonFlagsRegressions) {
