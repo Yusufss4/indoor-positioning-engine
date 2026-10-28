@@ -1,0 +1,17 @@
+{
+  "name": "airport_hall_sparse",
+  "description": "Large departure hall with beacons 20 m apart, two shops without beacons, high packet loss from crowds.",
+  "venue": "../venues/airport_hall.json",
+  "seed": 707,
+  "walk": {
+    "waypoints": [
+      [5, 5], [75, 5], [75, 24], [50, 24], [50, 30], [50, 36], [45, 37], [55, 37], [50, 33], [50, 30],
+      [50, 24], [30, 24], [30, 30], [30, 36], [26, 37], [34, 37], [30, 33], [30, 30], [30, 24], [10, 24],
+      [10, 10], [50, 10], [50, 22]
+    ]
+  },
+  "ble": {
+    "rx_interval_s": 0.7,
+    "dropout": 0.35
+  }
+}

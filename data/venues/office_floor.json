@@ -1,0 +1,31 @@
+{
+  "name": "office_floor",
+  "description": "40 x 24 m office floor: central corridor, four rooms to the north, open-plan area and two meeting rooms to the south.",
+  "bounds": [0, 0, 40, 24],
+  "wall_attenuation_db": 3.5,
+  "walls": [
+    [0, 0, 40, 0], [40, 0, 40, 24], [40, 24, 0, 24], [0, 24, 0, 0],
+
+    [0, 13, 4.2, 13], [5.8, 13, 14.2, 13], [15.8, 13, 24.2, 13], [25.8, 13, 34.2, 13], [35.8, 13, 40, 13],
+    [10, 13, 10, 24], [20, 13, 20, 24], [30, 13, 30, 24],
+
+    [0, 10, 9, 10], [11, 10, 24.2, 10], [25.8, 10, 34.2, 10], [35.8, 10, 40, 10],
+    [20, 0, 20, 10], [30, 0, 30, 10],
+
+    [6, 3, 6, 6.5], [14, 3, 14, 6.5]
+  ],
+  "beacons": [
+    {"id": "C1", "x": 5,  "y": 11.5, "tx_power": -59, "path_loss_exp": 2.0},
+    {"id": "C2", "x": 15, "y": 11.5, "tx_power": -59, "path_loss_exp": 2.0},
+    {"id": "C3", "x": 25, "y": 11.5, "tx_power": -59, "path_loss_exp": 2.0},
+    {"id": "C4", "x": 35, "y": 11.5, "tx_power": -59, "path_loss_exp": 2.0},
+    {"id": "N1", "x": 5,  "y": 20,   "tx_power": -59, "path_loss_exp": 2.0},
+    {"id": "N2", "x": 15, "y": 20,   "tx_power": -59, "path_loss_exp": 2.0},
+    {"id": "N3", "x": 25, "y": 20,   "tx_power": -59, "path_loss_exp": 2.0},
+    {"id": "N4", "x": 35, "y": 20,   "tx_power": -59, "path_loss_exp": 2.0},
+    {"id": "S1", "x": 3,  "y": 4,    "tx_power": -59, "path_loss_exp": 2.0},
+    {"id": "S2", "x": 17, "y": 4,    "tx_power": -59, "path_loss_exp": 2.0},
+    {"id": "S3", "x": 25, "y": 5,    "tx_power": -59, "path_loss_exp": 2.0},
+    {"id": "S4", "x": 35, "y": 5,    "tx_power": -59, "path_loss_exp": 2.0}
+  ]
+}

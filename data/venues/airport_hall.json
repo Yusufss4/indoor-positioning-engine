@@ -1,0 +1,28 @@
+{
+  "name": "airport_hall",
+  "description": "80 x 40 m departure hall: three check-in islands in the open area and a row of shops along the north side. Beacons are sparse.",
+  "bounds": [0, 0, 80, 40],
+  "wall_attenuation_db": 3.5,
+  "walls": [
+    [0, 0, 80, 0], [80, 0, 80, 40], [80, 40, 0, 40], [0, 40, 0, 0],
+
+    [15, 14, 25, 14], [25, 14, 25, 20], [25, 20, 15, 20], [15, 20, 15, 14],
+    [35, 14, 45, 14], [45, 14, 45, 20], [45, 20, 35, 20], [35, 20, 35, 14],
+    [55, 14, 65, 14], [65, 14, 65, 20], [65, 20, 55, 20], [55, 20, 55, 14],
+
+    [0, 30, 9, 30], [11, 30, 29, 30], [31, 30, 49, 30], [51, 30, 69, 30], [71, 30, 80, 30],
+    [20, 30, 20, 40], [40, 30, 40, 40], [60, 30, 60, 40]
+  ],
+  "beacons": [
+    {"id": "H1", "x": 10, "y": 8,  "tx_power": -59, "path_loss_exp": 2.0},
+    {"id": "H2", "x": 30, "y": 8,  "tx_power": -59, "path_loss_exp": 2.0},
+    {"id": "H3", "x": 50, "y": 8,  "tx_power": -59, "path_loss_exp": 2.0},
+    {"id": "H4", "x": 70, "y": 8,  "tx_power": -59, "path_loss_exp": 2.0},
+    {"id": "H5", "x": 10, "y": 24, "tx_power": -59, "path_loss_exp": 2.0},
+    {"id": "H6", "x": 30, "y": 24, "tx_power": -59, "path_loss_exp": 2.0},
+    {"id": "H7", "x": 50, "y": 24, "tx_power": -59, "path_loss_exp": 2.0},
+    {"id": "H8", "x": 70, "y": 24, "tx_power": -59, "path_loss_exp": 2.0},
+    {"id": "R1", "x": 10, "y": 35, "tx_power": -59, "path_loss_exp": 2.0},
+    {"id": "R3", "x": 50, "y": 35, "tx_power": -59, "path_loss_exp": 2.0}
+  ]
+}
