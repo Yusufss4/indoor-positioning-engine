@@ -34,8 +34,8 @@ struct BenchmarkOptions {
 std::vector<BenchmarkCase> run_benchmark(const std::string& scenario_dir, const BenchmarkOptions& opts);
 
 struct Tolerance {
-  double relative = 0.10;   ///< Allowed fractional increase.
-  double absolute_m = 0.15; ///< Plus this many metres, to absorb tiny drifts.
+  double relative = 0.10;    ///< Allowed fractional increase.
+  double absolute_m = 0.15;  ///< Plus this many metres, to absorb tiny drifts.
 };
 
 struct Finding {

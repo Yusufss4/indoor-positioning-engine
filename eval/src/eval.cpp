@@ -13,19 +13,18 @@ namespace ipe {
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(PdrConfig, gravity, lowpass_alpha, peak_threshold, valley_threshold,
                                                 min_step_interval, weinberg_k, min_step_length, max_step_length)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(RssiModelConfig, sigma_db, outlier_prob, outlier_range_db,
-                                                min_distance, wall_aware)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(RssiModelConfig, sigma_db, outlier_prob, outlier_range_db, min_distance,
+                                                wall_aware)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ParticleFilterConfig, num_particles, seed, step_length_sigma,
                                                 step_scale_sigma, step_scale_walk, heading_sigma_deg,
                                                 heading_outlier_prob, wall_constraint, estimate_rssi_offset,
                                                 rssi_offset_sigma, rssi_offset_walk, beacon_integrity,
                                                 integrity_threshold_db, integrity_alpha, integrity_min_samples,
-                                                integrity_max_sigma_m, resample_ess_ratio, roughening_m,
-                                                recovery, recovery_alpha_slow, recovery_alpha_fast,
-                                                recovery_max_fraction)
+                                                integrity_max_sigma_m, resample_ess_ratio, roughening_m, recovery,
+                                                recovery_alpha_slow, recovery_alpha_fast, recovery_max_fraction)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(EkfConfig, step_length_sigma_rel, step_length_sigma_abs,
-                                                heading_sigma_deg, init_pos_sigma, init_heading_sigma_deg,
-                                                rssi_min_dbm, rssi_gate_chi2, heading_gate_chi2, init_min_beacons, init_window_s,
+                                                heading_sigma_deg, init_pos_sigma, init_heading_sigma_deg, rssi_min_dbm,
+                                                rssi_gate_chi2, heading_gate_chi2, init_min_beacons, init_window_s,
                                                 reinit_after_rejections)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(WclConfig, window_s, top_k, weight_exponent)
 
@@ -216,11 +215,13 @@ ReplayResult replay(const Venue& venue, const Trace& trace, const EngineConfig& 
       result.records.push_back(rec);
 
       const auto* pf = engine.particle_filter();
-      if (pf && opts.particle_snapshot_every > 0 && truth_seen % static_cast<std::size_t>(opts.particle_snapshot_every) == 0) {
+      if (pf && opts.particle_snapshot_every > 0 &&
+          truth_seen % static_cast<std::size_t>(opts.particle_snapshot_every) == 0) {
         ParticleSnapshot snap;
         snap.t = truth.t;
         const auto& ps = pf->particles();
-        const std::size_t stride = std::max<std::size_t>(1, ps.size() / std::max<std::size_t>(1, opts.particle_snapshot_max));
+        const std::size_t stride =
+            std::max<std::size_t>(1, ps.size() / std::max<std::size_t>(1, opts.particle_snapshot_max));
         for (std::size_t k = 0; k < ps.size(); k += stride) {
           snap.particles.push_back(
               {static_cast<float>(ps[k].pos.x), static_cast<float>(ps[k].pos.y), static_cast<float>(ps[k].weight)});

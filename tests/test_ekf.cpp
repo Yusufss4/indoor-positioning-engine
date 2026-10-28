@@ -38,8 +38,8 @@ void expect_valid_covariance(const Ekf::Mat3& P) {
   }
   // Leading principal minors positive => positive definite.
   EXPECT_GT(P[0] * P[4] - P[1] * P[3], 0.0);
-  const double det = P[0] * (P[4] * P[8] - P[5] * P[7]) - P[1] * (P[3] * P[8] - P[5] * P[6]) +
-                     P[2] * (P[3] * P[7] - P[4] * P[6]);
+  const double det =
+      P[0] * (P[4] * P[8] - P[5] * P[7]) - P[1] * (P[3] * P[8] - P[5] * P[6]) + P[2] * (P[3] * P[7] - P[4] * P[6]);
   EXPECT_GT(det, 0.0);
 }
 

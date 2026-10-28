@@ -19,9 +19,9 @@ struct EkfConfig {
   /// Weak packets mostly come from far beacons behind walls, where the
   /// free-space model is badly biased and the linearisation is flat.
   double rssi_min_dbm = -85.0;
-  double rssi_gate_chi2 = 9.0;     ///< Innovation gate for RSSI (3 sigma).
-  double heading_gate_chi2 = 6.63; ///< Innovation gate for heading (99%).
-  int init_min_beacons = 3;        ///< Distinct beacons needed before initialising.
+  double rssi_gate_chi2 = 9.0;      ///< Innovation gate for RSSI (3 sigma).
+  double heading_gate_chi2 = 6.63;  ///< Innovation gate for heading (99%).
+  int init_min_beacons = 3;         ///< Distinct beacons needed before initialising.
   double init_window_s = 2.0;
   int reinit_after_rejections = 25;  ///< Consecutive gated RSSI before re-initialising.
 };

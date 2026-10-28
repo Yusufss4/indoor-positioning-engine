@@ -26,10 +26,10 @@ void apply_config_overrides(EngineConfig& cfg, std::string_view json_patch);
 std::string config_to_json(const EngineConfig& cfg, int indent = 2);
 
 struct Metrics {
-  std::size_t samples = 0;         ///< Ground-truth samples evaluated (after warm-up).
-  double availability = 0.0;       ///< Fraction of evaluated samples with a position fix.
+  std::size_t samples = 0;    ///< Ground-truth samples evaluated (after warm-up).
+  double availability = 0.0;  ///< Fraction of evaluated samples with a position fix.
   double time_to_first_fix_s = 0.0;
-  double convergence_s = 0.0;      ///< First time error stays < 3 m for 10 s (-1 if never).
+  double convergence_s = 0.0;  ///< First time error stays < 3 m for 10 s (-1 if never).
   double mean_m = 0.0;
   double rmse_m = 0.0;
   double cep50_m = 0.0;
@@ -69,8 +69,7 @@ struct ReplayResult {
 /// Feeds the trace through a fresh engine in timestamp order and scores the
 /// estimate against ground truth at every truth sample. Between fixes the
 /// last valid estimate is held, as a blue dot would be on screen.
-ReplayResult replay(const Venue& venue, const Trace& trace, const EngineConfig& cfg,
-                    const ReplayOptions& opts = {});
+ReplayResult replay(const Venue& venue, const Trace& trace, const EngineConfig& cfg, const ReplayOptions& opts = {});
 
 Metrics compute_metrics(const std::vector<EstimateRecord>& records, double warmup_s);
 double percentile(std::vector<double> values, double p);

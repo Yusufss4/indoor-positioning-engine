@@ -54,8 +54,7 @@ TEST(Venue, GridMatchesBruteForce) {
 TEST(Venue, RejectsMalformedInput) {
   EXPECT_THROW(parse_venue(R"({"bounds": [0, 0, 10], "beacons": []})"), std::runtime_error);
   EXPECT_THROW(parse_venue(R"({"bounds": [0, 0, 0, 10], "beacons": []})"), std::runtime_error);
-  EXPECT_THROW(parse_venue(R"({"bounds": [0, 0, 10, 10], "walls": [[1, 2, 3]], "beacons": []})"),
-               std::runtime_error);
+  EXPECT_THROW(parse_venue(R"({"bounds": [0, 0, 10, 10], "walls": [[1, 2, 3]], "beacons": []})"), std::runtime_error);
   EXPECT_ANY_THROW(parse_venue("not json"));
 }
 

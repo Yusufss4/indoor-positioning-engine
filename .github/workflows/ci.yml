@@ -1,0 +1,92 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: build + test (${{ matrix.compiler }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - compiler: gcc
+            cc: gcc
+            cxx: g++
+          - compiler: clang
+            cc: clang
+            cxx: clang++
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: >
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_C_COMPILER=${{ matrix.cc }} -DCMAKE_CXX_COMPILER=${{ matrix.cxx }}
+          -DIPE_WARNINGS_AS_ERRORS=ON
+      - name: Build
+        run: cmake --build build -j4
+      - name: Unit tests
+        run: ctest --test-dir build -LE regression --output-on-failure -j4
+      - name: Accuracy regression
+        run: ctest --test-dir build -L regression --output-on-failure -V
+
+  sanitizers:
+    name: ASan + UBSan
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DIPE_SANITIZE=address,undefined
+      - name: Build
+        run: cmake --build build -j4
+      - name: Unit tests under sanitizers
+        run: ctest --test-dir build -LE regression --output-on-failure -j4
+      - name: Replay smoke test under sanitizers
+        run: ./build/tools/ipe-replay --scenario data/scenarios/office_field_issue.json --filter pf
+
+  format:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: clang-format
+        run: |
+          find core sim eval tools tests web -name '*.cpp' -o -name '*.hpp' | xargs clang-format-18 --dry-run --Werror
+
+  wasm:
+    name: WebAssembly build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mymindstorm/setup-emsdk@v14
+      - name: Configure
+        run: emcmake cmake -S . -B build-wasm -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build-wasm -j4
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: build-wasm/site
+
+  pages:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [wasm, build-test]
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4

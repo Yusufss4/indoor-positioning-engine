@@ -37,7 +37,7 @@ struct ImuConfig {
   double gyro_bias = 0.004;    ///< rad/s, constant for the session
   double mag_field_ut = 40.0;  ///< Horizontal Earth field magnitude
   double mag_noise_ut = 1.5;
-  double weinberg_k = 0.48;    ///< The walker's true Weinberg constant.
+  double weinberg_k = 0.48;  ///< The walker's true Weinberg constant.
   std::vector<MagDisturbance> mag_disturbances;
 };
 

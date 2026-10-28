@@ -14,8 +14,8 @@ namespace {
 
 /// Vertical acceleration pattern of `steps` steps at `freq` Hz whose
 /// peak-to-peak amplitude matches the Weinberg model for `step_len`.
-std::vector<ImuSample> walking_signal(int steps, double freq, double step_len, double k, double yaw_rate,
-                                      double noise, std::uint64_t seed) {
+std::vector<ImuSample> walking_signal(int steps, double freq, double step_len, double k, double yaw_rate, double noise,
+                                      std::uint64_t seed) {
   Rng rng(seed);
   const double rate = 50.0;
   const double amp = std::pow(step_len / k, 4.0);

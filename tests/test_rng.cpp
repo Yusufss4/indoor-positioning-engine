@@ -23,8 +23,8 @@ TEST(Rng, DifferentSeedDifferentStream) {
 // libraries and in the WebAssembly build.
 TEST(Rng, GoldenValues) {
   Rng r(42);
-  const std::vector<std::uint64_t> expected = {1546998764402558742ULL, 6990951692964543102ULL,
-                                               12544586762248559009ULL, 17057574109182124193ULL};
+  const std::vector<std::uint64_t> expected = {1546998764402558742ULL, 6990951692964543102ULL, 12544586762248559009ULL,
+                                               17057574109182124193ULL};
   for (auto v : expected) EXPECT_EQ(r.next_u64(), v);
 }
 

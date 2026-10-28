@@ -59,8 +59,6 @@ inline constexpr double rad2deg(double r) { return r * 180.0 / std::numbers::pi;
 /// wall is treated as blocked.
 bool segments_intersect(Vec2 p1, Vec2 p2, Vec2 q1, Vec2 q2);
 
-inline bool segments_intersect(const Segment& s, const Segment& t) {
-  return segments_intersect(s.a, s.b, t.a, t.b);
-}
+inline bool segments_intersect(const Segment& s, const Segment& t) { return segments_intersect(s.a, s.b, t.a, t.b); }
 
 }  // namespace ipe

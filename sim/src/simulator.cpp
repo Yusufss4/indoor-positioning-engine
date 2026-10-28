@@ -91,8 +91,7 @@ Scenario load_scenario_file(const std::string& path) {
   return parse_scenario(ss.str(), std::filesystem::path(path).parent_path().string());
 }
 
-Trace simulate(const Scenario& sc, const Venue& venue, std::optional<std::uint64_t> seed,
-               SimulationReport* report) {
+Trace simulate(const Scenario& sc, const Venue& venue, std::optional<std::uint64_t> seed, SimulationReport* report) {
   Rng rng(seed.value_or(sc.seed));
   const auto& walk = sc.walk;
   const auto& imu_cfg = sc.imu;
@@ -130,8 +129,8 @@ Trace simulate(const Scenario& sc, const Venue& venue, std::optional<std::uint64
   };
   std::vector<BeaconState> beacons;
   for (const auto& b : venue.beacons()) {
-    BeaconState st{&b, b.pos, false, rng.uniform(0.0, ble_cfg.rx_interval_s), 0.0,
-                   rng.normal(0.0, ble_cfg.shadowing_db)};
+    BeaconState st{
+        &b, b.pos, false, rng.uniform(0.0, ble_cfg.rx_interval_s), 0.0, rng.normal(0.0, ble_cfg.shadowing_db)};
     if (auto it = ble_cfg.moved_beacons.find(b.id); it != ble_cfg.moved_beacons.end()) st.true_pos = it->second;
     st.dead = std::find(ble_cfg.dead_beacons.begin(), ble_cfg.dead_beacons.end(), b.id) != ble_cfg.dead_beacons.end();
     beacons.push_back(st);

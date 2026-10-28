@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Indoor Positioning Engine - live WebAssembly demo</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>Indoor Positioning Engine</h1>
+    <p>The C++ engine compiled to WebAssembly: a simulated walker, BLE beacons and phone IMU, fused by a
+      particle filter (red), an EKF (blue) and a weighted-centroid baseline (green). Everything runs in your browser.
+      <a href="https://github.com/Yusufss4/indoor-positioning-engine">Source on GitHub</a></p>
+  </header>
+
+  <section class="controls">
+    <label>Scenario
+      <select id="scenario">
+        <option value="office_nominal">office_nominal</option>
+        <option value="office_nlos_heavy">office_nlos_heavy</option>
+        <option value="office_device_offset">office_device_offset</option>
+        <option value="office_mag_disturbance">office_mag_disturbance</option>
+        <option value="office_field_issue">office_field_issue</option>
+        <option value="office_step_scale">office_step_scale</option>
+        <option value="airport_hall_sparse">airport_hall_sparse</option>
+      </select>
+    </label>
+    <label>Speed
+      <select id="speed">
+        <option value="1">1x</option>
+        <option value="2" selected>2x</option>
+        <option value="5">5x</option>
+        <option value="10">10x</option>
+      </select>
+    </label>
+    <label>Seed <input id="seed" type="number" value="1" min="0" step="1"></label>
+    <button id="play">Pause</button>
+    <button id="restart">Restart</button>
+    <label><input id="show-particles" type="checkbox" checked> particles</label>
+    <label><input id="show-ekf" type="checkbox" checked> EKF</label>
+    <label><input id="show-wcl" type="checkbox" checked> WCL</label>
+  </section>
+
+  <main>
+    <canvas id="map" width="1000" height="620"></canvas>
+    <aside>
+      <div id="clock">loading...</div>
+      <p id="description"></p>
+      <table>
+        <thead><tr><th>filter</th><th>error</th><th>mean</th><th>CEP95</th></tr></thead>
+        <tbody id="stats"></tbody>
+      </table>
+      <p class="hint">Statistics exclude the first 5 s, matching the regression suite.</p>
+    </aside>
+  </main>
+
+  <script src="ipe_wasm.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

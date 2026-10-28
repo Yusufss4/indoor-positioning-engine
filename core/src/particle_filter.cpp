@@ -32,7 +32,8 @@ bool ParticleFilter::check_beacon(std::size_t beacon_index, double rssi) {
   if (!h.excluded && h.samples >= cfg_.integrity_min_samples &&
       std::abs(h.mean_residual) > cfg_.integrity_threshold_db) {
     // Never drop more than a third of the infrastructure on our own say-so.
-    const auto excluded = std::count_if(health_.begin(), health_.end(), [](const BeaconHealth& b) { return b.excluded; });
+    const auto excluded =
+        std::count_if(health_.begin(), health_.end(), [](const BeaconHealth& b) { return b.excluded; });
     if (static_cast<std::size_t>(excluded + 1) * 3 <= health_.size()) h.excluded = true;
   } else if (h.excluded && std::abs(h.mean_residual) < 0.5 * cfg_.integrity_threshold_db) {
     h.excluded = false;

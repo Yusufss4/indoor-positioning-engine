@@ -11,8 +11,8 @@
 
 namespace ipe {
 
-Venue::Venue(std::string name, Bounds bounds, std::vector<Segment> walls,
-             std::vector<Beacon> beacons, double wall_attenuation_db)
+Venue::Venue(std::string name, Bounds bounds, std::vector<Segment> walls, std::vector<Beacon> beacons,
+             double wall_attenuation_db)
     : name_(std::move(name)),
       bounds_(bounds),
       walls_(std::move(walls)),

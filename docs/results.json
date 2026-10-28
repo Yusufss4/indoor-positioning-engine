@@ -1,0 +1,244 @@
+{
+  "results": {
+    "airport_hall_sparse": {
+      "ekf": {
+        "availability": 0.998,
+        "cep50_m": 1.605,
+        "cep95_m": 10.474,
+        "convergence_s": 89.2,
+        "mean_m": 3.549,
+        "unconverged_runs": 0
+      },
+      "pf": {
+        "availability": 1.0,
+        "cep50_m": 1.301,
+        "cep95_m": 7.25,
+        "convergence_s": 70.46,
+        "mean_m": 2.468,
+        "unconverged_runs": 0
+      },
+      "pf-nomap": {
+        "availability": 1.0,
+        "cep50_m": 1.413,
+        "cep95_m": 7.578,
+        "convergence_s": 75.96,
+        "mean_m": 2.593,
+        "unconverged_runs": 0
+      },
+      "wcl": {
+        "availability": 1.0,
+        "cep50_m": 4.734,
+        "cep95_m": 12.846,
+        "convergence_s": 156.1,
+        "mean_m": 5.543,
+        "unconverged_runs": 8
+      }
+    },
+    "office_device_offset": {
+      "ekf": {
+        "availability": 0.995,
+        "cep50_m": 7.004,
+        "cep95_m": 9.452,
+        "convergence_s": 29.1,
+        "mean_m": 7.057,
+        "unconverged_runs": 6
+      },
+      "pf": {
+        "availability": 1.0,
+        "cep50_m": 0.754,
+        "cep95_m": 2.054,
+        "convergence_s": 6.36,
+        "mean_m": 0.93,
+        "unconverged_runs": 0
+      },
+      "pf-nomap": {
+        "availability": 1.0,
+        "cep50_m": 0.959,
+        "cep95_m": 2.772,
+        "convergence_s": 10.48,
+        "mean_m": 1.182,
+        "unconverged_runs": 0
+      },
+      "wcl": {
+        "availability": 1.0,
+        "cep50_m": 2.477,
+        "cep95_m": 5.307,
+        "convergence_s": 93.133,
+        "mean_m": 2.596,
+        "unconverged_runs": 7
+      }
+    },
+    "office_field_issue": {
+      "ekf": {
+        "availability": 1.0,
+        "cep50_m": 2.853,
+        "cep95_m": 5.745,
+        "convergence_s": 21.711,
+        "mean_m": 2.907,
+        "unconverged_runs": 1
+      },
+      "pf": {
+        "availability": 1.0,
+        "cep50_m": 0.72,
+        "cep95_m": 2.002,
+        "convergence_s": 2.36,
+        "mean_m": 0.89,
+        "unconverged_runs": 0
+      },
+      "pf-nomap": {
+        "availability": 1.0,
+        "cep50_m": 1.013,
+        "cep95_m": 3.675,
+        "convergence_s": 5.18,
+        "mean_m": 1.329,
+        "unconverged_runs": 0
+      },
+      "wcl": {
+        "availability": 1.0,
+        "cep50_m": 2.994,
+        "cep95_m": 12.946,
+        "convergence_s": 62.971,
+        "mean_m": 3.966,
+        "unconverged_runs": 3
+      }
+    },
+    "office_mag_disturbance": {
+      "ekf": {
+        "availability": 1.0,
+        "cep50_m": 1.599,
+        "cep95_m": 3.852,
+        "convergence_s": 14.58,
+        "mean_m": 1.834,
+        "unconverged_runs": 0
+      },
+      "pf": {
+        "availability": 1.0,
+        "cep50_m": 1.094,
+        "cep95_m": 2.63,
+        "convergence_s": 3.66,
+        "mean_m": 1.236,
+        "unconverged_runs": 0
+      },
+      "pf-nomap": {
+        "availability": 1.0,
+        "cep50_m": 1.452,
+        "cep95_m": 3.291,
+        "convergence_s": 0.68,
+        "mean_m": 1.603,
+        "unconverged_runs": 0
+      },
+      "wcl": {
+        "availability": 1.0,
+        "cep50_m": 2.279,
+        "cep95_m": 4.927,
+        "convergence_s": 36.086,
+        "mean_m": 2.409,
+        "unconverged_runs": 3
+      }
+    },
+    "office_nlos_heavy": {
+      "ekf": {
+        "availability": 1.0,
+        "cep50_m": 0.985,
+        "cep95_m": 2.724,
+        "convergence_s": 10.96,
+        "mean_m": 1.157,
+        "unconverged_runs": 0
+      },
+      "pf": {
+        "availability": 1.0,
+        "cep50_m": 0.654,
+        "cep95_m": 1.872,
+        "convergence_s": 2.6,
+        "mean_m": 0.77,
+        "unconverged_runs": 0
+      },
+      "pf-nomap": {
+        "availability": 1.0,
+        "cep50_m": 0.864,
+        "cep95_m": 2.216,
+        "convergence_s": 5.6,
+        "mean_m": 1.011,
+        "unconverged_runs": 0
+      },
+      "wcl": {
+        "availability": 1.0,
+        "cep50_m": 2.309,
+        "cep95_m": 5.14,
+        "convergence_s": 50.943,
+        "mean_m": 2.429,
+        "unconverged_runs": 3
+      }
+    },
+    "office_nominal": {
+      "ekf": {
+        "availability": 1.0,
+        "cep50_m": 0.955,
+        "cep95_m": 4.126,
+        "convergence_s": 16.14,
+        "mean_m": 1.366,
+        "unconverged_runs": 0
+      },
+      "pf": {
+        "availability": 1.0,
+        "cep50_m": 0.655,
+        "cep95_m": 1.594,
+        "convergence_s": 1.44,
+        "mean_m": 0.751,
+        "unconverged_runs": 0
+      },
+      "pf-nomap": {
+        "availability": 1.0,
+        "cep50_m": 0.82,
+        "cep95_m": 2.232,
+        "convergence_s": 5.98,
+        "mean_m": 0.938,
+        "unconverged_runs": 0
+      },
+      "wcl": {
+        "availability": 1.0,
+        "cep50_m": 2.32,
+        "cep95_m": 4.884,
+        "convergence_s": 49.029,
+        "mean_m": 2.407,
+        "unconverged_runs": 3
+      }
+    },
+    "office_step_scale": {
+      "ekf": {
+        "availability": 1.0,
+        "cep50_m": 0.969,
+        "cep95_m": 2.546,
+        "convergence_s": 9.32,
+        "mean_m": 1.111,
+        "unconverged_runs": 0
+      },
+      "pf": {
+        "availability": 1.0,
+        "cep50_m": 0.732,
+        "cep95_m": 1.871,
+        "convergence_s": 2.0,
+        "mean_m": 0.843,
+        "unconverged_runs": 0
+      },
+      "pf-nomap": {
+        "availability": 1.0,
+        "cep50_m": 0.812,
+        "cep95_m": 2.284,
+        "convergence_s": 4.74,
+        "mean_m": 0.939,
+        "unconverged_runs": 0
+      },
+      "wcl": {
+        "availability": 1.0,
+        "cep50_m": 2.235,
+        "cep95_m": 4.799,
+        "convergence_s": 43.8,
+        "mean_m": 2.342,
+        "unconverged_runs": 2
+      }
+    }
+  },
+  "seeds": 10,
+  "warmup_s": 5.0
+}

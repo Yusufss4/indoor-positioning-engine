@@ -75,8 +75,8 @@ int main(int argc, char** argv) {
     for (const auto& f : compare_to_baseline(results, ss.str(), tol)) {
       if (f.status == Finding::Status::Ok) continue;
       if (f.status == Finding::Status::Regressed) ++regressions;
-      std::printf("%-10s %-24s %-9s %-8s baseline=%.3f current=%.3f\n", to_string(f.status).c_str(),
-                  f.scenario.c_str(), f.preset.c_str(), f.metric.c_str(), f.baseline, f.current);
+      std::printf("%-10s %-24s %-9s %-8s baseline=%.3f current=%.3f\n", to_string(f.status).c_str(), f.scenario.c_str(),
+                  f.preset.c_str(), f.metric.c_str(), f.baseline, f.current);
     }
     std::cout << (regressions ? "FAIL: " + std::to_string(regressions) + " regression(s)\n"
                               : "PASS: no accuracy regressions\n");
