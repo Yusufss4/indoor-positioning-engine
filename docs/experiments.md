@@ -59,6 +59,25 @@ whose residuals are biased by unmodelled walls, so `pf-nomap` disables it.
 
 ![before/after](img/field_issue_before_after.png)
 
+**20-seed check of the kept change.** The 5-8 seed numbers above were too noisy to judge side effects,
+so the original and kept configurations were rerun with 20 seeds (CEP95, m):
+
+| Scenario | original | kept | |
+|---|---:|---:|---|
+| office_field_issue | 3.69 | 2.01 | better |
+| office_device_offset | 3.77 | 2.87 | better |
+| office_nominal | 1.51 | 1.54 | same |
+| office_nlos_heavy | 1.80 | 1.75 | same |
+| office_mag_disturbance | 2.48 | 2.52 | same |
+| office_step_scale | 1.51 | 1.76 | worse |
+| airport_hall_sparse | 5.60 | 7.27 | worse |
+
+Reverting one piece at a time (20 seeds) shows both halves of the change cost the airport hall:
+offset prior back to 5 dB gives airport 6.32 m but device offset 4.68 m; `alpha_fast` back to 0.3 gives
+airport 6.33 m but field issue 2.53 m. The integrity monitor makes no difference to the airport hall
+(7.27 m either way). No single setting won everywhere, so the kept configuration favours the
+deployment faults, which are the common field complaint, and the airport cost is tracked below.
+
 ## 3. Cross-platform determinism
 
 The WebAssembly demo (Clang + libc++) and the native CLI (GCC + libstdc++) report identical metrics for
@@ -69,6 +88,9 @@ the same seed, e.g. `office_field_issue` seed 1: PF mean 0.71 m / CEP95 1.70 m, 
 
 - Airport hall convergence (~70 s) is dominated by sparse beacons and symmetric geometry. An initial
   proposal drawn from the strongest beacons, instead of uniform over 3200 m^2, should cut it sharply.
+  It should also recover the CEP95 lost in experiment 2: the slower recovery trigger mainly hurts there
+  because the cloud takes longer to escape a wrong mode, and a beacon-driven proposal would not depend
+  on the trigger. A per-venue recovery rate (fast in open halls, slow in walled offices) is the fallback.
 - The map-aware filter beats the map-free one everywhere except `office_mag_disturbance` convergence time,
   where wall kills during the first heading-uncertain steps slow convergence (3.7 s vs 0.7 s).
 - `office_nlos_heavy`: the wall-aware model assumes 3.5 dB per wall while the truth is 7 dB; estimating

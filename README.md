@@ -51,8 +51,10 @@ real venues. The comparisons between filters and the before/after deltas are the
 map says, and two have dead batteries. The map-aware particle filter was initially *worse* than the
 map-free one there (CEP95 5.4 m vs 2.4 m), because recovery particles locked onto the beacon's mapped
 position (17 m error for 10 s). Widening the per-user priors and slowing the recovery trigger fixed it
-without hurting the other scenarios (now 2.0 m). The investigation, including the variants that did
-not work, is in [docs/experiments.md](docs/experiments.md).
+(20 seeds: CEP95 3.7 -> 2.0 m; device offset 3.8 -> 2.9 m). It is a trade-off, not a free win: slower
+recovery costs the sparse airport hall (5.6 -> 7.3 m) and the short-stride walker (1.5 -> 1.8 m); the
+other three scenarios are unchanged within noise. The investigation, including the variants that did
+not work and the ablation of that cost, is in [docs/experiments.md](docs/experiments.md).
 
 ![field issue before/after](docs/img/field_issue_before_after.png)
 
