@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <vector>
 
@@ -46,6 +47,20 @@ struct ParticleFilterConfig {
   double recovery_alpha_fast = 0.05;
   double recovery_max_fraction = 0.05;
 
+  /// Beacon-driven proposal: the first RSSI packet re-seeds the cloud from a
+  /// mixture of a range ring around that beacon and the uniform prior, with
+  /// importance weights so the result is still the exact posterior.
+  bool init_proposal = false;
+  double init_proposal_fraction = 0.8;  ///< Share of particles drawn from the ring.
+  double init_window_s = 1.0;           ///< Packets collected before seeding; the closest-looking beacon wins.
+  /// Recovery injections are drawn from the ring of a recent packet instead
+  /// of uniformly over the venue.
+  bool recovery_proposal = false;
+  int proposal_history = 8;          ///< Recent packets remembered (at most kMaxProposalHistory).
+  double proposal_max_age_s = 2.0;   ///< Older packets are not used for recovery proposals.
+  double proposal_level_jump = 0.1;  ///< Probability a ring particle is put on a level next to the beacon's.
+  double proposal_ring_scale = 1.0;  ///< Ring width in units of the RSSI model's sigma.
+
   // Floor model; only active in multi-level venues.
   double level_change_prob_step = 0.08;  ///< Per step, for particles standing in a connector footprint.
   double level_change_prob_baro = 0.1;   ///< Per barometer update in a connector (lift rides have no steps).
@@ -75,6 +90,8 @@ struct Particle {
 /// radio model decide which level hypotheses survive.
 class ParticleFilter final : public Filter {
  public:
+  static constexpr int kMaxProposalHistory = 32;
+
   ParticleFilter(const Venue& venue, ParticleFilterConfig cfg, RssiModelConfig rssi_cfg, BaroConfig baro_cfg = {});
 
   void on_step(const StepEvent& step) override;
@@ -90,6 +107,18 @@ class ParticleFilter final : public Filter {
   [[nodiscard]] std::uint64_t resample_count() const { return resample_count_; }
   [[nodiscard]] std::uint64_t recovery_count() const { return recovery_count_; }
   [[nodiscard]] bool beacon_excluded(std::size_t beacon_index) const;
+  [[nodiscard]] bool radio_seeded() const { return radio_seeded_; }
+
+  /// Replaces the cloud with draws from the init proposal for one packet and
+  /// importance-weights them back to the prior. The packet's likelihood is not
+  /// applied; on_rssi does that afterwards. Called by the first on_rssi when
+  /// `init_proposal` is on.
+  void seed_from_beacon(std::size_t beacon_index, double rssi);
+
+  /// Range ring around a beacon: log10 of the distance is normal with the given
+  /// mean and spread, the bearing uniform. Returns the 2D density at offset `d`
+  /// metres from the beacon [1/m^2].
+  [[nodiscard]] static double ring_density(double d, double log10_mean, double log10_sigma);
 
  private:
   struct BeaconHealth {
@@ -97,6 +126,35 @@ class ParticleFilter final : public Filter {
     int samples = 0;
     bool excluded = false;
   };
+
+  struct Packet {
+    double t = 0.0;
+    std::size_t beacon = 0;
+    double rssi = 0.0;
+  };
+
+  struct Ring {
+    double log10_mean = 0.0;
+    double log10_sigma = 1.0;
+  };
+
+  struct RingDraw {
+    int attempts = 0;
+    bool fell_back = false;  ///< Every try left the venue; the position is uniform.
+  };
+
+  static constexpr int kRingTries = 4;
+
+  [[nodiscard]] Ring ring_for(const Beacon& beacon, double rssi, double rssi_offset) const;
+  /// Draws a particle whose device offset and distance from `beacon` are
+  /// consistent with hearing it at `rssi`.
+  Particle sample_ring_particle(const Beacon& beacon, double rssi, RingDraw& draw);
+  /// Probability the ring proposal puts a particle on `level`.
+  [[nodiscard]] double ring_level_prob(int beacon_level, int level) const;
+  Particle sample_recovery_particle();
+  void remember_packet(double t, std::size_t beacon_index, double rssi);
+  /// RSSI likelihood update, after the integrity check.
+  void update_rssi(double t, std::size_t beacon_index, double rssi);
 
   /// Updates the integrity monitor; returns false if the beacon should be skipped.
   bool check_beacon(std::size_t beacon_index, double rssi);
@@ -126,6 +184,13 @@ class ParticleFilter final : public Filter {
 
   double w_slow_ = 0.0;
   double w_fast_ = 0.0;
+  double now_ = 0.0;
+  bool radio_seeded_ = false;
+  std::array<Packet, kMaxProposalHistory> history_{};
+  std::size_t history_head_ = 0;
+  std::size_t history_count_ = 0;
+  std::array<Packet, kMaxProposalHistory> pending_{};  ///< Packets collected before the radio seed.
+  std::size_t pending_count_ = 0;
   std::uint64_t resample_count_ = 0;
   std::uint64_t recovery_count_ = 0;
 

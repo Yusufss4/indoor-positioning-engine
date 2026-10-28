@@ -16,7 +16,7 @@ WebAssembly build that runs the same engine in the browser with a 2D and a 3D (M
 | Component | Description |
 |---|---|
 | **Pedestrian dead reckoning** | Step detection on accelerometer magnitude, Weinberg step length, gyro yaw integration, magnetometer heading |
-| **Particle filter** | Fuses steps, heading, RSSI and pressure; walls kill particles that cross them and attenuate radio in the likelihood; per-particle step-length scale, device RSSI offset, floor and barometer offset states; floor changes only inside stairwells and lifts; robust likelihoods; systematic resampling; augmented-MCL recovery; beacon integrity monitor |
+| **Particle filter** | Fuses steps, heading, RSSI and pressure; walls kill particles that cross them and attenuate radio in the likelihood; per-particle step-length scale, device RSSI offset, floor and barometer offset states; floor changes only inside stairwells and lifts; robust likelihoods; systematic resampling; augmented-MCL recovery; beacon integrity monitor; optional beacon-driven init/recovery proposal with exact importance weights |
 | **EKF** | `[x, y, heading]` with Jacobian-based prediction, scalar RSSI/heading updates, chi-square gating and Joseph-form covariance update; floor from an anchored barometer |
 | **Weighted centroid** | RSSI-only baseline with a beacon floor vote |
 | **Floors** | Venues with levels, stairwells, lifts and escalators; 3D radio distance with slab loss; barometric altitude with low-pass filtering; floor accuracy and floor-switch latency metrics |
@@ -82,6 +82,16 @@ not work and the ablation of that cost, is in [docs/experiments.md](docs/experim
 
 ![field issue before/after](docs/img/field_issue_before_after.png)
 
+### Beacon-driven start for open halls
+
+In the airport hall, the filter took ~70 s to converge from a uniform start over 3200 m^2. An opt-in
+proposal seeds the cloud from a range ring around the closest-looking beacon, with importance weights
+so the posterior is unchanged. It cuts convergence to 41 s and CEP95 from 7.3 to 5.4 m (20 seeds),
+and helps the two-floor walks. In the small walled offices it slows convergence by a few seconds, so
+it is not on by default. [`data/configs/open_venue.json`](data/configs/open_venue.json) enables it; the
+numbers, the ablation and the variants that failed are experiment 4 in
+[docs/experiments.md](docs/experiments.md).
+
 <details>
 <summary>Tracks and error CDF on office_nominal</summary>
 
@@ -96,7 +106,7 @@ not work and the ablation of that cost, is in [docs/experiments.md](docs/experim
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
-ctest --test-dir build --output-on-failure          # 83 unit tests + accuracy regression
+ctest --test-dir build --output-on-failure          # 89 unit tests + accuracy regression
 
 # simulate a scenario and replay it through a filter
 ./build/tools/ipe-sim --scenario data/scenarios/office_nominal.json --out /tmp/trace.csv
@@ -179,7 +189,7 @@ eval/     presets, config overrides, replay, metrics, benchmark/baseline compari
 geo/      GeoJSON / IMDF import and export
 tools/    ipe-sim, ipe-replay, ipe-regress, ipe-import
 tests/    GoogleTest unit tests, regression baseline
-data/     venues, scenarios, GeoJSON exports, IMDF sample, mapping tables
+data/     venues, scenarios, engine config patches, GeoJSON exports, IMDF sample, mapping tables
 viz/      matplotlib figures and animation
 web/      embind bindings, 2D canvas and 3D MapLibre front end
 docs/     design notes, file formats, experiment log, results

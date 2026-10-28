@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cmath>
 
 #include "ipe/baro.hpp"
 #include "ipe/particle_filter.hpp"
@@ -153,6 +154,125 @@ TEST(ParticleFilter, WeightsStayNormalised) {
   for (const auto& p : pf.particles()) sum += p.weight;
   EXPECT_NEAR(sum, 1.0, 1e-9);
   EXPECT_GT(pf.resample_count(), 0u);
+}
+
+TEST(ParticleFilter, RingDensityIntegratesToOne) {
+  // Brute-force Cartesian grid, far enough out that the tail is negligible.
+  const double mean = std::log10(5.0), sigma = 0.2, h = 0.05;
+  double sum = 0.0;
+  for (double x = -40.0 + h / 2; x < 40.0; x += h) {
+    for (double y = -40.0 + h / 2; y < 40.0; y += h) sum += ParticleFilter::ring_density(std::hypot(x, y), mean, sigma);
+  }
+  EXPECT_NEAR(sum * h * h, 1.0, 2e-3);
+}
+
+namespace {
+ParticleFilterConfig proposal_config() {
+  auto cfg = test_config();
+  cfg.num_particles = 40000;
+  cfg.estimate_rssi_offset = true;
+  cfg.init_proposal = true;
+  return cfg;
+}
+
+/// Weighted share of the particles inside [x0, x1] x [y0, y1].
+double weighted_share(const ParticleFilter& pf, double x0, double x1, double y0, double y1) {
+  double w = 0.0;
+  for (const auto& p : pf.particles()) {
+    if (p.pos.x >= x0 && p.pos.x < x1 && p.pos.y >= y0 && p.pos.y < y1) w += p.weight;
+  }
+  return w;
+}
+}  // namespace
+
+TEST(ParticleFilter, BeaconSeedConcentratesParticlesInsideTheVenue) {
+  const Venue v = test::two_room_venue();
+  ParticleFilter pf(v, proposal_config(), {});
+  // Beacon A at (2, 2); -59 dBm at 1 m and exponent 2 put -65 dBm at about 2 m.
+  pf.seed_from_beacon(0, -65.0);
+  ASSERT_TRUE(pf.radio_seeded());
+  std::size_t near = 0;
+  for (const auto& p : pf.particles()) {
+    ASSERT_TRUE(v.bounds().contains(p.pos));
+    if (distance(p.pos, {2.0, 2.0}) < 6.0) ++near;
+  }
+  // 6 m around A is under a fifth of the venue; the ring puts most draws there.
+  EXPECT_GT(static_cast<double>(near) / static_cast<double>(pf.particles().size()), 0.5);
+}
+
+TEST(ParticleFilter, BeaconSeedWeightsRecoverTheUniformPrior) {
+  // Importance weights undo the proposal: weighted, the cloud must still be
+  // the uniform prior over position and the offset prior.
+  const Venue v = test::two_room_venue();
+  const auto cfg = proposal_config();
+  ParticleFilter pf(v, cfg, {});
+  pf.seed_from_beacon(0, -65.0);
+  for (double x0 : {0.0, 5.0, 10.0, 15.0}) {
+    for (double y0 : {0.0, 5.0}) EXPECT_NEAR(weighted_share(pf, x0, x0 + 5.0, y0, y0 + 5.0), 0.125, 0.02);
+  }
+  double mean = 0.0, var = 0.0;
+  for (const auto& p : pf.particles()) mean += p.weight * p.rssi_offset;
+  for (const auto& p : pf.particles()) var += p.weight * (p.rssi_offset - mean) * (p.rssi_offset - mean);
+  EXPECT_NEAR(mean, 0.0, 0.5);
+  EXPECT_NEAR(std::sqrt(var), cfg.rssi_offset_sigma, 0.5);
+}
+
+TEST(ParticleFilter, BeaconSeedWeightsRecoverTheLevelPrior) {
+  const Venue v = test::two_level_venue();
+  ParticleFilter pf(v, proposal_config(), {});
+  pf.seed_from_beacon(4, -62.0);  // A1, on level index 1
+  double upper = 0.0;
+  std::size_t upper_count = 0;
+  for (const auto& p : pf.particles()) {
+    if (p.level == 1) {
+      upper += p.weight;
+      ++upper_count;
+    }
+  }
+  EXPECT_GT(static_cast<double>(upper_count) / static_cast<double>(pf.particles().size()), 0.7);
+  EXPECT_NEAR(upper, 0.5, 0.03);
+}
+
+TEST(ParticleFilter, BeaconSeedWaitsForTheInitWindow) {
+  const Venue v = test::two_room_venue();
+  auto cfg = proposal_config();
+  cfg.num_particles = 800;
+  cfg.init_window_s = 1.0;
+  ParticleFilter pf(v, cfg, {});
+  feed_rssi(pf, v, {5.0, 5.0}, 4);  // 16 packets over 0.8 s
+  EXPECT_FALSE(pf.radio_seeded());
+  feed_rssi(pf, v, {5.0, 5.0}, 60, 1.0);
+  EXPECT_TRUE(pf.radio_seeded());
+  // A static user with an unknown device offset is poorly observable, so
+  // compare with the uniform start on the same packets instead of a fixed bound.
+  cfg.init_proposal = false;
+  ParticleFilter uniform(v, cfg, {});
+  feed_rssi(uniform, v, {5.0, 5.0}, 4);
+  feed_rssi(uniform, v, {5.0, 5.0}, 60, 1.0);
+  EXPECT_LT(distance(pf.estimate().pos, {5.0, 5.0}), std::max(1.5, distance(uniform.estimate().pos, {5.0, 5.0})));
+}
+
+TEST(ParticleFilter, ProposalSettingsAreInertWhenDisabled) {
+  const Venue v = test::two_room_venue();
+  auto tuned = test_config();
+  tuned.recovery = true;
+  tuned.init_proposal_fraction = 0.3;
+  tuned.init_window_s = 0.0;
+  tuned.proposal_history = 3;
+  tuned.proposal_max_age_s = 10.0;
+  auto plain = test_config();
+  plain.recovery = true;
+  ParticleFilter a(v, plain, {});
+  ParticleFilter b(v, tuned, {});
+  for (auto* pf : {&a, &b}) {
+    feed_rssi(*pf, v, {15.0, 6.0}, 20);
+    feed_rssi(*pf, v, {15.0, 6.0}, 20, 1.0, /*bias_a=*/+25.0);
+  }
+  ASSERT_EQ(a.particles().size(), b.particles().size());
+  for (std::size_t i = 0; i < a.particles().size(); ++i) {
+    EXPECT_EQ(a.particles()[i].pos.x, b.particles()[i].pos.x);
+    EXPECT_EQ(a.particles()[i].weight, b.particles()[i].weight);
+  }
 }
 
 TEST(ParticleFilter, IntegrityMonitorExcludesBiasedBeacon) {

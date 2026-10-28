@@ -42,6 +42,13 @@ State per particle: position, heading, step-length scale, device RSSI offset.
 - **Recovery**: augmented MCL (`w_slow`/`w_fast`) injects up to 5% uniform particles when the short-term
   likelihood falls below the long-term one. If every particle dies, the cloud is re-seeded around the last
   estimate.
+- **Beacon-driven proposal** (opt-in, `init_proposal` / `recovery_proposal`): after a 1 s collection
+  window, the packet with the shortest apparent range re-seeds the cloud. 80% of the particles come from a
+  ring around that beacon, with log-range normal around the inverted path-loss model for each particle's
+  device offset; 20% stay uniform. Weights are prior/proposal, computed analytically. Draws that leave
+  the venue are rejected jointly with their offset (up to 4 tries), so one acceptance rate normalises
+  the truncated ring. Recovery can draw from the ring of a recent packet instead of uniformly. Off by
+  default because it slows convergence in small walled venues (experiment 4).
 - **Beacon integrity monitor**: once converged, keeps an exponential average of each beacon's RSSI
   residual at the estimate and stops using beacons whose bias exceeds 10 dB (re-admitted below 5 dB, never
   more than a third of the beacons).

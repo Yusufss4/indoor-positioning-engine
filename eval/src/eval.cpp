@@ -20,9 +20,10 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
     ParticleFilterConfig, num_particles, seed, step_length_sigma, step_scale_sigma, step_scale_walk, heading_sigma_deg,
     heading_outlier_prob, wall_constraint, estimate_rssi_offset, rssi_offset_sigma, rssi_offset_walk, beacon_integrity,
     integrity_threshold_db, integrity_alpha, integrity_min_samples, integrity_max_sigma_m, resample_ess_ratio,
-    roughening_m, recovery, recovery_alpha_slow, recovery_alpha_fast, recovery_max_fraction, level_change_prob_step,
-    level_change_prob_baro, use_barometer, baro_update_interval_s, baro_sigma_m, baro_outlier_prob, baro_offset_sigma_m,
-    baro_offset_walk_m)
+    roughening_m, recovery, recovery_alpha_slow, recovery_alpha_fast, recovery_max_fraction, init_proposal,
+    init_proposal_fraction, init_window_s, recovery_proposal, proposal_history, proposal_max_age_s, proposal_level_jump,
+    proposal_ring_scale, level_change_prob_step, level_change_prob_baro, use_barometer, baro_update_interval_s,
+    baro_sigma_m, baro_outlier_prob, baro_offset_sigma_m, baro_offset_walk_m)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(EkfConfig, step_length_sigma_rel, step_length_sigma_abs,
                                                 heading_sigma_deg, init_pos_sigma, init_heading_sigma_deg, rssi_min_dbm,
                                                 rssi_gate_chi2, heading_gate_chi2, init_min_beacons, init_window_s,
