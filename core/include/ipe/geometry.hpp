@@ -47,7 +47,7 @@ struct Bounds {
 inline double wrap_angle(double a) {
   constexpr double two_pi = 2.0 * std::numbers::pi;
   a = std::fmod(a + std::numbers::pi, two_pi);
-  if (a < 0.0) a += two_pi;
+  if (a <= 0.0) a += two_pi;
   return a - std::numbers::pi;
 }
 
