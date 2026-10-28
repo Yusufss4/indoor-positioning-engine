@@ -3,7 +3,7 @@
 
 For every site and floor:
 
-* the floor plan (WGS84 GeoJSON scaled to the floor's width x height in metres) becomes a
+* the floor plan (GCJ-02 GeoJSON scaled to the floor's width x height in metres) becomes a
   single-level venue, with walls from the floor outline (``boundary``) or the shop outlines
   (``units``);
 * paths are split into training and test sets by path id;
@@ -183,6 +183,33 @@ class Floor:
         return x, y
 
 
+def _gcj02_offset(lon: float, lat: float) -> tuple[float, float]:
+    """GCJ-02 minus WGS84 at a point, in degrees (the published Krasovsky-ellipsoid formula)."""
+    a, ee = 6378245.0, 0.00669342162296594323
+    x, y = lon - 105.0, lat - 35.0
+    common = (20 * math.sin(6 * x * math.pi) + 20 * math.sin(2 * x * math.pi)) * 2 / 3
+    dlat = -100 + 2 * x + 3 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * math.sqrt(abs(x)) + common
+    dlat += (20 * math.sin(y * math.pi) + 40 * math.sin(y / 3 * math.pi)) * 2 / 3
+    dlat += (160 * math.sin(y / 12 * math.pi) + 320 * math.sin(y * math.pi / 30)) * 2 / 3
+    dlon = 300 + x + 2 * y + 0.1 * x * x + 0.1 * x * y + 0.1 * math.sqrt(abs(x)) + common
+    dlon += (20 * math.sin(x * math.pi) + 40 * math.sin(x / 3 * math.pi)) * 2 / 3
+    dlon += (150 * math.sin(x / 12 * math.pi) + 300 * math.sin(x / 30 * math.pi)) * 2 / 3
+    rad = math.radians(lat)
+    m = 1 - ee * math.sin(rad) ** 2
+    dlat = dlat * 180 / ((a * (1 - ee)) / (m * math.sqrt(m)) * math.pi)
+    dlon = dlon * 180 / (a / math.sqrt(m) * math.cos(rad) * math.pi)
+    return dlon, dlat
+
+
+def gcj02_to_wgs84(lon: float, lat: float) -> tuple[float, float]:
+    """Inverts the GCJ-02 offset by fixed-point iteration (converges to millimetres)."""
+    wlon, wlat = lon, lat
+    for _ in range(5):
+        dlon, dlat = _gcj02_offset(wlon, wlat)
+        wlon, wlat = lon - dlon, lat - dlat
+    return wlon, wlat
+
+
 def _rings(geom):
     if geom["type"] == "Polygon":
         return list(geom["coordinates"])
@@ -197,7 +224,9 @@ def load_floor(floor_dir: Path) -> Floor:
     floor_rings, unit_rings = [], []
     for feat in gj["features"]:
         rings = _rings(feat["geometry"])
-        if feat.get("properties", {}).get("type") == "floor" or feat.get("properties", {}).get("category") == "floor":
+        props = feat.get("properties", {})
+        # site1 tags the floor polygon type/category "floor"; site2 gives it a "floor": "F1" property.
+        if props.get("type") == "floor" or props.get("category") == "floor" or "floor" in props:
             floor_rings += rings
         else:
             unit_rings += rings
@@ -433,11 +462,14 @@ def convert_floor(site: str, floor_name: str, floor_dir: Path, paths: list[PathD
     report["fit_rms_db_median"] = float(np.median([t.rms_db for t in txs])) if txs else float("nan")
 
     name = f"{site}_{floor_name}"
+    # The plans are in GCJ-02 (China's offset datum), about 500 m from WGS84 here. The offset varies
+    # by under a metre across a floor, so shifting the origin is enough.
+    origin_lon, origin_lat = gcj02_to_wgs84(floor.lon0, floor.lat0)
     venue = {
         "name": name,
         "bounds": [0, 0, round(floor.width, 3), round(floor.height, 3)],
         "wall_attenuation_db": args.wall_attenuation_db,
-        "georef": {"origin_lat": floor.lat0, "origin_lon": floor.lon0, "rotation_deg": 0},
+        "georef": {"origin_lat": origin_lat, "origin_lon": origin_lon, "rotation_deg": 0},
         "walls": [[round(float(v), 3) for v in w] for w in wall_sets[mode]],
         "beacons": [
             {"id": t.id, "x": round(t.x, 3), "y": round(t.y, 3), "tx_power": round(t.tx_power, 2), "path_loss_exp": round(t.path_loss_exp, 3)}

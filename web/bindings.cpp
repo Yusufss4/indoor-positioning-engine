@@ -4,14 +4,17 @@
 #include <emscripten/bind.h>
 #include <emscripten/val.h>
 
+#include <algorithm>
 #include <cmath>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <vector>
 
 #include "ipe/engine.hpp"
 #include "ipe/eval.hpp"
 #include "ipe/simulator.hpp"
+#include "ipe/trace.hpp"
 
 using emscripten::val;
 
@@ -29,18 +32,17 @@ struct Track {
 
 class Demo {
  public:
+  /// Simulates the scenario and runs every filter with its preset config.
   Demo(const std::string& venue_json, const std::string& scenario_json, unsigned seed)
       : venue_(ipe::parse_venue(venue_json)) {
-    const auto scenario = ipe::sim::parse_scenario(scenario_json);
-    trace_ = ipe::sim::simulate(scenario, venue_, seed);
-    for (const char* preset : {"pf", "ekf", "wcl"}) {
-      Track tr;
-      tr.name = preset;
-      tr.engine = std::make_unique<ipe::PositioningEngine>(venue_, ipe::eval::preset_config(preset));
-      tracks_.push_back(std::move(tr));
-    }
-    ble_index_.reserve(trace_.ble.size());
-    for (const auto& b : trace_.ble) ble_index_.push_back(venue_.beacon_index(b.beacon_id).value_or(SIZE_MAX));
+    trace_ = ipe::sim::simulate(ipe::sim::parse_scenario(scenario_json), venue_, seed);
+    init("");
+  }
+
+  /// Replays a recorded trace. `pf_config_patch` (may be empty) applies to the particle filter only.
+  static Demo* replay(const std::string& venue_json, const std::string& trace_csv, const std::string& pf_config_patch) {
+    std::istringstream in(trace_csv);
+    return new Demo(ipe::parse_venue(venue_json), ipe::read_trace(in), pf_config_patch);
   }
 
   double time() const { return now_; }
@@ -90,14 +92,17 @@ class Demo {
     return !finished();
   }
 
+  /// Ground truth at the current time, interpolated between truth samples. Recorded traces only have
+  /// sparse surveyor waypoints; scoring (mean, CEP95) still happens at the samples themselves.
   val truth() const {
+    const auto t = truth_now();
     val o = val::object();
-    o.set("x", truth_.pos.x);
-    o.set("y", truth_.pos.y);
-    o.set("heading", truth_.heading);
-    o.set("level", truth_.level);
-    o.set("z", truth_.z);
-    set_wgs84(o, truth_.pos);
+    o.set("x", t.pos.x);
+    o.set("y", t.pos.y);
+    o.set("heading", t.heading);
+    o.set("level", t.level);
+    o.set("z", t.z);
+    set_wgs84(o, t.pos);
     return o;
   }
 
@@ -113,7 +118,8 @@ class Demo {
       o.set("z", e.z);
       set_wgs84(o, e.pos);
       o.set("sigma", e.sigma_radius());
-      o.set("error", e.valid && e.level == truth_.level ? ipe::distance(e.pos, truth_.pos) : -1.0);
+      const auto t = truth_now();
+      o.set("error", e.valid && e.level == t.level ? ipe::distance(e.pos, t.pos) : -1.0);
       o.set("mean", tr.error_count ? tr.error_sum / tr.error_count : -1.0);
       o.set("cep95", ipe::eval::percentile(tr.errors, 0.95));
       o.set("floorAcc", floor_accuracy(tr));
@@ -159,6 +165,34 @@ class Demo {
   int steps() const { return static_cast<int>(tracks_.front().engine->step_count()); }
 
  private:
+  Demo(ipe::Venue venue, ipe::Trace trace, const std::string& pf_config_patch)
+      : venue_(std::move(venue)), trace_(std::move(trace)) {
+    init(pf_config_patch);
+  }
+
+  void init(const std::string& pf_config_patch) {
+    for (const char* preset : {"pf", "ekf", "wcl"}) {
+      Track tr;
+      tr.name = preset;
+      auto cfg = ipe::eval::preset_config(preset);
+      if (tr.name == "pf" && !pf_config_patch.empty()) ipe::eval::apply_config_overrides(cfg, pf_config_patch);
+      tr.engine = std::make_unique<ipe::PositioningEngine>(venue_, cfg);
+      tracks_.push_back(std::move(tr));
+    }
+    ble_index_.reserve(trace_.ble.size());
+    for (const auto& b : trace_.ble) ble_index_.push_back(venue_.beacon_index(b.beacon_id).value_or(SIZE_MAX));
+  }
+
+  ipe::TruthSample truth_now() const {
+    if (g_ == 0 || g_ >= trace_.truth.size()) return truth_;
+    const auto& next = trace_.truth[g_];
+    if (next.level != truth_.level || next.t <= truth_.t) return truth_;
+    const double a = std::clamp((now_ - truth_.t) / (next.t - truth_.t), 0.0, 1.0);
+    auto t = truth_;
+    t.pos = truth_.pos + (next.pos - truth_.pos) * a;
+    return t;
+  }
+
   static double floor_accuracy(const Track& tr) {
     return tr.fixes ? static_cast<double>(tr.floor_ok) / tr.fixes : -1.0;
   }
@@ -186,6 +220,7 @@ class Demo {
 EMSCRIPTEN_BINDINGS(ipe) {
   emscripten::class_<Demo>("Demo")
       .constructor<std::string, std::string, unsigned>()
+      .class_function("replay", &Demo::replay, emscripten::return_value_policy::take_ownership())
       .function("time", &Demo::time)
       .function("duration", &Demo::duration)
       .function("finished", &Demo::finished)

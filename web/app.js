@@ -18,11 +18,47 @@ let trails = {};
 let pings = new Map();
 let view = "2d";
 let map3d = null;
+let realDemos = new Map(); // id -> entry of data/real/demos.json
+let real = null; // entry being replayed, null for simulated scenarios
+let background = null; // floor plan image of a recording
+let waypoints = []; // [t, x, y] surveyor waypoints of a recording
+
+const REAL_BASE = new URL("data/real/", window.location.href);
 
 async function loadJson(url) {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`${url}: ${res.status}`);
   return res.text();
+}
+
+function loadImage(url) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error(`${url}: image failed to load`));
+    img.src = url;
+  });
+}
+
+/// Adds the recordings listed in data/real/demos.json to the scenario menu (if the file exists).
+async function loadRealDemos() {
+  let index;
+  try {
+    index = JSON.parse(await loadJson(new URL("demos.json", REAL_BASE)));
+  } catch {
+    return;
+  }
+  const group = document.createElement("optgroup");
+  group.label = "Real recordings (Microsoft Indoor Location)";
+  for (const d of index.demos) {
+    realDemos.set(d.id, d);
+    group.append(new Option(d.title, `real:${d.id}`));
+  }
+  el("scenario").append(group);
+}
+
+function parseWaypoints(traceText) {
+  return traceText.split("\n").filter((l) => l.startsWith("gt,")).map((l) => l.split(",").slice(1, 4).map(Number));
 }
 
 /// Venue JSON in either layout (top-level walls, or levels) -> one shape.
@@ -42,8 +78,7 @@ function normalizeVenue(v) {
   };
 }
 
-async function start() {
-  const name = el("scenario").value;
+async function startSimulated(name) {
   const scenarioUrl = new URL(`data/scenarios/${name}.json`, window.location.href);
   const scenarioText = await loadJson(scenarioUrl);
   const scenario = JSON.parse(scenarioText);
@@ -51,10 +86,37 @@ async function start() {
   const venueText = await loadJson(venueUrl);
   venue = normalizeVenue(JSON.parse(venueText));
   geojsonUrl = new URL(venueUrl.href.replace(/\/venues\/([^/]+)\.json$/, "/geojson/$1.geojson"));
+  background = null;
+  waypoints = [];
   el("description").textContent = scenario.description || "";
-
   if (demo) demo.delete();
   demo = new Module.Demo(venueText, scenarioText, Number(el("seed").value) >>> 0);
+}
+
+async function startRecording(entry) {
+  const at = (path) => new URL(path, REAL_BASE);
+  const [venueText, traceText, configText, image] = await Promise.all([
+    loadJson(at(entry.venue)), loadJson(at(entry.trace)), loadJson(at(entry.config)), loadImage(at(entry.image)),
+  ]);
+  venue = normalizeVenue(JSON.parse(venueText));
+  geojsonUrl = at(entry.geojson);
+  background = image;
+  waypoints = parseWaypoints(traceText);
+  el("description").textContent =
+    `${entry.title} with a real Android phone (IMU + Wi-Fi), held out from fitting and tuning. Squares are ` +
+    `the surveyor's waypoints, the only ground truth; the black path is interpolated between them, and the ` +
+    `live error is measured against it. Purple dots are Wi-Fi access points located from other walks. The ` +
+    `particle filter uses data/configs/msil_wifi.json.`;
+  if (demo) demo.delete();
+  demo = Module.Demo.replay(venueText, traceText, configText);
+}
+
+async function start() {
+  const name = el("scenario").value;
+  real = name.startsWith("real:") ? realDemos.get(name.slice(5)) : null;
+  if (real) await startRecording(real);
+  else await startSimulated(name);
+  el("seed").disabled = !!real;
   truthTrail = [];
   trails = Object.fromEntries(FILTERS.map((f) => [f, []]));
   pings = new Map();
@@ -75,7 +137,7 @@ function shownLevel() {
 }
 
 function transform() {
-  const [x0, y0, x1, y1] = venue.bounds;
+  const [x0, y0, x1, y1] = real ? real.view : venue.bounds;
   const pad = 20;
   const s = Math.min((canvas.width - 2 * pad) / (x1 - x0), (canvas.height - 2 * pad) / (y1 - y0));
   const ox = pad + ((canvas.width - 2 * pad) - s * (x1 - x0)) / 2;
@@ -125,6 +187,13 @@ function draw(level) {
   const T = transform();
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+  if (background) {
+    const [bx0, by0, bx1, by1] = venue.bounds;
+    ctx.globalAlpha = 0.5;
+    ctx.drawImage(background, T.toX(bx0), T.toY(by1), (bx1 - bx0) * T.s, (by1 - by0) * T.s);
+    ctx.globalAlpha = 1;
+  }
+
   for (const c of venue.connectors) {
     if (!c.levels.includes(level)) continue;
     ctx.beginPath();
@@ -148,18 +217,24 @@ function draw(level) {
   }
 
   const now = demo.time();
+  // Recorded venues have hundreds of Wi-Fi access points: small dots, no labels.
+  const dense = venue.beacons.length > 60;
   for (const b of venue.beacons) {
     if (b.level !== level) continue;
     const ping = pings.get(b.id);
     if (ping && now - ping.t < 0.6) {
       const age = (now - ping.t) / 0.6;
       ctx.beginPath();
-      ctx.arc(T.toX(b.x), T.toY(b.y), 6 + 22 * age, 0, 2 * Math.PI);
-      ctx.strokeStyle = `rgba(127, 63, 191, ${0.5 * (1 - age)})`;
+      ctx.arc(T.toX(b.x), T.toY(b.y), dense ? 3 + 9 * age : 6 + 22 * age, 0, 2 * Math.PI);
+      ctx.strokeStyle = `rgba(127, 63, 191, ${(dense ? 0.3 : 0.5) * (1 - age)})`;
       ctx.lineWidth = 2;
       ctx.stroke();
     }
     ctx.fillStyle = COLORS.beacon;
+    if (dense) {
+      ctx.fillRect(T.toX(b.x) - 1.5, T.toY(b.y) - 1.5, 3, 3);
+      continue;
+    }
     ctx.beginPath();
     ctx.moveTo(T.toX(b.x), T.toY(b.y) - 7);
     ctx.lineTo(T.toX(b.x) - 6, T.toY(b.y) + 5);
@@ -179,6 +254,11 @@ function draw(level) {
   }
 
   drawPath(truthTrail, T, COLORS.truth, 2, level);
+  ctx.fillStyle = COLORS.truth;
+  for (const [t, x, y] of waypoints) {
+    if (t > now) break;
+    ctx.fillRect(T.toX(x) - 4, T.toY(y) - 4, 8, 8);
+  }
   for (const f of visibleFilters()) {
     drawPath(trails[f], T, COLORS[f], 1.3, level);
     const e = demo.estimate(f);
@@ -298,6 +378,7 @@ el("underlay").addEventListener("change", () => map3d && map3d.setUnderlay(el("u
 
 createIpeModule().then(async (m) => {
   Module = m;
+  await loadRealDemos();
   await start();
   requestAnimationFrame(tick);
 }).catch((err) => {

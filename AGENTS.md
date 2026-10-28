@@ -22,6 +22,8 @@ truth; a replay tool and a regression suite measure accuracy.
 - `data/configs` - engine config patches for `--config` (e.g. `open_venue.json`, `msil_wifi.json`).
 - `datasets/msil` - fetch and convert scripts for the Microsoft Indoor Location sample. The raw data and
   the converted `out/` are git-ignored; `tests/regression/msil_baseline.json` gates the held-out walks.
+  `data/real` holds three converted walks for the web demo; regenerate it with
+  `datasets/msil/export_demo.py` (a unit test checks it against the venue export).
 - `viz/` - Python plotting; `web/` - Emscripten bindings and the browser demo.
 
 ## Build and test

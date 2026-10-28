@@ -1,0 +1,57 @@
+{
+ "source": "Microsoft Indoor Location Competition 2.0 sample data, https://github.com/location-competition/indoor-location-competition-20 (MIT, see LICENSE)",
+ "selection": "longest held-out walk on each of the floors with the longest held-out walks",
+ "demos": [
+  {
+   "id": "site1_B1_5dda14bf",
+   "title": "site1 B1, 231 s walk",
+   "venue": "site1_B1/venue.json",
+   "geojson": "site1_B1/venue.geojson",
+   "image": "site1_B1/floor.png",
+   "trace": "site1_B1/5dda14bf9191710006b57220.csv",
+   "config": "../configs/msil_wifi.json",
+   "view": [
+    154.4,
+    148.2,
+    304.2,
+    221.9
+   ],
+   "duration_s": 230.8,
+   "waypoints": 33
+  },
+  {
+   "id": "site2_F1_5dd35c98",
+   "title": "site2 F1, 217 s walk",
+   "venue": "site2_F1/venue.json",
+   "geojson": "site2_F1/venue.geojson",
+   "image": "site2_F1/floor.png",
+   "trace": "site2_F1/5dd35c9844333f00067aa0e0.csv",
+   "config": "../configs/msil_wifi.json",
+   "view": [
+    63.8,
+    117.7,
+    146.1,
+    211.6
+   ],
+   "duration_s": 217.0,
+   "waypoints": 38
+  },
+  {
+   "id": "site1_F2_5dda5afc",
+   "title": "site1 F2, 160 s walk",
+   "venue": "site1_F2/venue.json",
+   "geojson": "site1_F2/venue.geojson",
+   "image": "site1_F2/floor.png",
+   "trace": "site1_F2/5dda5afcc5b77e0006b17719.csv",
+   "config": "../configs/msil_wifi.json",
+   "view": [
+    170.1,
+    52.6,
+    238.0,
+    135.5
+   ],
+   "duration_s": 160.5,
+   "waypoints": 20
+  }
+ ]
+}

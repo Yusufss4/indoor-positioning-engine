@@ -102,14 +102,16 @@ chosen on half of the rest, and results are reported on the other half (109 walk
 
 | Filter | Median CEP50 / CEP95 over walks [m] |
 |---|---|
-| PF, default | 11.6 / 20.5 |
-| PF, [Wi-Fi config](data/configs/msil_wifi.json) (sigma 8 dB, 5k particles, beacon-driven proposal) | **7.5** / 11.1 |
+| PF, default | 11.7 / 20.5 |
+| PF, [Wi-Fi config](data/configs/msil_wifi.json) (sigma 8 dB, 5k particles, beacon-driven proposal) | **7.0** / 11.1 |
 | EKF | 7.8 / **10.4** |
 | Weighted centroid | 8.4 / 14.9 |
 
 Real errors are about ten times the simulated office's. The particle filter only matches the EKF once
 virtual access points (one radio, up to six BSSIDs) are merged and the start is seeded from the
 closest-looking access point. Method, per-floor numbers and failure modes: [docs/real_data.md](docs/real_data.md).
+Three of the held-out walks play in the [live demo](https://yusufss4.github.io/indoor-positioning-engine/)
+under "Real recordings", over the mall's floor plan.
 
 ![held-out walk](docs/img/msil_trajectory.png)
 
@@ -127,7 +129,7 @@ closest-looking access point. Method, per-floor numbers and failure modes: [docs
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
-ctest --test-dir build --output-on-failure          # 90 unit tests + accuracy regression
+ctest --test-dir build --output-on-failure          # 91 unit tests + accuracy regression
                                                      # (+ real-data regression once datasets/msil/out exists)
 
 # simulate a scenario and replay it through a filter
@@ -158,7 +160,9 @@ python3 -m http.server -d build-wasm/site 8000   # open http://localhost:8000
 
 The 2D view draws one floor at a time: the walker's floor by default, or any floor picked in the Floor
 menu. Trails show only that floor, estimates on another floor are drawn as dashed rings, and the stats
-table adds a floor column for two-floor scenarios.
+table adds a floor column for two-floor scenarios. The "Real recordings" scenarios replay phone walks from
+two shopping malls instead of simulating one, over the mall's floor plan, with the surveyor's waypoints as
+squares.
 
 The **3D** button switches to a MapLibre GL view of the venue: walls extruded per floor, translucent slabs,
 stair and lift shafts, the walker, each filter's estimate with its uncertainty, and the particles coloured
@@ -211,8 +215,9 @@ eval/     presets, config overrides, replay, metrics, benchmark/baseline compari
 geo/      GeoJSON / IMDF import and export
 tools/    ipe-sim, ipe-replay, ipe-regress, ipe-import
 tests/    GoogleTest unit tests, regression baseline
-data/     venues, scenarios, engine config patches, GeoJSON exports, IMDF sample, mapping tables
-datasets/ fetch + convert scripts for public real-data recordings (data itself is not committed)
+data/     venues, scenarios, engine config patches, GeoJSON exports, IMDF sample, mapping tables,
+          three real recordings for the web demo
+datasets/ fetch + convert scripts for public real-data recordings (the raw data is not committed)
 viz/      matplotlib figures and animation
 web/      embind bindings, 2D canvas and 3D MapLibre front end
 docs/     design notes, file formats, experiment log, results, real-data evaluation

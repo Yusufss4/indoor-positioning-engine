@@ -5,7 +5,9 @@
 #include <fstream>
 #include <sstream>
 
+#include "ipe/eval.hpp"
 #include "ipe/geo.hpp"
+#include "ipe/trace.hpp"
 #include "test_util.hpp"
 
 using namespace ipe;
@@ -148,6 +150,30 @@ TEST(Import, CommittedExportsAreUpToDate) {
     const std::string file = entry.path().filename().string();
     EXPECT_EQ(slurp(entry.path().string()), slurp(test::data_path("imdf/office_two_floor/" + file))) << file;
   }
+}
+
+TEST(Import, WebDemoRecordingsAreConsistent) {
+  // Regenerate with: datasets/msil/export_demo.py
+  auto cfg = eval::preset_config("pf");
+  eval::apply_config_overrides(cfg, slurp(test::data_path("configs/msil_wifi.json")));
+  int traces = 0;
+  for (const auto& floor : fs::directory_iterator(test::data_path("real"))) {
+    if (!floor.is_directory()) continue;
+    SCOPED_TRACE(floor.path().string());
+    const Venue v = load_venue_file((floor.path() / "venue.json").string());
+    EXPECT_TRUE(v.georef().has_value());
+    EXPECT_EQ(geo::export_geojson(v), slurp((floor.path() / "venue.geojson").string()));
+    EXPECT_TRUE(fs::exists(floor.path() / "floor.png"));
+    for (const auto& file : fs::directory_iterator(floor.path())) {
+      if (file.path().extension() != ".csv") continue;
+      const Trace t = read_trace_file(file.path().string());
+      EXPECT_FALSE(t.truth.empty());
+      EXPECT_FALSE(t.imu.empty());
+      for (const auto& b : t.ble) ASSERT_TRUE(v.beacon_index(b.beacon_id).has_value()) << b.beacon_id;
+      ++traces;
+    }
+  }
+  EXPECT_GE(traces, 1);
 }
 
 /// A platform-style export: rooms instead of walls, a door, per-floor stair
