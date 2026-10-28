@@ -43,7 +43,7 @@ class PathData:
     acc: np.ndarray = field(default_factory=lambda: np.zeros((0, 3)))
     gyro: np.ndarray = field(default_factory=lambda: np.zeros((0, 3)))
     rotvec: np.ndarray = field(default_factory=lambda: np.zeros((0, 4)))
-    wifi: list = field(default_factory=list)  # (t_seen, bssid, rssi)
+    wifi: list = field(default_factory=list)  # (t_seen, bssid, rssi, t_scan)
     ble: list = field(default_factory=list)  # (t, id, rssi)
     waypoints: np.ndarray = field(default_factory=lambda: np.zeros((0, 3)))  # t, x, y
 
@@ -56,21 +56,22 @@ def physical_ap(bssid: str) -> str:
 
 
 def merge_virtual_aps(wifi: list, window_s: float = 0.05) -> list:
-    """Keeps one reading (the strongest) per physical access point within `window_s`."""
+    """Keeps one reading (the strongest) per physical access point within `window_s`, tagged with
+    the scan of the group's first reading."""
     by_ap: dict[str, list] = {}
-    for t, ap, rssi in wifi:
-        by_ap.setdefault(ap, []).append((t, rssi))
+    for t, ap, rssi, t_scan in wifi:
+        by_ap.setdefault(ap, []).append((t, rssi, t_scan))
     out = []
     for ap, readings in by_ap.items():
         readings.sort()
-        group_t, best = readings[0]
-        for t, rssi in readings[1:]:
+        group_t, best, group_scan = readings[0]
+        for t, rssi, t_scan in readings[1:]:
             if t - group_t < window_s:
                 best = max(best, rssi)
                 continue
-            out.append((group_t, ap, best))
-            group_t, best = t, rssi
-        out.append((group_t, ap, best))
+            out.append((group_t, ap, best, group_scan))
+            group_t, best, group_scan = t, rssi, t_scan
+        out.append((group_t, ap, best, group_scan))
     return sorted(out)
 
 
@@ -104,7 +105,7 @@ def parse_path(path: Path) -> PathData:
                     if (bssid, last_seen) in seen_wifi:
                         continue
                     seen_wifi.add((bssid, last_seen))
-                    wifi.append((last_seen / 1000.0, physical_ap(bssid), rssi))
+                    wifi.append((last_seen / 1000.0, physical_ap(bssid), rssi, t / 1000.0))
                 elif kind == "TYPE_BEACON" and len(cols) >= 7:
                     ble.append((t / 1000.0, f"{cols[2]}_{cols[3]}_{cols[4]}", float(cols[6])))
                 elif kind == "TYPE_WAYPOINT":
@@ -360,7 +361,7 @@ def fit_radio_map(train: list[PathData], floor: Floor, args) -> list[Transmitter
                 continue
             t = np.array([s[0] for s in stream])
             xy, mask = interp_waypoints(pd, t)
-            for (_, tid, rssi), p, ok in zip(stream, xy, mask):
+            for (_, tid, rssi, *_), p, ok in zip(stream, xy, mask):
                 if ok:
                     samples.setdefault(prefix + tid, []).append((p[0], p[1], rssi))
     out = []
@@ -381,7 +382,8 @@ def fit_radio_map(train: list[PathData], floor: Floor, args) -> list[Transmitter
 # Output
 
 
-def write_trace(path: Path, pd: PathData, name: str, offset: float, known: set[str], wifi: bool) -> dict:
+def write_trace(path: Path, pd: PathData, name: str, offset: float, known: set[str], wifi: bool,
+                scans: bool = False) -> dict:
     t0 = pd.imu_t[0]
     r = rotation_matrices(pd.rotvec)
     acc_w = np.einsum("nij,nj->ni", r, pd.acc)
@@ -400,12 +402,25 @@ def write_trace(path: Path, pd: PathData, name: str, offset: float, known: set[s
                 f"imu,{pd.imu_t[i] - t0:.3f},{a[0]:.4f},{a[1]:.4f},{a[2]:.4f},0,0,{g[2]:.5f},{mx:.3f},{my:.3f},0",
             )
         )
-    streams = [("b:", pd.ble)] + ([("w:", pd.wifi)] if wifi else [])
+    streams = [("b:", pd.ble)] + ([("w:", pd.wifi)] if wifi and not scans else [])
     packets = 0
     for prefix, stream in streams:
-        for t, tid, rssi in stream:
+        for t, tid, rssi, *_ in stream:
             if prefix + tid in known and t >= t0:
                 rows.append((t - t0, f"ble,{t - t0:.3f},{prefix}{tid},{rssi:.0f}"))
+                packets += 1
+    n_scans = 0
+    if wifi and scans:
+        # One batch per Wi-Fi scan, stamped with its newest reading. The rows share a time and stay
+        # contiguous (the sort below is stable), which is how replay recognises the scan.
+        by_scan: dict[float, list] = {}
+        for t, tid, rssi, t_scan in pd.wifi:
+            if "w:" + tid in known and t >= t0:
+                by_scan.setdefault(t_scan, []).append((t, tid, rssi))
+        batches = sorted((max(r[0] for r in readings), t_scan, readings) for t_scan, readings in by_scan.items())
+        for n_scans, (t_batch, _, readings) in enumerate(batches, start=1):
+            for _, tid, rssi in sorted(readings, key=lambda r: r[1]):
+                rows.append((t_batch - t0, f"ble,{t_batch - t0:.3f},w:{tid},{rssi:.0f},{n_scans}"))
                 packets += 1
     wp = pd.waypoints
     for i, (t, x, y) in enumerate(wp):
@@ -418,7 +433,10 @@ def write_trace(path: Path, pd: PathData, name: str, offset: float, known: set[s
         f.write(f"# ipe-trace v1\n# scenario: {name}\n# source: msil path {pd.path_id}\n")
         for _, line in rows:
             f.write(line + "\n")
-    return {"duration_s": float(pd.imu_t[-1] - t0), "packets": packets, "waypoints": len(wp)}
+    stats = {"duration_s": float(pd.imu_t[-1] - t0), "packets": packets, "waypoints": len(wp)}
+    if scans:
+        stats["scans"] = n_scans
+    return stats
 
 
 def is_test(path_id: str, test_every: int) -> bool:
@@ -487,7 +505,7 @@ def convert_floor(site: str, floor_name: str, floor_dir: Path, paths: list[PathD
         if len(pd.imu_t) < 100 or len(pd.waypoints) < 2:
             continue
         trace_path = floor_out / f"{pd.path_id}.csv"
-        stats = write_trace(trace_path, pd, f"{name}_{pd.path_id}", offset, known, args.wifi)
+        stats = write_trace(trace_path, pd, f"{name}_{pd.path_id}", offset, known, args.wifi, args.scans)
         entries.append({"name": f"{name}_{pd.path_id}", "group": name, "venue": str(venue_path.relative_to(out)), "trace": str(trace_path.relative_to(out)), **stats})
     report["test_traces"] = len(entries)
     return entries, report
@@ -510,6 +528,8 @@ def main():
     ap.add_argument("--sites", nargs="*", help="limit to these sites")
     ap.add_argument("--floors", nargs="*", help="limit to these floor names (e.g. F1 B1)")
     ap.add_argument("--wifi", action="store_true", help="also fit and replay Wi-Fi access points")
+    ap.add_argument("--scans", action="store_true",
+                    help="with --wifi, write each Wi-Fi scan as one batch (scan column, newest reading's time)")
     ap.add_argument("--walls", choices=["auto", "none", "boundary", "units"], default="auto")
     ap.add_argument("--test-every", type=int, default=5, help="every N-th path (by id hash) is a test path")
     ap.add_argument("--min-samples", type=int, default=30)
@@ -517,6 +537,8 @@ def main():
     ap.add_argument("--max-rms", type=float, default=8.0, help="dB; transmitters fitting worse are dropped")
     ap.add_argument("--wall-attenuation-db", type=float, default=3.0)
     args = ap.parse_args()
+    if args.scans and not args.wifi:
+        ap.error("--scans needs --wifi")
 
     manifest, reports = [], []
     for site_dir in sorted(p for p in args.raw.iterdir() if p.is_dir()):

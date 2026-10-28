@@ -61,6 +61,10 @@ struct ParticleFilterConfig {
   double proposal_level_jump = 0.1;  ///< Probability a ring particle is put on a level next to the beacon's.
   double proposal_ring_scale = 1.0;  ///< Ring width in units of the RSSI model's sigma.
 
+  /// A scan of k readings multiplies their likelihoods raised to k^-gamma.
+  /// 0 treats readings as independent; 1 counts the whole scan as one measurement.
+  double scan_tempering = 0.0;
+
   // Floor model; only active in multi-level venues.
   double level_change_prob_step = 0.08;  ///< Per step, for particles standing in a connector footprint.
   double level_change_prob_baro = 0.1;   ///< Per barometer update in a connector (lift rides have no steps).
@@ -97,6 +101,9 @@ class ParticleFilter final : public Filter {
   void on_step(const StepEvent& step) override;
   void on_heading(double t, double heading, double sigma) override;
   void on_rssi(double t, std::size_t beacon_index, double rssi) override;
+  /// One weight update, resample and estimate for the whole scan, with the
+  /// readings' summed log-likelihood tempered by `scan_tempering`.
+  void on_rssi_scan(double t, std::span<const RssiReading> readings) override;
   void on_pressure(double t, double hpa) override;
 
   [[nodiscard]] Estimate estimate() const override { return estimate_; }
@@ -153,8 +160,13 @@ class ParticleFilter final : public Filter {
   [[nodiscard]] double ring_level_prob(int beacon_level, int level) const;
   Particle sample_recovery_particle();
   void remember_packet(double t, std::size_t beacon_index, double rssi);
+  /// 10 log10 of the free-space distance at which the beacon is heard at `rssi`.
+  [[nodiscard]] double apparent_range(std::size_t beacon_index, double rssi) const;
+  /// Applies the packets collected before the radio seed.
+  void flush_pending();
   /// RSSI likelihood update, after the integrity check.
   void update_rssi(double t, std::size_t beacon_index, double rssi);
+  void update_rssi(double t, std::span<const RssiReading> readings);
 
   /// Updates the integrity monitor; returns false if the beacon should be skipped.
   bool check_beacon(std::size_t beacon_index, double rssi);
@@ -178,6 +190,7 @@ class ParticleFilter final : public Filter {
   std::vector<Particle> particles_;
   std::vector<Particle> scratch_;
   std::vector<double> loglik_;
+  std::vector<RssiReading> scan_;  ///< Readings of the current scan that passed the integrity check.
   std::vector<BeaconHealth> health_;
   double mean_rssi_offset_ = 0.0;
   Estimate estimate_;

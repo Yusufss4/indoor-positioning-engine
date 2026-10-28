@@ -8,5 +8,6 @@ __pycache__/
 viz/output/
 datasets/msil/raw/
 datasets/msil/out/
+datasets/msil/out_scans/
 web/dist/
 .DS_Store

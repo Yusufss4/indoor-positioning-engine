@@ -273,23 +273,67 @@ void ParticleFilter::on_rssi(double t, std::size_t beacon_index, double rssi) {
     const bool room = pending_count_ < pending_.size();
     if (room) pending_[pending_count_++] = {t, beacon_index, rssi};
     if (room && pending_count_ < pending_.size() && t - pending_[0].t < cfg_.init_window_s) return;
-    const auto range = [&](const Packet& pk) {
-      const Beacon& b = venue_->beacons()[pk.beacon];
-      return (b.tx_power_dbm - pk.rssi) / b.path_loss_exp;
-    };
     const auto best = std::min_element(pending_.begin(), pending_.begin() + static_cast<std::ptrdiff_t>(pending_count_),
-                                       [&](const Packet& a, const Packet& b) { return range(a) < range(b); });
+                                       [&](const Packet& a, const Packet& b) {
+                                         return apparent_range(a.beacon, a.rssi) < apparent_range(b.beacon, b.rssi);
+                                       });
     seed_from_beacon(best->beacon, best->rssi);
-    for (std::size_t i = 0; i < pending_count_; ++i) update_rssi(pending_[i].t, pending_[i].beacon, pending_[i].rssi);
+    flush_pending();
     if (!room) update_rssi(t, beacon_index, rssi);
-    pending_count_ = 0;
     return;
   }
   update_rssi(t, beacon_index, rssi);
 }
 
+void ParticleFilter::on_rssi_scan(double t, std::span<const RssiReading> readings) {
+  now_ = t;
+  scan_.clear();
+  for (const auto& r : readings) {
+    if (r.beacon_index >= venue_->beacons().size() || !check_beacon(r.beacon_index, r.rssi)) continue;
+    remember_packet(t, r.beacon_index, r.rssi);
+    scan_.push_back(r);
+  }
+  if (scan_.empty()) return;
+  if (cfg_.init_proposal && !radio_seeded_) {
+    // A scan is already a batch, so no collection window: seed from the
+    // shortest apparent range among its readings and any lone packets waiting.
+    const auto best_in_scan = std::min_element(scan_.begin(), scan_.end(), [&](const auto& a, const auto& b) {
+      return apparent_range(a.beacon_index, a.rssi) < apparent_range(b.beacon_index, b.rssi);
+    });
+    std::size_t beacon = best_in_scan->beacon_index;
+    double rssi = best_in_scan->rssi;
+    for (std::size_t i = 0; i < pending_count_; ++i) {
+      if (apparent_range(pending_[i].beacon, pending_[i].rssi) < apparent_range(beacon, rssi)) {
+        beacon = pending_[i].beacon;
+        rssi = pending_[i].rssi;
+      }
+    }
+    seed_from_beacon(beacon, rssi);
+    flush_pending();
+  }
+  update_rssi(t, scan_);
+}
+
+double ParticleFilter::apparent_range(std::size_t beacon_index, double rssi) const {
+  const Beacon& b = venue_->beacons()[beacon_index];
+  return (b.tx_power_dbm - rssi) / b.path_loss_exp;
+}
+
+void ParticleFilter::flush_pending() {
+  for (std::size_t i = 0; i < pending_count_; ++i) update_rssi(pending_[i].t, pending_[i].beacon, pending_[i].rssi);
+  pending_count_ = 0;
+}
+
 void ParticleFilter::update_rssi(double t, std::size_t beacon_index, double rssi) {
-  const Beacon& beacon = venue_->beacons()[beacon_index];
+  const RssiReading reading{beacon_index, rssi};
+  update_rssi(t, std::span<const RssiReading>(&reading, 1));
+}
+
+void ParticleFilter::update_rssi(double t, std::span<const RssiReading> readings) {
+  // Readings of one scan share most of their model error, so their summed
+  // log-likelihood is tempered by k^-gamma (gamma = 1: the scan counts once).
+  const double temper =
+      cfg_.scan_tempering > 0.0 ? std::pow(static_cast<double>(readings.size()), -cfg_.scan_tempering) : 1.0;
 
   loglik_.resize(particles_.size());
   double max_ll = -std::numeric_limits<double>::infinity();
@@ -300,8 +344,13 @@ void ParticleFilter::update_rssi(double t, std::size_t beacon_index, double rssi
       loglik_[i] = -std::numeric_limits<double>::infinity();
       continue;
     }
-    const double expected = rssi_model_.expected_rssi(beacon, p.pos, p.level) + p.rssi_offset;
-    loglik_[i] = rssi_model_.log_likelihood(rssi - expected);
+    double ll = 0.0;
+    for (const auto& r : readings) {
+      const Beacon& beacon = venue_->beacons()[r.beacon_index];
+      const double expected = rssi_model_.expected_rssi(beacon, p.pos, p.level) + p.rssi_offset;
+      ll += rssi_model_.log_likelihood(r.rssi - expected);
+    }
+    loglik_[i] = temper * ll;
     max_ll = std::max(max_ll, loglik_[i]);
   }
 

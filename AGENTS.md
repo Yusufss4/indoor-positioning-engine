@@ -21,7 +21,8 @@ truth; a replay tool and a regression suite measure accuracy.
   are stale. `data/mappings` - GeoJSON property mapping tables.
 - `data/configs` - engine config patches for `--config` (e.g. `open_venue.json`, `msil_wifi.json`).
 - `datasets/msil` - fetch and convert scripts for the Microsoft Indoor Location sample. The raw data and
-  the converted `out/` are git-ignored; `tests/regression/msil_baseline.json` gates the held-out walks.
+  the converted `out/` (readings one by one) and `out_scans/` (`--scans`, one batch per Wi-Fi scan) are
+  git-ignored; `tests/regression/msil_baseline.json` gates the held-out walks of `out_scans/`.
   `data/real` holds three converted walks for the web demo; regenerate it with
   `datasets/msil/export_demo.py` (a unit test checks it against the venue export).
 - `viz/` - Python plotting; `web/` - Emscripten bindings and the browser demo.
@@ -36,7 +37,7 @@ ctest --test-dir build -L regression --output-on-failure    # accuracy gate, ~3 
 ```
 
 `-L regression` also runs `real_data_regression` (label `realdata`), which is skipped unless
-`datasets/msil/out/` exists (see [docs/real_data.md](docs/real_data.md)). Settings for real data are
+`datasets/msil/out_scans/` exists (see [docs/real_data.md](docs/real_data.md)). Settings for real data are
 chosen on `manifest_tune.json` only; `manifest_holdout.json` is for reporting, not for tuning.
 
 Sanitizers: `-DIPE_SANITIZE=address,undefined` with `CMAKE_BUILD_TYPE=Debug`.

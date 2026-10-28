@@ -6,12 +6,15 @@ replays real phone recordings through the unchanged engine.
 
 **Summary.** On 109 held-out walks in two Chinese shopping malls (14 floors, with plan extents of
 42,000-119,000 m^2), the
-particle filter reaches a median CEP50 of 7.0 m and a median CEP95 of 11.1 m. That is about ten times the
-simulated office (0.63 / 1.36 m). It is level with the EKF (7.8 / 10.4 m) and ahead of the weighted
-centroid (8.4 / 14.9 m) on CEP95, but it needs a Wi-Fi configuration chosen on separate walks.
-With default settings, the particle filter is the worst of the four (11.7 / 20.5 m). Most of the gap
-came from data handling, not filter tuning: virtual Wi-Fi access points counted up to six times, and
-a uniform start over very large floors.
+particle filter reaches a median CEP50 of 7.1 m and a median CEP95 of 9.5 m when each Wi-Fi scan is
+applied as one update. That is about ten times the simulated office (0.63 / 1.36 m), and ahead of the
+EKF (7.6 / 11.4 m) and the weighted centroid (8.2 / 14.5 m) on the same traces. Applying the readings one
+by one, as the first version of this page did, gives 7.0 / 11.1 m. The particle filter needs a Wi-Fi
+configuration chosen on separate walks: with default settings it is the worst of the four
+(11.7 / 20.5 m). Most of the gap came from data handling, not filter tuning: virtual Wi-Fi access
+points counted up to six times, a uniform start over very large floors, and one weight update per
+reading instead of per scan. Its uncertainty is still far too small: the 95% ellipse holds the truth
+for under a fifth of the fixes in a typical walk.
 
 ## Data
 
@@ -39,6 +42,7 @@ in `data/real/` for the web demo (see below), with the sample's MIT licence next
 | Coordinates in GCJ-02, not WGS84 | Chinese map data uses an offset datum (about 500 m here). The venue's `georef` origin is converted to WGS84; metres are unaffected | Over OpenStreetMap, site 1 falls on Hangzhou Xixi Intime City. Site 2 lands about 100 m from Hangzhou Joy City, an offset not explained |
 | Unknown transmitter positions | Robust least squares (soft-L1, 4 dB scale) of position, tx power and path-loss exponent for each transmitter, on interpolated positions from training walks. Keeps transmitters with at least 30 samples, at least 3 m of spatial spread, RMS of 8 dB or less, inside the floor | 252-887 transmitters per floor; median fit RMS 4.5-5.9 dB |
 | Virtual access points | One radio advertises up to 6 SSIDs under BSSIDs that differ only in the first octet. These are merged into one transmitter, keeping one reading per access point per 50 ms | In 40 walks on site1 F1, half of the Wi-Fi readings were duplicates and 162 of 715 physical access points had 6 BSSIDs |
+| Scans | With `--scans`, the Wi-Fi readings of one scan are written as one batch (a `scan` column on the `ble` rows), stamped with the scan's newest `last_seen`. A phone only gets the readings when the scan completes, so applying each at its own `last_seen` (the default) is slightly optimistic | Median 14 scans per walk, 38 transmitters per scan after the fit and the merge |
 | Walls | Floor outline as walls (`boundary`). Shop outlines (`units`) have no doors, so the surveyor's path crosses them. The outline is tagged `type: floor` on site 1 and by a `floor` property on site 2 | `units`: 8-132 truth crossings on every floor, so never used. `boundary`: 0 crossings, except site1 F4 (2), which therefore gets no walls |
 
 Two more data facts shaped the setup:
@@ -77,6 +81,8 @@ the beacon-driven init and recovery proposals from experiment 4 in [experiments.
 | pf-nomap, Wi-Fi config | 8.0 | 11.8 | 11.9 | 17.0 |
 | ekf, default | 7.8 | **10.4** | 12.7 | **15.4** |
 | wcl, default | 8.4 | 14.9 | **10.5** | 16.7 |
+
+These rows apply each Wi-Fi reading on its own. The real-data CTest now gates the scan traces below.
 
 Per floor (median CEP50 / CEP95; few walks per floor, so single floors are noisy):
 
@@ -122,6 +128,59 @@ walk-to-walk noise. The first line was measured before two converter fixes (site
 merged access points); the rest were rerun after them, and the ranking is unchanged from the run that
 chose the config.
 
+## Scans as one update
+
+A scan reports about 40 located access points at once, and their model errors are correlated. Fed one
+by one, each reading gets its own weight update and possibly its own resample, and the cloud collapses
+long before the scan is over. `convert.py --wifi --scans --out datasets/msil/out_scans` writes each scan as
+one batch (same radio map, venues and split as `out/`). The particle filter applies a batch as one
+update, with the summed log-likelihood optionally tempered by `k^-gamma` (`pf.scan_tempering`, see
+[design.md](design.md#particle-filter)). `coverage95` is the share of fixes inside the reported 95%
+ellipse; an honest filter scores 95%.
+
+Tune half, `pf` with the Wi-Fi config, median over walks:
+
+| Variant | CEP50 / CEP95 [m] | Coverage95 |
+|---|---:|---:|
+| (a) readings one by one, each at its `last_seen` | 8.11 / 12.73 | 17% |
+| readings one by one, at the scan's batch time | 7.41 / 11.16 | 18% |
+| **(b) one update per scan, gamma 0** | **6.37 / 10.19** | 19% |
+| gamma 0.25 | 7.19 / 11.29 | 40% |
+| gamma 0.5 | 8.69 / 12.85 | 75% |
+| gamma 0.75 | 10.55 / 17.33 | 100% |
+| gamma 1 (the scan counts once) | 18.51 / 28.46 | 100% |
+| gamma 0, sigma 5 dB | 7.39 / 11.53 | 7% |
+| gamma 0.25 / 0.5 / 0.75 / 1, sigma 5 dB | 7.19 / 10.99, 7.67 / 11.62, 9.63 / 16.76, 16.45 / 29.06 | 11%, 33%, 75%, 100% |
+
+The gain comes from batching, not from tempering. Moving the readings to the batch time accounts for
+about 0.7 / 1.6 m (the `last_seen` stamps within a scan are not a better clock than the scan itself), and
+one update per scan for another 1.0 / 1.0 m. Tempering does what it should for the uncertainty (coverage
+goes from 19% to 75% at gamma 0.5) but every step of it costs accuracy. Spreading the weight over a
+wider cloud gives the many wrong hypotheses on a 100,000 m^2 floor more time to survive. So
+`scan_tempering` stays 0, and `msil_wifi.json` is unchanged.
+
+Held-out half, replayed once with the frozen choice:
+
+| Filter | Traces | Median CEP50 | Median CEP95 | Mean CEP50 | Mean CEP95 | Median coverage95 |
+|---|---|---:|---:|---:|---:|---:|
+| pf, Wi-Fi config | readings one by one | **6.96** | 11.06 | 12.47 | 18.67 | 20% |
+| **pf, Wi-Fi config** | **scans** | 7.07 | **9.50** | 12.50 | 17.12 | 17% |
+| pf-nomap, Wi-Fi config | scans | 6.98 | 9.62 | 12.13 | 16.76 | 17% |
+| ekf, default | readings one by one | 7.76 | 10.40 | 12.74 | **15.42** | 0% |
+| ekf, default | scans | 7.56 | 11.37 | 12.80 | 15.97 | 0% |
+| wcl, default | scans | 8.15 | 14.53 | **10.70** | 16.27 | - |
+
+The CEP95 gain holds (11.1 -> 9.5 m, now the best median CEP95 of the four filters); the CEP50 gain on the
+tune half (1.7 m) does not, and held-out CEP50 is unchanged within noise. Per floor (mean over 1-18 walks)
+it is a trade-off: site1_B1, site1_F4, site2_B1, site2_F4, site2_F5, site2_F6 and site2_F7 (CEP95) get
+better, while site1_F2 (CEP50 7.5 -> 12.5 m), site2_F1 (CEP95 12.5 -> 18.5 m), site1_F1 and site2_F8 (CEP50)
+get worse. Because a live phone delivers whole scans, the real-data CTest now gates the scan traces;
+`tests/regression/msil_baseline.json` was regenerated for that.
+
+The EKF's covariance is the most overconfident of all (coverage 0%), likely because dozens of scalar
+updates per scan each shrink it as if independent. Inflating its measurement noise per scan is the
+matching change there and is not done yet.
+
 ## Simulation vs. real data
 
 | | pf CEP50 / CEP95 [m] | EKF CEP50 / CEP95 [m] |
@@ -129,11 +188,13 @@ chose the config.
 | office_nominal (simulated, CI baseline) | 0.63 / 1.36 | 0.84 / 4.07 |
 | airport_hall_sparse (simulated, CI baseline) | 1.48 / 8.88 | 1.72 / 10.13 |
 | Microsoft malls (real, held-out median over walks) | 7.0 / 11.1 | 7.8 / 10.4 |
+| Microsoft malls, one update per scan | 7.1 / 9.5 | 7.6 / 11.4 |
 
 The simulated rows pool all scored epochs over 3 seeds, as in `tests/regression/baseline.json`.
 The real row is the median of per-walk CEPs, so the rows are comparable in scale but not to the decimal.
 
-In the simulated office the particle filter's CEP95 is a third of the EKF's; on real data the two are level. On
+In the simulated office the particle filter's CEP95 is a third of the EKF's; on real data the two are level
+with readings applied one by one, and the particle filter leads by 1.9 m with one update per scan. On
 raw Wi-Fi the particle filter's per-packet independence assumption is its weak point. The EKF
 ignores packets below -85 dBm and the weighted centroid uses only the strongest few, so both are
 naturally robust to the weak, correlated readings that mislead the particle filter. The map helps much
@@ -146,9 +207,11 @@ resampling jitter still refuses to cross walls whatever `wall_constraint` says.
 
 - **Correlated Wi-Fi errors.** Each scan reports about 100 access points whose fitted-model errors are
   spatially correlated. The likelihood multiplies them as if independent, which makes the cloud
-  overconfident: under 1 m spread while 20 m off. Merging virtual access points removed the worst
-  duplicates. Weighting a scan as one measurement (for example, a tempered likelihood per scan) is the
-  natural next engine change.
+  overconfident: under 1 m spread while 20 m off, and the 95% ellipse holds the truth for 17% of the
+  fixes in a typical walk. Merging virtual access points removed the worst duplicates, and one update per
+  scan (above) helps accuracy. A tempered likelihood per scan makes the spread honest but costs
+  accuracy at every setting tried. A likelihood that models the correlation, for example through a
+  fingerprint map's residuals, is the open problem.
 - **Short walks on large floors.** Most walks end before any filter meets the "error under 3 m for
   10 s" convergence rule (89-101 of 109 never do), so convergence time is not reported here. Multi-walk
   sessions from the full dataset would show steady-state accuracy.
@@ -156,7 +219,8 @@ resampling jitter still refuses to cross walls whatever `wall_constraint` says.
   surveyors do not walk straight lines. The radio map inherits that error, and so does the scoring.
 - **Scan latency.** Wi-Fi readings are timestamped with the access point's `last_seen`, up to a few
   seconds before the scan completes. The walker has moved by then; the engine has no notion of
-  measurement age.
+  measurement age. Scan traces apply the whole scan at its newest reading, which on these walks was
+  better than applying each reading at its own `last_seen` (tune half: 7.4 / 11.2 vs 8.1 / 12.7 m).
 - **Doors.** The shop outlines would be useful walls if the doors were known. IMDF `opening` features
   carry exactly that; this GeoJSON does not.
 - **site2 F5** (2 walks) is lost by every filter. Its transmitter density is average (9 per 1,000 m^2),
@@ -182,11 +246,14 @@ python3 -m venv .venv && .venv/bin/pip install -r datasets/msil/requirements.txt
 ./build/tools/ipe-regress --traces datasets/msil/out/manifest_holdout.json --no-baseline
 ./build/tools/ipe-regress --traces datasets/msil/out/manifest_holdout.json --no-baseline \
     --presets pf,pf-nomap --config data/configs/msil_wifi.json
-ctest --test-dir build -L realdata                               # gate against tests/regression/msil_baseline.json
+.venv/bin/python datasets/msil/convert.py --wifi --scans --out datasets/msil/out_scans   # one batch per scan
+./build/tools/ipe-regress --traces datasets/msil/out_scans/manifest_holdout.json --no-baseline \
+    --presets pf,pf-nomap --config data/configs/msil_wifi.json
+ctest --test-dir build -L realdata                               # out_scans vs tests/regression/msil_baseline.json
 .venv/bin/python datasets/msil/plot.py --trace site2/F1/5dd35c9844333f00067aa0e0.csv --out docs/img/msil_trajectory.png
 .venv/bin/python datasets/msil/export_demo.py                    # refresh data/real/ for the web demo
 ```
 
-`convert.py --help` lists the options: `--walls`, the fit thresholds, `--test-every`, and `--sites` /
-`--floors` to convert part of the data. The `real_data_regression` CTest is skipped when
-`datasets/msil/out/` is missing, so CI stays green without the dataset.
+`convert.py --help` lists the options: `--walls`, `--scans`, the fit thresholds, `--test-every`, and
+`--sites` / `--floors` to convert part of the data. The `real_data_regression` CTest is skipped when
+`datasets/msil/out_scans/` is missing, so CI stays green without the dataset.

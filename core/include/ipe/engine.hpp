@@ -42,6 +42,8 @@ class PositioningEngine {
   void on_imu(const ImuSample& sample);
   void on_ble(double t, std::string_view beacon_id, double rssi);
   void on_ble(double t, std::size_t beacon_index, double rssi);
+  /// One scan's readings; beacon indices outside the venue are dropped.
+  void on_scan(double t, std::span<const RssiReading> readings);
   void on_pressure(double t, double hpa);
 
   [[nodiscard]] Estimate estimate() const { return filter_->estimate(); }

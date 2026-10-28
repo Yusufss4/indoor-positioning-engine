@@ -22,12 +22,14 @@ struct BenchmarkCase {
   bool multi_level = false;  ///< Floor metrics are only reported for multi-level venues.
   double floor_accuracy = 1.0;
   double floor_switch_latency_s = -1.0;
+  double coverage95 = -1.0;  ///< Mean over runs; -1 when the filter reports no covariance.
   /// Recorded traces: `runs` are different walks rather than seeds, so the
   /// medians over traces are reported next to the means.
   bool recorded = false;
   double median_mean_m = 0.0;
   double median_cep50_m = 0.0;
   double median_cep95_m = 0.0;
+  double median_coverage95 = -1.0;
 };
 
 struct BenchmarkOptions {

@@ -69,6 +69,39 @@ TEST(Trace, StreamsAreSortedOnRead) {
   EXPECT_NEAR(r.duration(), 1.5, 1e-12);
 }
 
+TEST(Trace, ScanColumnRoundTrip) {
+  Trace t;
+  t.ble.push_back({0.5, "B1", -60});
+  t.ble.push_back({1.0, "W1", -70, 3});
+  t.ble.push_back({1.0, "W2", -75, 3});
+  t.ble.push_back({1.0, "W3", -80, 4});
+  t.ble.push_back({1.2, "B1", -61});
+
+  std::stringstream ss;
+  write_trace(ss, t);
+  EXPECT_NE(ss.str().find("# ble,t,beacon_id,rssi[,scan]"), std::string::npos);
+  EXPECT_NE(ss.str().find("ble,1.000,W2,-75,3\n"), std::string::npos);
+  EXPECT_NE(ss.str().find("ble,0.500,B1,-60\n"), std::string::npos);
+  const Trace r = read_trace(ss);
+  ASSERT_EQ(r.ble.size(), 5u);
+  EXPECT_EQ(r.ble[0].scan, 0u);
+  EXPECT_EQ(r.ble[1].scan, 3u);
+  EXPECT_EQ(r.ble[3].scan, 4u);
+
+  EXPECT_EQ(scan_end(r.ble, 0), 1u);
+  EXPECT_EQ(scan_end(r.ble, 1), 3u);
+  EXPECT_EQ(scan_end(r.ble, 3), 4u);
+  EXPECT_EQ(scan_end(r.ble, 4), 5u);
+}
+
+TEST(Trace, TraceWithoutScansKeepsOriginalBleHeader) {
+  Trace t;
+  t.ble.push_back({0.5, "B1", -60});
+  std::stringstream ss;
+  write_trace(ss, t);
+  EXPECT_NE(ss.str().find("# ble,t,beacon_id,rssi\n"), std::string::npos);
+}
+
 TEST(Trace, MalformedRowsReportLineNumber) {
   std::stringstream bad_type("# header\nfoo,1,2\n");
   try {
@@ -81,4 +114,8 @@ TEST(Trace, MalformedRowsReportLineNumber) {
   EXPECT_THROW(read_trace(bad_num), std::runtime_error);
   std::stringstream short_row("imu,0.1,1,2\n");
   EXPECT_THROW(read_trace(short_row), std::runtime_error);
+  std::stringstream bad_scan("ble,1.0,A,-70,x\n");
+  EXPECT_THROW(read_trace(bad_scan), std::runtime_error);
+  std::stringstream negative_scan("ble,1.0,A,-70,-2\n");
+  EXPECT_THROW(read_trace(negative_scan), std::runtime_error);
 }

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
 #include <iosfwd>
 #include <map>
 #include <string>
@@ -14,6 +16,9 @@ struct BleSample {
   double t = 0.0;
   std::string beacon_id;
   double rssi = 0.0;
+  /// Non-zero for readings delivered together in one scan (Wi-Fi). Readings of
+  /// one scan share `t` and are contiguous in the stream; 0 is a lone packet.
+  std::uint32_t scan = 0;
 };
 
 struct BaroSample {
@@ -39,6 +44,10 @@ struct Trace {
 
   [[nodiscard]] double duration() const;
 };
+
+/// One past the last sample of the scan that starts at `ble[begin]`; `begin + 1`
+/// for a lone packet.
+std::size_t scan_end(const std::vector<BleSample>& ble, std::size_t begin);
 
 /// Writes the line-oriented CSV format described in docs/formats.md.
 void write_trace(std::ostream& out, const Trace& trace);

@@ -65,11 +65,20 @@ class Demo {
         for (auto& tr : tracks_) tr.engine->on_imu(trace_.imu[i_]);
         ++i_;
       } else if (tb == next) {
-        if (ble_index_[b_] != SIZE_MAX) {
+        const std::size_t end = ipe::scan_end(trace_.ble, b_);
+        if (trace_.ble[b_].scan != 0) {
+          scan_.clear();
+          for (std::size_t k = b_; k < end; ++k) {
+            if (ble_index_[k] == SIZE_MAX) continue;
+            scan_.push_back({ble_index_[k], trace_.ble[k].rssi});
+            recent_ble_.push_back(k);
+          }
+          for (auto& tr : tracks_) tr.engine->on_scan(trace_.ble[b_].t, scan_);
+        } else if (ble_index_[b_] != SIZE_MAX) {
           for (auto& tr : tracks_) tr.engine->on_ble(trace_.ble[b_].t, ble_index_[b_], trace_.ble[b_].rssi);
           recent_ble_.push_back(b_);
         }
-        ++b_;
+        b_ = end;
       } else if (tp == next) {
         for (auto& tr : tracks_) tr.engine->on_pressure(trace_.baro[p_].t, trace_.baro[p_].hpa);
         ++p_;
@@ -209,6 +218,7 @@ class Demo {
   std::vector<Track> tracks_;
   std::vector<std::size_t> ble_index_;
   std::vector<std::size_t> recent_ble_;
+  std::vector<ipe::RssiReading> scan_;
   std::vector<float> particle_buf_;
   ipe::TruthSample truth_{};
   double now_ = 0.0;

@@ -52,6 +52,15 @@ State per particle: position, heading, step-length scale, device RSSI offset.
 - **Beacon integrity monitor**: once converged, keeps an exponential average of each beacon's RSSI
   residual at the estimate and stops using beacons whose bias exceeds 10 dB (re-admitted below 5 dB, never
   more than a third of the beacons).
+- **Scans** (`on_rssi_scan`): a Wi-Fi scan reports dozens of access points at once. The filter applies
+  the whole scan as one update: one device-offset random-walk step, one recovery-statistics update, one
+  resample decision and one estimate. The integrity monitor still checks each reading. The scan's
+  summed log-likelihood is multiplied by `k^-scan_tempering` for `k` readings: 0 (the default) treats
+  readings as independent, and 1 counts the whole scan as one measurement, so an access point reported
+  under several ids no longer counts several times. Tempering makes the cloud's spread honest but
+  costs accuracy on the real traces, so it is off (see [real_data.md](real_data.md#scans-as-one-update)).
+  A one-reading scan is bit-identical to `on_rssi`; the EKF and weighted centroid treat a scan as
+  consecutive packets.
 - **Wall queries** use a uniform grid over wall segments, with a linear scan for long radio paths where
   the grid would visit most cells anyway. A property test checks the grid against brute force.
 

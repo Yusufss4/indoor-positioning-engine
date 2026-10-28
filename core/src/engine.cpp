@@ -61,6 +61,8 @@ void PositioningEngine::on_ble(double t, std::size_t beacon_index, double rssi) 
   filter_->on_rssi(t, beacon_index, rssi);
 }
 
+void PositioningEngine::on_scan(double t, std::span<const RssiReading> readings) { filter_->on_rssi_scan(t, readings); }
+
 void PositioningEngine::on_pressure(double t, double hpa) { filter_->on_pressure(t, hpa); }
 
 const ParticleFilter* PositioningEngine::particle_filter() const {

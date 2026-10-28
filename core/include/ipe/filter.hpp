@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <span>
 #include <string_view>
 
 #include "ipe/geometry.hpp"
@@ -23,6 +24,11 @@ struct Estimate {
   [[nodiscard]] double sigma_radius() const;
 };
 
+struct RssiReading {
+  std::size_t beacon_index = 0;
+  double rssi = 0.0;
+};
+
 /// Common interface so the replay tool, regression suite and web demo can
 /// drive any estimator with the same measurement stream.
 class Filter {
@@ -32,6 +38,11 @@ class Filter {
   virtual void on_step(const StepEvent& step) = 0;
   virtual void on_heading(double t, double heading, double sigma) = 0;
   virtual void on_rssi(double t, std::size_t beacon_index, double rssi) = 0;
+  /// Readings delivered together in one scan (Wi-Fi). Filters without a scan
+  /// model treat them as consecutive packets.
+  virtual void on_rssi_scan(double t, std::span<const RssiReading> readings) {
+    for (const auto& r : readings) on_rssi(t, r.beacon_index, r.rssi);
+  }
   /// Barometric pressure [hPa]. Filters without a floor model ignore it.
   virtual void on_pressure(double /*t*/, double /*hpa*/) {}
 

@@ -54,13 +54,22 @@ double Trace::duration() const {
   return t1 > t0 ? t1 - t0 : 0.0;
 }
 
+std::size_t scan_end(const std::vector<BleSample>& ble, std::size_t begin) {
+  std::size_t end = begin + 1;
+  if (begin >= ble.size() || ble[begin].scan == 0) return end;
+  while (end < ble.size() && ble[end].scan == ble[begin].scan && ble[end].t == ble[begin].t) ++end;
+  return end;
+}
+
 void write_trace(std::ostream& out, const Trace& trace) {
   // Single-floor traces without a barometer keep the original v1 layout.
   const bool vertical =
       std::any_of(trace.truth.begin(), trace.truth.end(), [](const auto& s) { return s.level != 0 || s.z != 0.0; });
   out << "# ipe-trace v1\n";
   for (const auto& [k, v] : trace.metadata) out << "# " << k << ": " << v << "\n";
-  out << "# imu,t,ax,ay,az,gx,gy,gz,mx,my,mz\n# ble,t,beacon_id,rssi\n";
+  const bool scans = std::any_of(trace.ble.begin(), trace.ble.end(), [](const auto& s) { return s.scan != 0; });
+  out << "# imu,t,ax,ay,az,gx,gy,gz,mx,my,mz\n";
+  out << (scans ? "# ble,t,beacon_id,rssi[,scan]\n" : "# ble,t,beacon_id,rssi\n");
   if (!trace.baro.empty()) out << "# baro,t,pressure_hpa\n";
   out << (vertical ? "# gt,t,x,y,heading,level,z\n" : "# gt,t,x,y,heading\n");
 
@@ -78,7 +87,12 @@ void write_trace(std::ostream& out, const Trace& trace) {
                     s.accel.y, s.accel.z, s.gyro.x, s.gyro.y, s.gyro.z, s.mag.x, s.mag.y, s.mag.z);
     } else if (tb <= tp && tb <= tg) {
       const auto& s = trace.ble[b++];
-      std::snprintf(buf, sizeof(buf), "ble,%.3f,%s,%.0f\n", s.t, s.beacon_id.c_str(), s.rssi);
+      if (s.scan != 0) {
+        std::snprintf(buf, sizeof(buf), "ble,%.3f,%s,%.0f,%u\n", s.t, s.beacon_id.c_str(), s.rssi,
+                      static_cast<unsigned>(s.scan));
+      } else {
+        std::snprintf(buf, sizeof(buf), "ble,%.3f,%s,%.0f\n", s.t, s.beacon_id.c_str(), s.rssi);
+      }
     } else if (tp <= tg) {
       const auto& s = trace.baro[p++];
       std::snprintf(buf, sizeof(buf), "baro,%.3f,%.4f\n", s.t, s.hpa);
@@ -128,8 +142,13 @@ Trace read_trace(std::istream& in) {
       s.mag = {to_double(f[8], line_no), to_double(f[9], line_no), to_double(f[10], line_no)};
       trace.imu.push_back(s);
     } else if (f[0] == "ble") {
-      if (f.size() != 4) throw bad();
-      trace.ble.push_back({to_double(f[1], line_no), std::string(f[2]), to_double(f[3], line_no)});
+      if (f.size() != 4 && f.size() != 5) throw bad();
+      BleSample s{to_double(f[1], line_no), std::string(f[2]), to_double(f[3], line_no)};
+      if (f.size() == 5) {
+        const auto res = std::from_chars(f[4].data(), f[4].data() + f[4].size(), s.scan);
+        if (res.ec != std::errc{} || res.ptr != f[4].data() + f[4].size()) throw bad();
+      }
+      trace.ble.push_back(std::move(s));
     } else if (f[0] == "baro") {
       if (f.size() != 3) throw bad();
       trace.baro.push_back({to_double(f[1], line_no), to_double(f[2], line_no)});

@@ -93,12 +93,15 @@ Line-oriented, one sample per row, merged in timestamp order. Lines starting wit
 # ipe-trace v1
 # scenario: office_nominal
 imu,t,ax,ay,az,gx,gy,gz,mx,my,mz
-ble,t,beacon_id,rssi
+ble,t,beacon_id,rssi[,scan]
 baro,t,pressure_hpa
 gt,t,x,y,heading,level,z
 ```
 
 - IMU in the phone frame (phone flat, x forward): m/s^2, rad/s, uT.
+- `ble` rows with the optional `scan` column (a positive integer) are readings delivered together in one
+  Wi-Fi scan. The rows of a scan share `t` and are contiguous; replay hands them to the engine as one
+  batch (`PositioningEngine::on_scan`). Rows without the column are single packets, as before.
 - `baro` rows are optional phone barometer samples in hPa (Android `TYPE_PRESSURE`, iOS `CMAltimeter`
   reports kPa). Only pressure changes matter; the absolute value is never trusted.
 - `gt` rows are optional ground truth; replay scores the estimate at each one. `level` is the level index
@@ -131,17 +134,24 @@ truth after the warm-up are skipped. `--baseline` and `--update` work as for sce
 
 ## Replay outputs
 
-- `--out`: `t,truth_x,truth_y,est_x,est_y,sigma_m,error_m,has_fix,truth_level,est_level`, one row per
-  ground-truth sample.
+- `--out`: `t,truth_x,truth_y,est_x,est_y,sigma_m,error_m,has_fix,truth_level,est_level,cov_xx,cov_xy,cov_yy`,
+  one row per ground-truth sample.
 - `--particles`: `t,x,y,w,level`, subsampled particle cloud every N ground-truth samples.
 - stdout / `--metrics`: JSON with `mean_m`, `rmse_m`, `cep50_m`, `cep95_m`, `max_m`, `availability`,
   `time_to_first_fix_s`, `convergence_s`, `steps`, `compute_us_per_update`, `floor_accuracy`,
-  `floor_switch_latency_s`, `level_changes`.
+  `floor_switch_latency_s`, `level_changes`, `coverage95`, `nees_median`.
 
 `cep50`/`cep95` are the 50th/95th percentiles of horizontal error after a 5 s warm-up, over fixes on the
 correct floor. `floor_accuracy` is the share of fixes on the correct floor (1.0 on a single-floor venue).
 `floor_switch_latency_s` is the mean time from a true level change until the estimate reports the new
 level (-1 if the walk never changes level).
+
+`coverage95` and `nees_median` say whether the reported uncertainty is honest. For each scored fix,
+NEES = e^T P^-1 e is the squared horizontal error measured against the reported covariance P.
+`coverage95` is the share of fixes with NEES <= 5.991, i.e. inside the 95% ellipse; an honest filter
+scores about 0.95, and lower means overconfident. `nees_median` is about 1.39 for an honest filter. Both
+are -1 for filters that report no covariance (the weighted centroid). They are reported, not gated:
+`ipe-regress` adds `coverage95` (and `median_coverage95` for recorded traces) to its JSON and tables.
 
 ## GeoJSON and IMDF (`ipe-import`)
 

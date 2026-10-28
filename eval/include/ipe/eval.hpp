@@ -47,6 +47,13 @@ struct Metrics {
   /// catches up counts the time until the next true change.
   double floor_switch_latency_s = -1.0;
   int level_changes = 0;
+
+  /// Uncertainty calibration over the scored fixes, from NEES = e^T P^-1 e
+  /// (horizontal error against the reported covariance). An honest filter has
+  /// coverage95 ~ 0.95 and nees_median ~ 1.39 (chi-square, 2 dof). Both are -1
+  /// for filters that report no covariance.
+  double coverage95 = -1.0;  ///< Share of fixes with NEES <= 5.991.
+  double nees_median = -1.0;
 };
 
 struct EstimateRecord {
@@ -54,6 +61,9 @@ struct EstimateRecord {
   Vec2 truth;
   Vec2 estimate;
   double sigma_m = 0.0;
+  double cov_xx = 0.0;
+  double cov_xy = 0.0;
+  double cov_yy = 0.0;
   double error_m = 0.0;
   bool has_fix = false;
   int truth_level = 0;

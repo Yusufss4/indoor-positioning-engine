@@ -26,6 +26,13 @@ std::vector<EngineConfig> preset_configs(const BenchmarkOptions& opts) {
   }
   return configs;
 }
+
+double mean_or(const std::vector<double>& values, double fallback) {
+  if (values.empty()) return fallback;
+  double sum = 0.0;
+  for (double v : values) sum += v;
+  return sum / static_cast<double>(values.size());
+}
 }  // namespace
 
 std::vector<BenchmarkCase> run_benchmark(const std::string& scenario_dir, const BenchmarkOptions& opts) {
@@ -81,10 +88,12 @@ std::vector<BenchmarkCase> run_benchmark(const std::string& scenario_dir, const 
       c.floor_accuracy = 0.0;
       c.floor_switch_latency_s = 0.0;
       int converged = 0, with_changes = 0;
+      std::vector<double> coverages;
       for (const auto& jr : job_results) {
         if (jr.scenario != si) continue;
         const Metrics& m = jr.per_preset[pi];
         ++c.runs;
+        if (m.coverage95 >= 0.0) coverages.push_back(m.coverage95);
         c.mean_m += m.mean_m;
         c.cep50_m += m.cep50_m;
         c.cep95_m += m.cep95_m;
@@ -111,6 +120,7 @@ std::vector<BenchmarkCase> run_benchmark(const std::string& scenario_dir, const 
       c.floor_accuracy /= n;
       c.floor_switch_latency_s = with_changes ? c.floor_switch_latency_s / with_changes : -1.0;
       c.convergence_s = converged ? c.convergence_s / converged : -1.0;
+      c.coverage95 = mean_or(coverages, -1.0);
       cases.push_back(c);
     }
   }
@@ -166,7 +176,7 @@ std::vector<BenchmarkCase> run_trace_benchmark(const std::string& manifest_path,
       c.scenario = group;
       c.preset = opts.presets[pi];
       c.recorded = true;
-      std::vector<double> means, cep50s, cep95s;
+      std::vector<double> means, cep50s, cep95s, coverages;
       int converged = 0;
       for (std::size_t i = 0; i < entries.size(); ++i) {
         if (group != "all" && entries[i].group != group) continue;
@@ -174,6 +184,7 @@ std::vector<BenchmarkCase> run_trace_benchmark(const std::string& manifest_path,
         // A walk shorter than the warm-up has no scored samples.
         if (m.samples == 0) continue;
         ++c.runs;
+        if (m.coverage95 >= 0.0) coverages.push_back(m.coverage95);
         means.push_back(m.mean_m);
         cep50s.push_back(m.cep50_m);
         cep95s.push_back(m.cep95_m);
@@ -193,6 +204,8 @@ std::vector<BenchmarkCase> run_trace_benchmark(const std::string& manifest_path,
       c.median_mean_m = percentile(means, 0.5);
       c.median_cep50_m = percentile(cep50s, 0.5);
       c.median_cep95_m = percentile(cep95s, 0.5);
+      c.coverage95 = mean_or(coverages, -1.0);
+      c.median_coverage95 = coverages.empty() ? -1.0 : percentile(coverages, 0.5);
       c.availability /= n;
       c.compute_us_per_update /= n;
       c.convergence_s = converged ? c.convergence_s / converged : -1.0;
@@ -281,6 +294,7 @@ std::string benchmark_to_json(const std::vector<BenchmarkCase>& results, const B
              {"availability", round3(c.availability)},
              {"convergence_s", round3(c.convergence_s)},
              {"unconverged_runs", c.unconverged_runs}};
+    if (c.coverage95 >= 0.0) entry["coverage95"] = round3(c.coverage95);
     if (c.multi_level) {
       entry["floor_accuracy"] = round3(c.floor_accuracy);
       entry["floor_switch_latency_s"] = round3(c.floor_switch_latency_s);
@@ -290,6 +304,7 @@ std::string benchmark_to_json(const std::vector<BenchmarkCase>& results, const B
       entry["median_mean_m"] = round3(c.median_mean_m);
       entry["median_cep50_m"] = round3(c.median_cep50_m);
       entry["median_cep95_m"] = round3(c.median_cep95_m);
+      if (c.median_coverage95 >= 0.0) entry["median_coverage95"] = round3(c.median_coverage95);
     }
   }
   return j.dump(indent);
@@ -297,22 +312,31 @@ std::string benchmark_to_json(const std::vector<BenchmarkCase>& results, const B
 
 std::string benchmark_to_markdown(const std::vector<BenchmarkCase>& results) {
   std::ostringstream out;
+  const auto share = [](double v, char* buf, std::size_t size) {
+    if (v < 0.0) {
+      std::snprintf(buf, size, "-");
+    } else {
+      std::snprintf(buf, size, "%.0f%%", 100.0 * v);
+    }
+  };
   if (!results.empty() && results.front().recorded) {
     out << "| Group | Filter | Traces | Median CEP50 [m] | Median CEP95 [m] | Mean CEP50 [m] | Mean CEP95 [m] | "
-           "Converged | us/update |\n";
-    out << "|---|---|---:|---:|---:|---:|---:|---:|---:|\n";
+           "Median coverage95 | Converged | us/update |\n";
+    out << "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|\n";
     char buf[320];
     for (const auto& c : results) {
-      std::snprintf(buf, sizeof(buf), "| %s | %s | %d | %.2f | %.2f | %.2f | %.2f | %d/%d | %.1f |\n",
+      char coverage[16];
+      share(c.median_coverage95, coverage, sizeof(coverage));
+      std::snprintf(buf, sizeof(buf), "| %s | %s | %d | %.2f | %.2f | %.2f | %.2f | %s | %d/%d | %.1f |\n",
                     c.scenario.c_str(), c.preset.c_str(), c.runs, c.median_cep50_m, c.median_cep95_m, c.cep50_m,
-                    c.cep95_m, c.runs - c.unconverged_runs, c.runs, c.compute_us_per_update);
+                    c.cep95_m, coverage, c.runs - c.unconverged_runs, c.runs, c.compute_us_per_update);
       out << buf;
     }
     return out.str();
   }
-  out << "| Scenario | Filter | Mean [m] | CEP50 [m] | CEP95 [m] | Converged in [s] | Floor ok | Floor switch [s] | "
-         "us/update |\n";
-  out << "|---|---|---:|---:|---:|---:|---:|---:|---:|\n";
+  out << "| Scenario | Filter | Mean [m] | CEP50 [m] | CEP95 [m] | Coverage95 | Converged in [s] | Floor ok | "
+         "Floor switch [s] | us/update |\n";
+  out << "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|\n";
   char buf[320];
   for (const auto& c : results) {
     char conv[32];
@@ -330,8 +354,10 @@ std::string benchmark_to_markdown(const std::vector<BenchmarkCase>& results) {
         std::snprintf(floor_switch, sizeof(floor_switch), "%.1f", c.floor_switch_latency_s);
       }
     }
-    std::snprintf(buf, sizeof(buf), "| %s | %s | %.2f | %.2f | %.2f | %s | %s | %s | %.1f |\n", c.scenario.c_str(),
-                  c.preset.c_str(), c.mean_m, c.cep50_m, c.cep95_m, conv, floor_ok, floor_switch,
+    char coverage[16];
+    share(c.coverage95, coverage, sizeof(coverage));
+    std::snprintf(buf, sizeof(buf), "| %s | %s | %.2f | %.2f | %.2f | %s | %s | %s | %s | %.1f |\n", c.scenario.c_str(),
+                  c.preset.c_str(), c.mean_m, c.cep50_m, c.cep95_m, coverage, conv, floor_ok, floor_switch,
                   c.compute_us_per_update);
     out << buf;
   }

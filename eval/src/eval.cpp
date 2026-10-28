@@ -22,8 +22,8 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
     integrity_threshold_db, integrity_alpha, integrity_min_samples, integrity_max_sigma_m, resample_ess_ratio,
     roughening_m, recovery, recovery_alpha_slow, recovery_alpha_fast, recovery_max_fraction, init_proposal,
     init_proposal_fraction, init_window_s, recovery_proposal, proposal_history, proposal_max_age_s, proposal_level_jump,
-    proposal_ring_scale, level_change_prob_step, level_change_prob_baro, use_barometer, baro_update_interval_s,
-    baro_sigma_m, baro_outlier_prob, baro_offset_sigma_m, baro_offset_walk_m)
+    proposal_ring_scale, scan_tempering, level_change_prob_step, level_change_prob_baro, use_barometer,
+    baro_update_interval_s, baro_sigma_m, baro_outlier_prob, baro_offset_sigma_m, baro_offset_walk_m)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(EkfConfig, step_length_sigma_rel, step_length_sigma_abs,
                                                 heading_sigma_deg, init_pos_sigma, init_heading_sigma_deg, rssi_min_dbm,
                                                 rssi_gate_chi2, heading_gate_chi2, init_min_beacons, init_window_s,
@@ -124,14 +124,27 @@ Metrics compute_metrics(const std::vector<EstimateRecord>& records, double warmu
     }
   }
 
-  std::vector<double> errors;
+  std::vector<double> errors, nees;
   std::size_t evaluated = 0, with_fix = 0;
   for (const auto& r : records) {
     if (r.t - t0 < warmup_s) continue;
     ++evaluated;
     if (!r.has_fix) continue;
     ++with_fix;
-    if (r.est_level == r.truth_level) errors.push_back(r.error_m);
+    if (r.est_level != r.truth_level) continue;
+    errors.push_back(r.error_m);
+    const double det = r.cov_xx * r.cov_yy - r.cov_xy * r.cov_xy;
+    if (det > 0.0) {
+      const double dx = r.estimate.x - r.truth.x;
+      const double dy = r.estimate.y - r.truth.y;
+      nees.push_back((r.cov_yy * dx * dx - 2.0 * r.cov_xy * dx * dy + r.cov_xx * dy * dy) / det);
+    }
+  }
+  if (!nees.empty()) {
+    constexpr double chi2_2dof_95 = 5.991;
+    const auto inside = std::count_if(nees.begin(), nees.end(), [](double v) { return v <= chi2_2dof_95; });
+    m.coverage95 = static_cast<double>(inside) / static_cast<double>(nees.size());
+    m.nees_median = percentile(nees, 0.5);
   }
   m.samples = evaluated;
   m.availability = evaluated ? static_cast<double>(with_fix) / static_cast<double>(evaluated) : 0.0;
@@ -207,6 +220,7 @@ ReplayResult replay(const Venue& venue, const Trace& trace, const EngineConfig& 
   clock::duration busy{};
   std::uint64_t updates = 0;
   Estimate last_fix;
+  std::vector<RssiReading> scan;
   std::size_t i = 0, b = 0, p = 0, g = 0, truth_seen = 0;
   while (g < trace.truth.size()) {
     const double ti = i < trace.imu.size() ? trace.imu[i].t : 1e300;
@@ -220,10 +234,19 @@ ReplayResult replay(const Venue& venue, const Trace& trace, const EngineConfig& 
       busy += clock::now() - start;
       ++updates;
     } else if (tb <= tp && tb <= tg) {
+      const std::size_t end = scan_end(trace.ble, b);
+      if (trace.ble[b].scan != 0) {
+        scan.clear();
+        for (std::size_t k = b; k < end; ++k) scan.push_back({ble_index[k], trace.ble[k].rssi});
+      }
       const auto start = clock::now();
-      engine.on_ble(trace.ble[b].t, ble_index[b], trace.ble[b].rssi);
+      if (trace.ble[b].scan != 0) {
+        engine.on_scan(trace.ble[b].t, scan);
+      } else {
+        engine.on_ble(trace.ble[b].t, ble_index[b], trace.ble[b].rssi);
+      }
       busy += clock::now() - start;
-      ++b;
+      b = end;
       ++updates;
     } else if (tp <= tg) {
       const auto start = clock::now();
@@ -244,6 +267,9 @@ ReplayResult replay(const Venue& venue, const Trace& trace, const EngineConfig& 
       if (rec.has_fix) {
         rec.estimate = last_fix.pos;
         rec.sigma_m = last_fix.sigma_radius();
+        rec.cov_xx = last_fix.cov_xx;
+        rec.cov_xy = last_fix.cov_xy;
+        rec.cov_yy = last_fix.cov_yy;
         rec.error_m = distance(last_fix.pos, truth.pos);
         rec.est_level = last_fix.level;
       }
@@ -288,17 +314,20 @@ std::string metrics_to_json(const Metrics& m, int indent) {
                             {"compute_us_per_update", m.compute_us_per_update},
                             {"floor_accuracy", m.floor_accuracy},
                             {"floor_switch_latency_s", m.floor_switch_latency_s},
-                            {"level_changes", m.level_changes}};
+                            {"level_changes", m.level_changes},
+                            {"coverage95", m.coverage95},
+                            {"nees_median", m.nees_median}};
   return j.dump(indent);
 }
 
 void write_estimates_csv(const std::string& path, const ReplayResult& result) {
   std::FILE* f = std::fopen(path.c_str(), "w");
   if (!f) throw std::runtime_error("cannot write " + path);
-  std::fprintf(f, "t,truth_x,truth_y,est_x,est_y,sigma_m,error_m,has_fix,truth_level,est_level\n");
+  std::fprintf(f, "t,truth_x,truth_y,est_x,est_y,sigma_m,error_m,has_fix,truth_level,est_level,cov_xx,cov_xy,cov_yy\n");
   for (const auto& r : result.records) {
-    std::fprintf(f, "%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%d,%d,%d\n", r.t, r.truth.x, r.truth.y, r.estimate.x,
-                 r.estimate.y, r.sigma_m, r.error_m, r.has_fix ? 1 : 0, r.truth_level, r.est_level);
+    std::fprintf(f, "%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%d,%d,%d,%.6g,%.6g,%.6g\n", r.t, r.truth.x, r.truth.y,
+                 r.estimate.x, r.estimate.y, r.sigma_m, r.error_m, r.has_fix ? 1 : 0, r.truth_level, r.est_level,
+                 r.cov_xx, r.cov_xy, r.cov_yy);
   }
   std::fclose(f);
 }

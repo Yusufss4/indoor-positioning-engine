@@ -275,6 +275,77 @@ TEST(ParticleFilter, ProposalSettingsAreInertWhenDisabled) {
   }
 }
 
+namespace {
+
+/// One scan per round: every beacon as heard from `pos`, each reading repeated `copies` times.
+void feed_scans(ParticleFilter& pf, const Venue& v, Vec2 pos, int rounds, int copies = 1) {
+  const RssiModel model(v);
+  std::vector<RssiReading> scan;
+  for (int r = 0; r < rounds; ++r) {
+    scan.clear();
+    for (std::size_t i = 0; i < v.beacons().size(); ++i) {
+      for (int c = 0; c < copies; ++c) scan.push_back({i, model.expected_rssi(v.beacons()[i], pos) + 2.0 * (c % 2)});
+    }
+    pf.on_rssi_scan(r * 2.0, scan);
+  }
+}
+
+}  // namespace
+
+TEST(ParticleFilter, ScanOfOneReadingMatchesSinglePacket) {
+  const Venue v = test::two_room_venue();
+  auto cfg = test_config();
+  cfg.recovery = true;
+  cfg.estimate_rssi_offset = true;
+  ParticleFilter a(v, cfg, {});
+  ParticleFilter b(v, cfg, {});
+  const RssiModel model(v);
+  double t = 0.0;
+  for (int r = 0; r < 30; ++r) {
+    for (std::size_t i = 0; i < v.beacons().size(); ++i) {
+      const double rssi = model.expected_rssi(v.beacons()[i], {15.0, 6.0}) + (r % 3 == 0 ? 6.0 : 0.0);
+      a.on_rssi(t, i, rssi);
+      const RssiReading reading{i, rssi};
+      b.on_rssi_scan(t, std::span<const RssiReading>(&reading, 1));
+      t += 0.05;
+    }
+  }
+  ASSERT_EQ(a.particles().size(), b.particles().size());
+  for (std::size_t i = 0; i < a.particles().size(); ++i) {
+    EXPECT_EQ(a.particles()[i].pos.x, b.particles()[i].pos.x);
+    EXPECT_EQ(a.particles()[i].rssi_offset, b.particles()[i].rssi_offset);
+    EXPECT_EQ(a.particles()[i].weight, b.particles()[i].weight);
+  }
+}
+
+TEST(ParticleFilter, FullyTemperedScanCountsDuplicatesOnce) {
+  // Virtual access points: one radio reported under several ids. With
+  // scan_tempering = 1 a scan weighs the same however often it repeats itself.
+  const Venue v = test::two_room_venue();
+  auto cfg = test_config();
+  cfg.scan_tempering = 1.0;
+  ParticleFilter once(v, cfg, {});
+  ParticleFilter thrice(v, cfg, {});
+  feed_scans(once, v, {15.0, 6.0}, 1, 2);
+  feed_scans(thrice, v, {15.0, 6.0}, 1, 6);
+  for (std::size_t i = 0; i < once.particles().size(); ++i) {
+    EXPECT_NEAR(once.particles()[i].weight, thrice.particles()[i].weight, 1e-12);
+  }
+  EXPECT_NEAR(once.estimate().pos.x, thrice.estimate().pos.x, 1e-9);
+  EXPECT_NEAR(once.estimate().sigma_radius(), thrice.estimate().sigma_radius(), 1e-9);
+}
+
+TEST(ParticleFilter, TemperingKeepsTheCloudWider) {
+  const Venue v = test::two_room_venue();
+  auto cfg = test_config();
+  ParticleFilter independent(v, cfg, {});
+  cfg.scan_tempering = 1.0;
+  ParticleFilter tempered(v, cfg, {});
+  feed_scans(independent, v, {15.0, 6.0}, 3);
+  feed_scans(tempered, v, {15.0, 6.0}, 3);
+  EXPECT_GT(tempered.estimate().sigma_radius(), 1.25 * independent.estimate().sigma_radius());
+}
+
 TEST(ParticleFilter, IntegrityMonitorExcludesBiasedBeacon) {
   const Venue v = test::two_room_venue();
   ParticleFilter pf(v, test_config(), {});

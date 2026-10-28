@@ -103,13 +103,17 @@ chosen on half of the rest, and results are reported on the other half (109 walk
 | Filter | Median CEP50 / CEP95 over walks [m] |
 |---|---|
 | PF, default | 11.7 / 20.5 |
-| PF, [Wi-Fi config](data/configs/msil_wifi.json) (sigma 8 dB, 5k particles, beacon-driven proposal) | **7.0** / 11.1 |
-| EKF | 7.8 / **10.4** |
+| PF, [Wi-Fi config](data/configs/msil_wifi.json) (sigma 8 dB, 5k particles, beacon-driven proposal) | 7.0 / 11.1 |
+| PF, Wi-Fi config, one update per Wi-Fi scan | 7.1 / **9.5** |
+| EKF | 7.8 / 10.4 |
 | Weighted centroid | 8.4 / 14.9 |
 
 Real errors are about ten times the simulated office's. The particle filter only matches the EKF once
 virtual access points (one radio, up to six BSSIDs) are merged and the start is seeded from the
-closest-looking access point. Method, per-floor numbers and failure modes: [docs/real_data.md](docs/real_data.md).
+closest-looking access point, and it pulls ahead on CEP95 once each Wi-Fi scan is applied as one update
+instead of 40 separate ones. Its uncertainty is still far too small: a new calibration metric
+(`coverage95`) shows the 95% ellipse holding the truth for under a fifth of the fixes. Method, per-floor
+numbers and failure modes: [docs/real_data.md](docs/real_data.md).
 Three of the held-out walks play in the [live demo](https://yusufss4.github.io/indoor-positioning-engine/)
 under "Real recordings", over the mall's floor plan.
 
@@ -129,8 +133,8 @@ under "Real recordings", over the mall's floor plan.
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
-ctest --test-dir build --output-on-failure          # 91 unit tests + accuracy regression
-                                                     # (+ real-data regression once datasets/msil/out exists)
+ctest --test-dir build --output-on-failure          # 98 unit tests + accuracy regression
+                                                     # (+ real-data regression once datasets/msil/out_scans exists)
 
 # simulate a scenario and replay it through a filter
 ./build/tools/ipe-sim --scenario data/scenarios/office_nominal.json --out /tmp/trace.csv
