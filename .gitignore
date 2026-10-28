@@ -1,0 +1,10 @@
+build*/
+out/
+.cache/
+compile_commands.json
+__pycache__/
+*.pyc
+.venv/
+viz/output/
+web/dist/
+.DS_Store
