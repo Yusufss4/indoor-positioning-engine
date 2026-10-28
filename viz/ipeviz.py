@@ -35,9 +35,16 @@ class Venue:
     beacons: list[dict]
 
     @staticmethod
-    def load(path: str | Path) -> "Venue":
+    def load(path: str | Path, ordinal: int | None = None) -> "Venue":
+        """Loads one floor. Multi-level venues default to their lowest level."""
         j = json.loads(Path(path).read_text())
-        return Venue(j.get("name", "venue"), tuple(j["bounds"]), [tuple(w) for w in j.get("walls", [])], j["beacons"])
+        walls, beacons = j.get("walls", []), j["beacons"]
+        if "levels" in j:
+            levels = sorted(j["levels"], key=lambda lv: lv["ordinal"])
+            level = next((lv for lv in levels if lv["ordinal"] == ordinal), levels[0])
+            walls = level.get("walls", [])
+            beacons = [b for b in beacons if b.get("level", levels[0]["ordinal"]) == level["ordinal"]]
+        return Venue(j.get("name", "venue"), tuple(j["bounds"]), [tuple(w) for w in walls], beacons)
 
 
 @dataclass

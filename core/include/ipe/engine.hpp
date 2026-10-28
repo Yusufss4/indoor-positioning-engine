@@ -4,6 +4,7 @@
 #include <string>
 #include <string_view>
 
+#include "ipe/baro.hpp"
 #include "ipe/ekf.hpp"
 #include "ipe/filter.hpp"
 #include "ipe/particle_filter.hpp"
@@ -24,15 +25,16 @@ struct EngineConfig {
   FilterKind filter = FilterKind::ParticleFilter;
   PdrConfig pdr;
   RssiModelConfig rssi;
+  BaroConfig baro;
   ParticleFilterConfig pf;
   EkfConfig ekf;
   WclConfig wcl;
   double mag_heading_sigma_deg = 12.0;
 };
 
-/// Platform-independent entry point: feed raw IMU samples and BLE
-/// advertisements in timestamp order, read back the fused estimate. This is
-/// the surface a mobile SDK or the WebAssembly module would wrap.
+/// Platform-independent entry point: feed raw IMU samples, BLE advertisements
+/// and (optionally) barometer readings in timestamp order, read back the fused
+/// estimate. This is the surface a mobile SDK or the WebAssembly module would wrap.
 class PositioningEngine {
  public:
   PositioningEngine(const Venue& venue, EngineConfig cfg);
@@ -40,6 +42,7 @@ class PositioningEngine {
   void on_imu(const ImuSample& sample);
   void on_ble(double t, std::string_view beacon_id, double rssi);
   void on_ble(double t, std::size_t beacon_index, double rssi);
+  void on_pressure(double t, double hpa);
 
   [[nodiscard]] Estimate estimate() const { return filter_->estimate(); }
   [[nodiscard]] const Filter& filter() const { return *filter_; }

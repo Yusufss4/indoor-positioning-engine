@@ -31,12 +31,16 @@ void symmetrize(Mat3& a) {
 
 }  // namespace
 
-Ekf::Ekf(const Venue& venue, EkfConfig cfg, RssiModelConfig rssi_cfg)
-    : venue_(&venue), cfg_(cfg), rssi_model_(venue, [&] {
-        // The EKF is map-free by design.
-        rssi_cfg.wall_aware = false;
-        return rssi_cfg;
-      }()) {}
+Ekf::Ekf(const Venue& venue, EkfConfig cfg, RssiModelConfig rssi_cfg, BaroConfig baro_cfg)
+    : venue_(&venue),
+      cfg_(cfg),
+      rssi_model_(venue,
+                  [&] {
+                    // The EKF is map-free by design.
+                    rssi_cfg.wall_aware = false;
+                    return rssi_cfg;
+                  }()),
+      altimeter_(baro_cfg) {}
 
 void Ekf::try_initialize(double t) {
   std::erase_if(pending_, [&](const Pending& p) { return t - p.t > cfg_.init_window_s; });
@@ -54,10 +58,27 @@ void Ekf::try_initialize(double t) {
   for (int c : count) distinct += c > 0 ? 1 : 0;
   if (distinct < cfg_.init_min_beacons) return;
 
+  if (venue_->multi_level()) {
+    // Level vote: inverse-square weights of the apparent beacon distances.
+    std::vector<double> vote(static_cast<std::size_t>(venue_->level_count()), 0.0);
+    for (std::size_t i = 0; i < n_beacons; ++i) {
+      if (count[i] == 0) continue;
+      const auto& b = venue_->beacons()[i];
+      const double d = std::max(1.0, rssi_model_.distance_from_rssi(b, sum[i] / count[i]));
+      vote[static_cast<std::size_t>(b.level)] += 1.0 / (d * d);
+    }
+    level_ = static_cast<int>(std::max_element(vote.begin(), vote.end()) - vote.begin());
+    if (altimeter_.initialized()) {
+      baro_anchor_m_ = venue_->level(level_).elevation_m - altimeter_.altitude();
+      baro_anchored_ = true;
+    }
+  }
+
   double wx = 0.0, wy = 0.0, wsum = 0.0;
   for (std::size_t i = 0; i < n_beacons; ++i) {
     if (count[i] == 0) continue;
     const auto& b = venue_->beacons()[i];
+    if (b.level != level_) continue;
     const double d = std::max(1.0, rssi_model_.distance_from_rssi(b, sum[i] / count[i]));
     const double w = 1.0 / (d * d);
     wx += w * b.pos.x;
@@ -140,8 +161,14 @@ void Ekf::on_rssi(double t, std::size_t beacon_index, double rssi) {
   const Beacon& b = venue_->beacons()[beacon_index];
   const double dx = x_[0] - b.pos.x;
   const double dy = x_[1] - b.pos.y;
-  const double d2 = std::max(dx * dx + dy * dy, 1.0);
-  const double predicted = rssi_model_.expected_rssi_free_space(b, std::sqrt(d2));
+  double d2 = std::max(dx * dx + dy * dy, 1.0);
+  double slab_loss = 0.0;
+  if (b.level != level_) {
+    const double dz = venue_->level(b.level).elevation_m - venue_->level(level_).elevation_m;
+    d2 += dz * dz;
+    slab_loss = venue_->floor_attenuation_db() * std::abs(b.level - level_);
+  }
+  const double predicted = rssi_model_.expected_rssi_free_space(b, std::sqrt(d2)) - slab_loss;
   const double k = -10.0 * b.path_loss_exp / std::numbers::ln10;
   const std::array<double, 3> H = {k * dx / d2, k * dy / d2, 0.0};
   const double sigma = rssi_model_.config().sigma_db;
@@ -159,10 +186,24 @@ void Ekf::on_rssi(double t, std::size_t beacon_index, double rssi) {
   }
 }
 
+void Ekf::on_pressure(double t, double hpa) {
+  last_t_ = t;
+  const double alt = altimeter_.process(t, hpa);
+  if (!venue_->multi_level() || !initialized_) return;
+  if (!baro_anchored_) {
+    baro_anchor_m_ = venue_->level(level_).elevation_m - alt;
+    baro_anchored_ = true;
+    return;
+  }
+  level_ = venue_->nearest_level(alt + baro_anchor_m_);
+}
+
 Estimate Ekf::estimate() const {
   Estimate e;
   e.t = last_t_;
   e.valid = initialized_;
+  e.level = level_;
+  e.z = venue_->level_count() > 0 ? venue_->level(level_).elevation_m : 0.0;
   e.pos = {x_[0], x_[1]};
   e.heading = x_[2];
   e.cov_xx = P_[0];

@@ -7,10 +7,17 @@
 
 namespace ipe {
 
-ParticleFilter::ParticleFilter(const Venue& venue, ParticleFilterConfig cfg, RssiModelConfig rssi_cfg)
-    : venue_(&venue), cfg_(cfg), rssi_model_(venue, rssi_cfg), rng_(cfg.seed) {
+ParticleFilter::ParticleFilter(const Venue& venue, ParticleFilterConfig cfg, RssiModelConfig rssi_cfg,
+                               BaroConfig baro_cfg)
+    : venue_(&venue),
+      cfg_(cfg),
+      rssi_model_(venue, rssi_cfg),
+      rng_(cfg.seed),
+      multi_level_(venue.multi_level()),
+      altimeter_(baro_cfg) {
   cfg_.num_particles = std::max(cfg_.num_particles, 1);
   health_.resize(venue.beacons().size());
+  level_weight_.resize(static_cast<std::size_t>(std::max(venue.level_count(), 1)));
   initialize_uniform();
 }
 
@@ -25,7 +32,8 @@ bool ParticleFilter::check_beacon(std::size_t beacon_index, double rssi) {
   if (estimate_.sigma_radius() > cfg_.integrity_max_sigma_m) return !h.excluded;
 
   const Beacon& beacon = venue_->beacons()[beacon_index];
-  const double residual = rssi - (rssi_model_.expected_rssi(beacon, estimate_.pos) + mean_rssi_offset_);
+  const double residual =
+      rssi - (rssi_model_.expected_rssi(beacon, estimate_.pos, estimate_.level) + mean_rssi_offset_);
   h.mean_residual = h.samples == 0 ? residual : h.mean_residual + cfg_.integrity_alpha * (residual - h.mean_residual);
   ++h.samples;
 
@@ -48,7 +56,25 @@ Particle ParticleFilter::sample_uniform_particle() {
   p.heading = rng_.uniform(-std::numbers::pi, std::numbers::pi);
   p.step_scale = std::max(0.5, rng_.normal(1.0, cfg_.step_scale_sigma));
   p.rssi_offset = cfg_.estimate_rssi_offset ? rng_.normal(0.0, cfg_.rssi_offset_sigma) : 0.0;
+  if (multi_level_) {
+    p.level = std::min(static_cast<int>(rng_.uniform() * venue_->level_count()), venue_->level_count() - 1);
+    // Absolute altitude is unknown, so a fresh hypothesis is made consistent with the current reading.
+    if (baro_ready_) {
+      p.baro_offset = altimeter_.altitude() - elevation(p.level) + rng_.normal(0.0, cfg_.baro_offset_sigma_m);
+    }
+  }
   return p;
+}
+
+void ParticleFilter::maybe_change_level(Particle& p, double prob) {
+  const Connector* c = venue_->connector_at(p.pos, p.level);
+  if (!c || !rng_.bernoulli(prob)) return;
+  // Connector levels are sorted; move to a neighbour in that list.
+  const auto it = std::find(c->levels.begin(), c->levels.end(), p.level);
+  const bool has_up = it + 1 != c->levels.end();
+  const bool has_down = it != c->levels.begin();
+  const bool up = has_up && (!has_down || rng_.bernoulli(0.5));
+  p.level = up ? *(it + 1) : *(it - 1);
 }
 
 void ParticleFilter::initialize_uniform() {
@@ -70,11 +96,12 @@ void ParticleFilter::on_step(const StepEvent& step) {
     const double len = std::max(0.0, step.length * p.step_scale + rng_.normal(0.0, cfg_.step_length_sigma));
     const Vec2 next = p.pos + Vec2{std::cos(p.heading), std::sin(p.heading)} * len;
 
-    if (!venue_->bounds().contains(next) || (cfg_.wall_constraint && venue_->crosses_wall(p.pos, next))) {
+    if (!venue_->bounds().contains(next) || (cfg_.wall_constraint && venue_->crosses_wall(p.pos, next, p.level))) {
       p.weight = 0.0;
       continue;
     }
     p.pos = next;
+    if (multi_level_) maybe_change_level(p, cfg_.level_change_prob_step);
   }
   normalize_or_recover();
   resample_if_needed();
@@ -109,7 +136,7 @@ void ParticleFilter::on_rssi(double t, std::size_t beacon_index, double rssi) {
       loglik_[i] = -std::numeric_limits<double>::infinity();
       continue;
     }
-    const double expected = rssi_model_.expected_rssi(beacon, p.pos) + p.rssi_offset;
+    const double expected = rssi_model_.expected_rssi(beacon, p.pos, p.level) + p.rssi_offset;
     loglik_[i] = rssi_model_.log_likelihood(rssi - expected);
     max_ll = std::max(max_ll, loglik_[i]);
   }
@@ -125,6 +152,41 @@ void ParticleFilter::on_rssi(double t, std::size_t beacon_index, double rssi) {
     w_fast_ += cfg_.recovery_alpha_fast * (w_avg - w_fast_);
   }
 
+  apply_log_likelihoods(loglik_);
+  normalize_or_recover();
+  resample_if_needed();
+  update_estimate(t);
+}
+
+void ParticleFilter::on_pressure(double t, double hpa) {
+  const double alt = altimeter_.process(t, hpa);
+  if (!multi_level_ || !cfg_.use_barometer) return;
+  if (!baro_ready_) {
+    for (auto& p : particles_) p.baro_offset = alt - elevation(p.level) + rng_.normal(0.0, cfg_.baro_offset_sigma_m);
+    baro_ready_ = true;
+    last_baro_update_t_ = t;
+    return;
+  }
+  if (t - last_baro_update_t_ < cfg_.baro_update_interval_s) return;
+  last_baro_update_t_ = t;
+
+  // Prediction: lift rides produce no steps, so connector transitions are
+  // also proposed here; the offset random walk absorbs weather drift.
+  for (auto& p : particles_) {
+    if (p.weight <= 0.0) continue;
+    maybe_change_level(p, cfg_.level_change_prob_baro);
+    p.baro_offset += rng_.normal(0.0, cfg_.baro_offset_walk_m);
+  }
+
+  loglik_.resize(particles_.size());
+  const double s = cfg_.baro_sigma_m;
+  const double norm = 1.0 / (s * std::sqrt(2.0 * std::numbers::pi));
+  const double outlier = cfg_.baro_outlier_prob / 20.0;  // uniform over a 20 m altitude span
+  for (std::size_t i = 0; i < particles_.size(); ++i) {
+    const auto& p = particles_[i];
+    const double z = (alt - p.baro_offset - elevation(p.level)) / s;
+    loglik_[i] = std::log((1.0 - cfg_.baro_outlier_prob) * norm * std::exp(-0.5 * z * z) + outlier);
+  }
   apply_log_likelihoods(loglik_);
   normalize_or_recover();
   resample_if_needed();
@@ -158,6 +220,10 @@ void ParticleFilter::normalize_or_recover() {
         Vec2 pos = estimate_.pos + Vec2{rng_.normal(0.0, 3.0), rng_.normal(0.0, 3.0)};
         if (venue_->bounds().contains(pos)) fresh.pos = pos;
         fresh.heading = wrap_angle(estimate_.heading + rng_.normal(0.0, 0.5));
+        if (multi_level_) {
+          fresh.level = estimate_.level;
+          if (baro_ready_) fresh.baro_offset = altimeter_.altitude() - elevation(fresh.level);
+        }
       }
       p = fresh;
       p.weight = 1.0 / n;
@@ -200,7 +266,7 @@ void ParticleFilter::resample_if_needed() {
       p = sample_uniform_particle();
     } else {
       const Vec2 jittered = p.pos + Vec2{rng_.normal(0.0, cfg_.roughening_m), rng_.normal(0.0, cfg_.roughening_m)};
-      if (venue_->bounds().contains(jittered) && !venue_->crosses_wall(p.pos, jittered)) p.pos = jittered;
+      if (venue_->bounds().contains(jittered) && !venue_->crosses_wall(p.pos, jittered, p.level)) p.pos = jittered;
     }
     p.weight = step;
   }
@@ -208,22 +274,47 @@ void ParticleFilter::resample_if_needed() {
 }
 
 void ParticleFilter::update_estimate(double t) {
+  if (multi_level_) {
+    // The reported level is the weighted mode; position statistics use only
+    // the particles on that level so a split cloud does not average floors.
+    std::fill(level_weight_.begin(), level_weight_.end(), 0.0);
+    for (const auto& p : particles_) level_weight_[static_cast<std::size_t>(p.level)] += p.weight;
+    estimate_.level =
+        static_cast<int>(std::max_element(level_weight_.begin(), level_weight_.end()) - level_weight_.begin());
+    estimate_.z = elevation(estimate_.level);
+  }
+  const int level = estimate_.level;
+  const double level_w = multi_level_ ? level_weight_[static_cast<std::size_t>(level)] : 1.0;
+  const auto counts = [&](const Particle& p) { return !multi_level_ || p.level == level; };
+
   double sx = 0.0, sy = 0.0, ss = 0.0, sc = 0.0, so = 0.0;
   for (const auto& p : particles_) {
+    if (!counts(p)) continue;
     sx += p.weight * p.pos.x;
     sy += p.weight * p.pos.y;
     ss += p.weight * std::sin(p.heading);
     sc += p.weight * std::cos(p.heading);
     so += p.weight * p.rssi_offset;
   }
+  if (multi_level_ && level_w > 0.0) {
+    sx /= level_w;
+    sy /= level_w;
+    so /= level_w;
+  }
   mean_rssi_offset_ = so;
   double cxx = 0.0, cxy = 0.0, cyy = 0.0;
   for (const auto& p : particles_) {
+    if (!counts(p)) continue;
     const double dx = p.pos.x - sx;
     const double dy = p.pos.y - sy;
     cxx += p.weight * dx * dx;
     cxy += p.weight * dx * dy;
     cyy += p.weight * dy * dy;
+  }
+  if (multi_level_ && level_w > 0.0) {
+    cxx /= level_w;
+    cxy /= level_w;
+    cyy /= level_w;
   }
   estimate_.t = t;
   estimate_.pos = {sx, sy};

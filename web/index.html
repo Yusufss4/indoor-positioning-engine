@@ -9,21 +9,30 @@
 <body>
   <header>
     <h1>Indoor Positioning Engine</h1>
-    <p>The C++ engine compiled to WebAssembly: a simulated walker, BLE beacons and phone IMU, fused by a
+    <p>The C++ engine compiled to WebAssembly: a simulated walker, BLE beacons, phone IMU and barometer, fused by a
       particle filter (red), an EKF (blue) and a weighted-centroid baseline (green). Everything runs in your browser.
+      Pick a two-floor scenario and switch to 3D to watch the floor estimate.
       <a href="https://github.com/Yusufss4/indoor-positioning-engine">Source on GitHub</a></p>
   </header>
 
   <section class="controls">
     <label>Scenario
       <select id="scenario">
-        <option value="office_nominal">office_nominal</option>
-        <option value="office_nlos_heavy">office_nlos_heavy</option>
-        <option value="office_device_offset">office_device_offset</option>
-        <option value="office_mag_disturbance">office_mag_disturbance</option>
-        <option value="office_field_issue">office_field_issue</option>
-        <option value="office_step_scale">office_step_scale</option>
-        <option value="airport_hall_sparse">airport_hall_sparse</option>
+        <optgroup label="One floor">
+          <option value="office_nominal">office_nominal</option>
+          <option value="office_nlos_heavy">office_nlos_heavy</option>
+          <option value="office_device_offset">office_device_offset</option>
+          <option value="office_mag_disturbance">office_mag_disturbance</option>
+          <option value="office_field_issue">office_field_issue</option>
+          <option value="office_step_scale">office_step_scale</option>
+          <option value="airport_hall_sparse">airport_hall_sparse</option>
+        </optgroup>
+        <optgroup label="Two floors">
+          <option value="office_stairs_up_down">office_stairs_up_down</option>
+          <option value="office_elevator">office_elevator</option>
+          <option value="office_floor_bleed">office_floor_bleed</option>
+          <option value="baro_drift_long">baro_drift_long</option>
+        </optgroup>
       </select>
     </label>
     <label>Speed
@@ -40,22 +49,38 @@
     <label><input id="show-particles" type="checkbox" checked> particles</label>
     <label><input id="show-ekf" type="checkbox" checked> EKF</label>
     <label><input id="show-wcl" type="checkbox" checked> WCL</label>
+    <label id="floor-control" hidden>Floor <select id="floor"></select></label>
+    <span class="toggle">
+      <button id="view2d" class="active">2D</button><button id="view3d">3D</button>
+    </span>
+  </section>
+  <section id="controls3d" class="controls" hidden>
+    <label>Exploded <input id="exploded" type="range" min="0" max="2" step="0.1" value="0.6"></label>
+    <label><input id="follow" type="checkbox"> follow</label>
+    <label><input id="underlay" type="checkbox"> OpenStreetMap underlay</label>
+    <span class="hint">Drag to pan, right-drag or ctrl-drag to tilt and rotate.</span>
   </section>
 
   <main>
-    <canvas id="map" width="1000" height="620"></canvas>
+    <div class="view">
+      <canvas id="map" width="1000" height="620"></canvas>
+      <div id="map3d" hidden></div>
+      <div id="view3d-status" class="hint"></div>
+    </div>
     <aside>
       <div id="clock">loading...</div>
       <p id="description"></p>
       <table>
-        <thead><tr><th>filter</th><th>error</th><th>mean</th><th>CEP95</th></tr></thead>
+        <thead><tr><th>filter</th><th>error</th><th>mean</th><th>CEP95</th><th id="floor-head" hidden>floor (ok)</th></tr></thead>
         <tbody id="stats"></tbody>
       </table>
-      <p class="hint">Statistics exclude the first 5 s, matching the regression suite.</p>
+      <p class="hint">Statistics exclude the first 5 s, matching the regression suite. Horizontal errors only count
+        fixes on the right floor; "ok" is the share of fixes on the right floor.</p>
     </aside>
   </main>
 
   <script src="ipe_wasm.js"></script>
+  <script src="map3d.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -34,4 +34,15 @@ bool segments_intersect(Vec2 p1, Vec2 p2, Vec2 q1, Vec2 q2) {
   return false;
 }
 
+bool point_in_polygon(Vec2 p, const Polygon& poly) {
+  bool inside = false;
+  const std::size_t n = poly.size();
+  for (std::size_t i = 0, j = n - 1; i < n; j = i++) {
+    const Vec2 a = poly[i];
+    const Vec2 b = poly[j];
+    if ((a.y > p.y) != (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x) inside = !inside;
+  }
+  return inside;
+}
+
 }  // namespace ipe

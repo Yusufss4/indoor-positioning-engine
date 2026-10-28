@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <numbers>
+#include <vector>
 
 namespace ipe {
 
@@ -60,5 +61,11 @@ inline constexpr double rad2deg(double r) { return r * 180.0 / std::numbers::pi;
 bool segments_intersect(Vec2 p1, Vec2 p2, Vec2 q1, Vec2 q2);
 
 inline bool segments_intersect(const Segment& s, const Segment& t) { return segments_intersect(s.a, s.b, t.a, t.b); }
+
+/// Simple polygon as a vertex ring; the closing edge back to the first vertex is implicit.
+using Polygon = std::vector<Vec2>;
+
+/// Even-odd point-in-polygon test. Points exactly on an edge may go either way.
+bool point_in_polygon(Vec2 p, const Polygon& poly);
 
 }  // namespace ipe

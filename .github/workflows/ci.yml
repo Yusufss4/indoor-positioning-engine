@@ -61,7 +61,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: clang-format
         run: |
-          find core sim eval tools tests web -name '*.cpp' -o -name '*.hpp' | xargs clang-format-18 --dry-run --Werror
+          find core sim eval geo tools tests web -name '*.cpp' -o -name '*.hpp' | xargs clang-format-18 --dry-run --Werror
 
   wasm:
     name: WebAssembly build

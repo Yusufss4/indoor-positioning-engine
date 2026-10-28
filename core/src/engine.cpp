@@ -33,9 +33,9 @@ FilterKind parse_filter_kind(std::string_view name) {
 std::unique_ptr<Filter> make_filter(const Venue& venue, const EngineConfig& cfg) {
   switch (cfg.filter) {
     case FilterKind::ParticleFilter:
-      return std::make_unique<ParticleFilter>(venue, cfg.pf, cfg.rssi);
+      return std::make_unique<ParticleFilter>(venue, cfg.pf, cfg.rssi, cfg.baro);
     case FilterKind::Ekf:
-      return std::make_unique<Ekf>(venue, cfg.ekf, cfg.rssi);
+      return std::make_unique<Ekf>(venue, cfg.ekf, cfg.rssi, cfg.baro);
     case FilterKind::WeightedCentroid:
       return std::make_unique<WeightedCentroid>(venue, cfg.wcl, cfg.rssi);
   }
@@ -60,6 +60,8 @@ void PositioningEngine::on_ble(double t, std::string_view beacon_id, double rssi
 void PositioningEngine::on_ble(double t, std::size_t beacon_index, double rssi) {
   filter_->on_rssi(t, beacon_index, rssi);
 }
+
+void PositioningEngine::on_pressure(double t, double hpa) { filter_->on_pressure(t, hpa); }
 
 const ParticleFilter* PositioningEngine::particle_filter() const {
   return dynamic_cast<const ParticleFilter*>(filter_.get());

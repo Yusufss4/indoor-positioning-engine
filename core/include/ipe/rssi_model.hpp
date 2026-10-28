@@ -13,12 +13,15 @@ struct RssiModelConfig {
 };
 
 /// Log-distance path-loss model with an optional per-wall attenuation term
-/// and a robust (Gaussian + uniform) measurement likelihood.
+/// and a robust (Gaussian + uniform) measurement likelihood. Across levels the
+/// distance is 3D (floor elevations differ) and each slab in between costs the
+/// venue's `floor_attenuation_db`; walls are counted on the receiver's level.
 class RssiModel {
  public:
   RssiModel(const Venue& venue, RssiModelConfig cfg = {}) : venue_(&venue), cfg_(cfg) {}
 
-  [[nodiscard]] double expected_rssi(const Beacon& b, Vec2 p) const;
+  /// Expected RSSI from beacon `b` for a receiver at `p` on level index `level`.
+  [[nodiscard]] double expected_rssi(const Beacon& b, Vec2 p, int level = 0) const;
   [[nodiscard]] double expected_rssi_free_space(const Beacon& b, double d) const;
   [[nodiscard]] double distance_from_rssi(const Beacon& b, double rssi) const;
   [[nodiscard]] double log_likelihood(double residual_db) const;

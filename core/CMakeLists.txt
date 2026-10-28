@@ -1,7 +1,9 @@
 add_library(ipe_core STATIC
+  src/baro.cpp
   src/engine.cpp
   src/ekf.cpp
   src/geometry.cpp
+  src/georef.cpp
   src/particle_filter.cpp
   src/pdr.cpp
   src/rssi_model.cpp

@@ -15,7 +15,8 @@ struct WclConfig {
 };
 
 /// Weighted centroid localisation: the simplest RSSI-only baseline. Ignores
-/// steps and heading entirely.
+/// steps, heading and the barometer entirely. In multi-level venues the floor
+/// is a weighted vote of the strongest beacons' levels.
 class WeightedCentroid final : public Filter {
  public:
   WeightedCentroid(const Venue& venue, WclConfig cfg, RssiModelConfig rssi_cfg);

@@ -1,0 +1,16 @@
+{
+  "name": "office_elevator",
+  "description": "Two-floor office: ride the south-east lift up, walk the first floor, ride back down. No steps while in the cabin, so only the barometer (and slowly the radio) can see the floor change.",
+  "venue": "../venues/office_two_floor.json",
+  "seed": 402,
+  "walk": {
+    "waypoints": [
+      [5, 11.5, 0], [35, 11.5, 0], [35, 10, 0], [35, 6, 0], [38.5, 1.5, 0],
+      [38.5, 1.5, 1], [35, 6, 1], [35, 10, 1], [35, 11.5, 1], [35, 13, 1], [35, 18, 1], [32, 21, 1], [37, 21, 1],
+      [35, 16, 1], [35, 13, 1], [35, 11.5, 1], [25, 11.5, 1], [25, 8, 1], [22, 8, 1], [15, 8, 1], [22, 8, 1],
+      [28, 2, 1], [38.5, 1.5, 1],
+      [38.5, 1.5, 0], [35, 6, 0], [35, 10, 0], [35, 11.5, 0], [20, 11.5, 0], [15, 11.5, 0], [15, 13, 0], [15, 19, 0]
+    ]
+  },
+  "baro": {}
+}

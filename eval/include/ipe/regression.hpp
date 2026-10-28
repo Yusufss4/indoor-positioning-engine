@@ -19,6 +19,9 @@ struct BenchmarkCase {
   double convergence_s = 0.0;  ///< Mean over runs that converged.
   int unconverged_runs = 0;
   double compute_us_per_update = 0.0;
+  bool multi_level = false;  ///< Floor metrics are only reported for multi-level venues.
+  double floor_accuracy = 1.0;
+  double floor_switch_latency_s = -1.0;
 };
 
 struct BenchmarkOptions {
@@ -34,8 +37,9 @@ struct BenchmarkOptions {
 std::vector<BenchmarkCase> run_benchmark(const std::string& scenario_dir, const BenchmarkOptions& opts);
 
 struct Tolerance {
-  double relative = 0.10;    ///< Allowed fractional increase.
-  double absolute_m = 0.15;  ///< Plus this many metres, to absorb tiny drifts.
+  double relative = 0.10;        ///< Allowed fractional increase.
+  double absolute_m = 0.15;      ///< Plus this many metres, to absorb tiny drifts.
+  double floor_accuracy = 0.03;  ///< Allowed absolute drop of floor accuracy.
 };
 
 struct Finding {
@@ -49,7 +53,7 @@ struct Finding {
 
 std::string to_string(Finding::Status s);
 
-/// Compares CEP50 and CEP95 against the stored baseline.
+/// Compares CEP50 and CEP95 (and floor accuracy where the baseline has it) against the stored baseline.
 std::vector<Finding> compare_to_baseline(const std::vector<BenchmarkCase>& results, const std::string& baseline_json,
                                          const Tolerance& tol);
 

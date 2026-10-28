@@ -1,0 +1,3 @@
+{"type": "FeatureCollection", "features": [
+{"id":"1849963b-ebba-5f55-8856-0d22e36cb5e4","type":"Feature","feature_type":"venue","geometry":{"type":"Polygon","coordinates":[[[28.9795,41.0151],[28.979975534,41.0151],[28.979975534,41.015316111],[28.9795,41.015316111],[28.9795,41.0151]]]},"properties":{"category":"unspecified","restriction":null,"name":{"en":"office_two_floor"},"alt_name":null,"hours":null,"phone":null,"website":null,"display_point":{"type":"Point","coordinates":[28.979737767,41.015208055]},"address_id":null,"ipe:georef":{"origin_lat":41.0151,"origin_lon":28.9795,"rotation_deg":0.0},"ipe:wall_attenuation_db":3.5,"ipe:floor_attenuation_db":15.0}}
+]}

@@ -2,9 +2,10 @@
 
 [![ci](https://github.com/Yusufss4/indoor-positioning-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/Yusufss4/indoor-positioning-engine/actions/workflows/ci.yml)
 
-A C++20 indoor positioning engine that turns noisy phone sensor data (IMU + BLE RSSI) into a blue dot,
-plus the tooling to measure it: a venue simulator, trace replay, an accuracy regression suite that gates CI,
-Python visualisation and a WebAssembly build that runs the same engine in the browser.
+A C++20 indoor positioning engine that turns noisy phone sensor data (IMU + BLE RSSI + barometer) into a
+blue dot on the right floor, plus the tooling to measure it: a multi-floor venue simulator, trace replay, an
+accuracy regression suite that gates CI, Python visualisation, GeoJSON/IMDF map import and export, and a
+WebAssembly build that runs the same engine in the browser with a 2D and a 3D (MapLibre) view.
 
 **[Live demo (WebAssembly)](https://yusufss4.github.io/indoor-positioning-engine/)**
 
@@ -15,13 +16,15 @@ Python visualisation and a WebAssembly build that runs the same engine in the br
 | Component | Description |
 |---|---|
 | **Pedestrian dead reckoning** | Step detection on accelerometer magnitude, Weinberg step length, gyro yaw integration, magnetometer heading |
-| **Particle filter** | Fuses steps, heading and RSSI; walls kill particles that cross them and attenuate radio in the likelihood; per-particle step-length scale and device RSSI offset states; robust likelihoods; systematic resampling; augmented-MCL recovery; beacon integrity monitor |
-| **EKF** | `[x, y, heading]` with Jacobian-based prediction, scalar RSSI/heading updates, chi-square gating and Joseph-form covariance update |
-| **Weighted centroid** | RSSI-only baseline |
-| **Simulator** | Pure-pursuit walker through a floor plan; synthesises 50 Hz IMU and BLE with fading, shadowing, wall loss, path-loss mismatch, device offsets, packet loss, magnetic anomalies, dead and moved beacons |
-| **Replay + metrics** | Mean, RMSE, CEP50, CEP95, availability, time to first fix, convergence time, compute per update |
-| **Regression suite** | 7 scenarios x 4 filter presets x N seeds compared against a stored baseline in CI |
-| **WebAssembly** | Emscripten/embind build of the unchanged core with a canvas front end, deployed to GitHub Pages |
+| **Particle filter** | Fuses steps, heading, RSSI and pressure; walls kill particles that cross them and attenuate radio in the likelihood; per-particle step-length scale, device RSSI offset, floor and barometer offset states; floor changes only inside stairwells and lifts; robust likelihoods; systematic resampling; augmented-MCL recovery; beacon integrity monitor |
+| **EKF** | `[x, y, heading]` with Jacobian-based prediction, scalar RSSI/heading updates, chi-square gating and Joseph-form covariance update; floor from an anchored barometer |
+| **Weighted centroid** | RSSI-only baseline with a beacon floor vote |
+| **Floors** | Venues with levels, stairwells, lifts and escalators; 3D radio distance with slab loss; barometric altitude with low-pass filtering; floor accuracy and floor-switch latency metrics |
+| **Simulator** | Pure-pursuit walker through a floor plan, up stairs and in lifts; synthesises 50 Hz IMU, BLE with fading, shadowing, wall and slab loss, path-loss mismatch, device offsets, packet loss, magnetic anomalies, dead and moved beacons, and a phone barometer with weather drift, device bias and door spikes |
+| **Replay + metrics** | Mean, RMSE, CEP50, CEP95, availability, time to first fix, convergence time, floor accuracy, floor-switch latency, compute per update |
+| **Regression suite** | 11 scenarios x 4 filter presets x N seeds compared against a stored baseline in CI |
+| **Map interop** | `ipe-import`: GeoJSON (any platform, through a property mapping table) and an IMDF subset in and out, with WGS84 georeferencing |
+| **WebAssembly** | Emscripten/embind build of the unchanged core with a 2D canvas and a 3D MapLibre view, deployed to GitHub Pages |
 | **Agent tooling** | [`AGENTS.md`](AGENTS.md) with evaluation rules for coding agents; MCP server in [positioning-agent-tools](https://github.com/Yusufss4/positioning-agent-tools) |
 
 ## Results
@@ -40,6 +43,27 @@ sensor update (IMU and BLE averaged) on a desktop CPU. Full table: [docs/results
 | airport_hall_sparse | 80 x 40 m hall, beacons 20 m apart, 35% loss | **1.30 / 7.25** | 1.41 / 7.58 | 1.61 / 10.47 | 4.73 / 12.85 |
 
 ![CEP95 per scenario](docs/img/benchmark_cep95.png)
+
+### Two floors
+
+`office_two_floor` stacks a second, more open floor 4 m above the office, joined by a stairwell and a lift.
+"Floor ok" is the share of fixes on the right floor; CEP only counts those. "Switch" is the mean delay
+between the walker reaching the new floor and the estimate following (10 seeds each).
+
+| Scenario | What it stresses | PF CEP50 / CEP95 | PF floor ok / switch | EKF floor ok / switch | WCL floor ok / switch |
+|---|---|---|---|---|---|
+| office_stairs_up_down | stairs up, tour, stairs down | **0.78** / 3.22 | **99.5%** / 0.4 s | 98.7% / 1.0 s | 98.1% / 1.4 s |
+| office_elevator | lift rides: no steps, only pressure changes | **0.60 / 1.76** | **99.5%** / 0.4 s | 98.9% / 0.9 s | 98.3% / 1.2 s |
+| office_floor_bleed | slab loses 4 dB (map says 15): beacons below look close | **0.89** / 4.02 | **96.3%** / 1.0 s | 95.7% / 2.9 s | 95.2% / 2.1 s |
+| baro_drift_long | weather trend -6 hPa/h, phone barometer 2.5 hPa off | **0.63 / 1.99** | **99.5%** / 0.4 s | 67.4% / 25.2 s | 98.4% / 1.4 s |
+
+The barometer offset each particle carries is what keeps it right under weather drift. The EKF anchors the
+barometer once and snaps to the nearest floor, so a 6 hPa/h trend (50 m of apparent altitude per hour) puts
+it on the wrong floor a third of the time. The particle filter's CEP95 on the stair scenario (3.2 m) is
+worse than the EKF's (2.3 m). The large errors cluster after floor changes: the 15 s after a change are a
+fifth of the walk but hold half of the errors above the 95th percentile (5 seeds), while the cloud is still
+spread around the stairwell exit and the new floor's beacons pin it down. Single-floor results are
+bit-identical to the engine before floors were added.
 
 The simulator and the filters share a model family, so absolute numbers are optimistic compared to
 real venues. The comparisons between filters and the before/after deltas are the point. See
@@ -72,11 +96,15 @@ not work and the ablation of that cost, is in [docs/experiments.md](docs/experim
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
-ctest --test-dir build --output-on-failure          # 50 unit tests + accuracy regression
+ctest --test-dir build --output-on-failure          # 83 unit tests + accuracy regression
 
 # simulate a scenario and replay it through a filter
 ./build/tools/ipe-sim --scenario data/scenarios/office_nominal.json --out /tmp/trace.csv
 ./build/tools/ipe-replay --venue data/venues/office_floor.json --trace /tmp/trace.csv --filter pf --out /tmp/est.csv
+
+# two floors: the trace also carries barometer samples; metrics add floor_accuracy and floor_switch_latency_s
+./build/tools/ipe-sim --scenario data/scenarios/office_stairs_up_down.json --out /tmp/stairs.csv
+./build/tools/ipe-replay --venue data/venues/office_two_floor.json --trace /tmp/stairs.csv --filter pf
 
 # A/B experiment: does the beacon integrity monitor help, across every scenario and 10 seeds?
 ./build/tools/ipe-regress --scenarios data/scenarios --no-baseline --seeds 10 --presets pf \
@@ -96,6 +124,40 @@ python3 -m http.server -d build-wasm/site 8000   # open http://localhost:8000
 
 ![web demo](docs/img/web_demo.png)
 
+The 2D view draws one floor at a time: the walker's floor by default, or any floor picked in the Floor
+menu. Trails show only that floor, estimates on another floor are drawn as dashed rings, and the stats
+table adds a floor column for two-floor scenarios.
+
+The **3D** button switches to a MapLibre GL view of the venue: walls extruded per floor, translucent slabs,
+stair and lift shafts, the walker, each filter's estimate with its uncertainty, and the particles coloured
+by floor. The estimated floor is drawn opaque, floors above it nearly vanish, and "Exploded" pulls the
+floors apart. MapLibre loads from a CDN on first use with a blank style (no tile keys); an OpenStreetMap
+underlay is optional.
+
+<img src="docs/img/demo_3d.png" alt="3D view during a lift ride" width="427">
+
+## Maps from other platforms (GeoJSON, IMDF)
+
+The engine's venue JSON is local metres. `ipe-import` converts it to and from what indoor-mapping
+platforms publish, using the venue's `georef` (origin latitude/longitude and rotation):
+
+```bash
+./build/tools/ipe-import export data/venues/office_two_floor.json --out office.geojson    # WGS84 GeoJSON
+./build/tools/ipe-import export-imdf data/venues/office_two_floor.json --out imdf/       # IMDF subset
+./build/tools/ipe-import imdf imdf/ --out venue.json                                      # and back
+./build/tools/ipe-import geojson their_export.geojson --mapping my_mapping.json \
+    --beacon-grid 8 --out venue.json
+```
+
+- **IMDF** (Apple's Indoor Mapping Data Format, also used by many mapping vendors): levels, units and
+  openings become floors, walls (room outlines with doors cut out) and stair/lift connectors.
+- **Any GeoJSON** goes through a mapping table that names the property and values meaning wall, room,
+  door, level, stairs, lift or beacon. Supporting a new platform's export is a JSON file, not code;
+  [`data/mappings/ipe.json`](data/mappings/ipe.json) is the table for this project's own export.
+- Map data has no beacons, so they come from a sidecar file (`--beacons`, with lat/lon) or a grid.
+
+Formats in detail: [docs/formats.md](docs/formats.md#geojson-and-imdf-ipe-import).
+
 ## Engineering notes
 
 - **Deterministic everywhere.** All sampling goes through a xoshiro256** generator with Box-Muller
@@ -111,14 +173,15 @@ python3 -m http.server -d build-wasm/site 8000   # open http://localhost:8000
 ## Repository layout
 
 ```
-core/     engine: PDR, RSSI model, particle filter, EKF, WCL, venue + trace I/O
+core/     engine: PDR, RSSI model, barometer, particle filter, EKF, WCL, venue + georef + trace I/O
 sim/      scenario -> synthetic trace
 eval/     presets, config overrides, replay, metrics, benchmark/baseline comparison
-tools/    ipe-sim, ipe-replay, ipe-regress
+geo/      GeoJSON / IMDF import and export
+tools/    ipe-sim, ipe-replay, ipe-regress, ipe-import
 tests/    GoogleTest unit tests, regression baseline
-data/     venues and scenarios
+data/     venues, scenarios, GeoJSON exports, IMDF sample, mapping tables
 viz/      matplotlib figures and animation
-web/      embind bindings and browser front end
+web/      embind bindings, 2D canvas and 3D MapLibre front end
 docs/     design notes, file formats, experiment log, results
 ```
 

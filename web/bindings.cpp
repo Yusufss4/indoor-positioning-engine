@@ -23,6 +23,8 @@ struct Track {
   double error_sum = 0.0;
   int error_count = 0;
   std::vector<double> errors;
+  int floor_ok = 0;  ///< Fixes on the true level (horizontal error is only scored for these).
+  int fixes = 0;
 };
 
 class Demo {
@@ -44,6 +46,7 @@ class Demo {
   double time() const { return now_; }
   double duration() const { return trace_.truth.empty() ? 0.0 : trace_.truth.back().t; }
   bool finished() const { return g_ >= trace_.truth.size(); }
+  int levelCount() const { return venue_.level_count(); }
 
   /// Processes every sensor event up to now + dt. Returns false at the end.
   bool advance(double dt) {
@@ -52,8 +55,9 @@ class Demo {
     while (g_ < trace_.truth.size()) {
       const double ti = i_ < trace_.imu.size() ? trace_.imu[i_].t : 1e300;
       const double tb = b_ < trace_.ble.size() ? trace_.ble[b_].t : 1e300;
+      const double tp = p_ < trace_.baro.size() ? trace_.baro[p_].t : 1e300;
       const double tg = trace_.truth[g_].t;
-      const double next = std::min({ti, tb, tg});
+      const double next = std::min({ti, tb, tp, tg});
       if (next > until) break;
       if (ti == next) {
         for (auto& tr : tracks_) tr.engine->on_imu(trace_.imu[i_]);
@@ -64,11 +68,17 @@ class Demo {
           recent_ble_.push_back(b_);
         }
         ++b_;
+      } else if (tp == next) {
+        for (auto& tr : tracks_) tr.engine->on_pressure(trace_.baro[p_].t, trace_.baro[p_].hpa);
+        ++p_;
       } else {
         truth_ = trace_.truth[g_++];
         for (auto& tr : tracks_) {
           const auto e = tr.engine->estimate();
           if (!e.valid || truth_.t < 5.0) continue;
+          ++tr.fixes;
+          if (e.level != truth_.level) continue;
+          ++tr.floor_ok;
           const double err = ipe::distance(e.pos, truth_.pos);
           tr.error_sum += err;
           ++tr.error_count;
@@ -85,6 +95,9 @@ class Demo {
     o.set("x", truth_.pos.x);
     o.set("y", truth_.pos.y);
     o.set("heading", truth_.heading);
+    o.set("level", truth_.level);
+    o.set("z", truth_.z);
+    set_wgs84(o, truth_.pos);
     return o;
   }
 
@@ -96,15 +109,27 @@ class Demo {
       o.set("valid", e.valid);
       o.set("x", e.pos.x);
       o.set("y", e.pos.y);
+      o.set("level", e.level);
+      o.set("z", e.z);
+      set_wgs84(o, e.pos);
       o.set("sigma", e.sigma_radius());
-      o.set("error", e.valid ? ipe::distance(e.pos, truth_.pos) : -1.0);
+      o.set("error", e.valid && e.level == truth_.level ? ipe::distance(e.pos, truth_.pos) : -1.0);
       o.set("mean", tr.error_count ? tr.error_sum / tr.error_count : -1.0);
       o.set("cep95", ipe::eval::percentile(tr.errors, 0.95));
+      o.set("floorAcc", floor_accuracy(tr));
     }
     return o;
   }
 
-  /// Flat [x0, y0, w0, x1, y1, w1, ...] view of the particle cloud. The view
+  /// Fraction of fixes (after the 5 s warm-up) on the true level; -1 before the first.
+  double floorAccuracy(const std::string& name) const {
+    for (const auto& tr : tracks_) {
+      if (tr.name == name) return floor_accuracy(tr);
+    }
+    return -1.0;
+  }
+
+  /// Flat [x0, y0, w0, level0, x1, ...] view of the particle cloud. The view
   /// aliases WASM memory and is only valid until the next call.
   val particles() {
     particle_buf_.clear();
@@ -113,6 +138,7 @@ class Demo {
         particle_buf_.push_back(static_cast<float>(p.pos.x));
         particle_buf_.push_back(static_cast<float>(p.pos.y));
         particle_buf_.push_back(static_cast<float>(p.weight));
+        particle_buf_.push_back(static_cast<float>(p.level));
       }
     }
     return val(emscripten::typed_memory_view(particle_buf_.size(), particle_buf_.data()));
@@ -133,6 +159,17 @@ class Demo {
   int steps() const { return static_cast<int>(tracks_.front().engine->step_count()); }
 
  private:
+  static double floor_accuracy(const Track& tr) {
+    return tr.fixes ? static_cast<double>(tr.floor_ok) / tr.fixes : -1.0;
+  }
+
+  void set_wgs84(val& o, ipe::Vec2 p) const {
+    if (!venue_.georef()) return;
+    const auto ll = venue_.georef()->to_wgs84(p);
+    o.set("lat", ll.lat);
+    o.set("lon", ll.lon);
+  }
+
   ipe::Venue venue_;
   ipe::Trace trace_;
   std::vector<Track> tracks_;
@@ -141,7 +178,7 @@ class Demo {
   std::vector<float> particle_buf_;
   ipe::TruthSample truth_{};
   double now_ = 0.0;
-  std::size_t i_ = 0, b_ = 0, g_ = 0;
+  std::size_t i_ = 0, b_ = 0, p_ = 0, g_ = 0;
 };
 
 }  // namespace
@@ -152,9 +189,11 @@ EMSCRIPTEN_BINDINGS(ipe) {
       .function("time", &Demo::time)
       .function("duration", &Demo::duration)
       .function("finished", &Demo::finished)
+      .function("levelCount", &Demo::levelCount)
       .function("advance", &Demo::advance)
       .function("truth", &Demo::truth)
       .function("estimate", &Demo::estimate)
+      .function("floorAccuracy", &Demo::floorAccuracy)
       .function("particles", &Demo::particles)
       .function("recentBle", &Demo::recentBle)
       .function("steps", &Demo::steps);

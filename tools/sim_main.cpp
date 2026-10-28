@@ -8,8 +8,8 @@
 namespace {
 constexpr const char* kUsage = R"(usage: ipe-sim --scenario FILE --out TRACE.csv [--seed N]
 
-Generates a synthetic trace (IMU, BLE, ground truth) for a scenario file and
-prints a JSON summary to stdout.
+Generates a synthetic trace (IMU, BLE, barometer if the scenario has one,
+ground truth) for a scenario file and prints a JSON summary to stdout.
 )";
 }
 
@@ -40,6 +40,8 @@ int main(int argc, char** argv) {
                                     {"true_steps", report.steps},
                                     {"imu_samples", trace.imu.size()},
                                     {"ble_samples", trace.ble.size()},
+                                    {"baro_samples", trace.baro.size()},
+                                    {"level_changes", report.level_changes},
                                     {"wall_violations", report.wall_violations}};
     std::cout << summary.dump(2) << "\n";
     return report.wall_violations == 0 ? 0 : 3;

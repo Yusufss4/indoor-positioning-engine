@@ -3,6 +3,7 @@
   "description": "40 x 24 m office floor: central corridor, four rooms to the north, open-plan area and two meeting rooms to the south.",
   "bounds": [0, 0, 40, 24],
   "wall_attenuation_db": 3.5,
+  "georef": {"origin_lat": 41.01510, "origin_lon": 28.97950, "rotation_deg": 0},
   "walls": [
     [0, 0, 40, 0], [40, 0, 40, 24], [40, 24, 0, 24], [0, 24, 0, 0],
 

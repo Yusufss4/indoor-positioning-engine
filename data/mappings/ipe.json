@@ -1,0 +1,25 @@
+{
+  "note": "The scheme written by `ipe-import export`. These are also the built-in defaults.",
+  "type_property": "feature_type",
+  "types": {
+    "wall": ["wall"],
+    "room": ["room"],
+    "opening": ["opening"],
+    "level": ["level"],
+    "beacon": ["beacon"],
+    "venue": ["venue"],
+    "stairs": ["stairs"],
+    "elevator": ["elevator"],
+    "escalator": ["escalator"]
+  },
+  "level_property": "level",
+  "levels_property": "levels",
+  "ordinal_property": "ordinal",
+  "name_property": "name",
+  "id_property": "id",
+  "elevation_property": "elevation_m",
+  "height_property": "height_m",
+  "tx_power_property": "tx_power",
+  "path_loss_property": "path_loss_exp",
+  "wall_max_thickness_m": 0.6
+}

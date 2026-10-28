@@ -34,6 +34,48 @@
         "unconverged_runs": 8
       }
     },
+    "baro_drift_long": {
+      "ekf": {
+        "availability": 1.0,
+        "cep50_m": 0.829,
+        "cep95_m": 4.191,
+        "convergence_s": 2.78,
+        "floor_accuracy": 0.674,
+        "floor_switch_latency_s": 25.225,
+        "mean_m": 1.241,
+        "unconverged_runs": 0
+      },
+      "pf": {
+        "availability": 1.0,
+        "cep50_m": 0.63,
+        "cep95_m": 1.991,
+        "convergence_s": 13.34,
+        "floor_accuracy": 0.995,
+        "floor_switch_latency_s": 0.37,
+        "mean_m": 0.831,
+        "unconverged_runs": 0
+      },
+      "pf-nomap": {
+        "availability": 1.0,
+        "cep50_m": 0.832,
+        "cep95_m": 2.185,
+        "convergence_s": 7.8,
+        "floor_accuracy": 0.993,
+        "floor_switch_latency_s": 0.47,
+        "mean_m": 0.978,
+        "unconverged_runs": 0
+      },
+      "wcl": {
+        "availability": 1.0,
+        "cep50_m": 2.552,
+        "cep95_m": 5.747,
+        "convergence_s": 97.94,
+        "floor_accuracy": 0.984,
+        "floor_switch_latency_s": 1.43,
+        "mean_m": 2.737,
+        "unconverged_runs": 0
+      }
+    },
     "office_device_offset": {
       "ekf": {
         "availability": 0.995,
@@ -68,6 +110,48 @@
         "unconverged_runs": 7
       }
     },
+    "office_elevator": {
+      "ekf": {
+        "availability": 1.0,
+        "cep50_m": 0.757,
+        "cep95_m": 1.786,
+        "convergence_s": 2.14,
+        "floor_accuracy": 0.989,
+        "floor_switch_latency_s": 0.86,
+        "mean_m": 0.843,
+        "unconverged_runs": 0
+      },
+      "pf": {
+        "availability": 1.0,
+        "cep50_m": 0.603,
+        "cep95_m": 1.76,
+        "convergence_s": 1.02,
+        "floor_accuracy": 0.995,
+        "floor_switch_latency_s": 0.37,
+        "mean_m": 0.789,
+        "unconverged_runs": 0
+      },
+      "pf-nomap": {
+        "availability": 1.0,
+        "cep50_m": 0.874,
+        "cep95_m": 2.041,
+        "convergence_s": 0.48,
+        "floor_accuracy": 0.993,
+        "floor_switch_latency_s": 0.43,
+        "mean_m": 1.014,
+        "unconverged_runs": 0
+      },
+      "wcl": {
+        "availability": 1.0,
+        "cep50_m": 2.799,
+        "cep95_m": 6.584,
+        "convergence_s": 66.686,
+        "floor_accuracy": 0.983,
+        "floor_switch_latency_s": 1.25,
+        "mean_m": 3.061,
+        "unconverged_runs": 3
+      }
+    },
     "office_field_issue": {
       "ekf": {
         "availability": 1.0,
@@ -100,6 +184,48 @@
         "convergence_s": 62.971,
         "mean_m": 3.966,
         "unconverged_runs": 3
+      }
+    },
+    "office_floor_bleed": {
+      "ekf": {
+        "availability": 1.0,
+        "cep50_m": 0.949,
+        "cep95_m": 3.13,
+        "convergence_s": 14.06,
+        "floor_accuracy": 0.957,
+        "floor_switch_latency_s": 2.93,
+        "mean_m": 1.19,
+        "unconverged_runs": 0
+      },
+      "pf": {
+        "availability": 1.0,
+        "cep50_m": 0.894,
+        "cep95_m": 4.018,
+        "convergence_s": 11.36,
+        "floor_accuracy": 0.963,
+        "floor_switch_latency_s": 1.04,
+        "mean_m": 1.326,
+        "unconverged_runs": 0
+      },
+      "pf-nomap": {
+        "availability": 1.0,
+        "cep50_m": 1.528,
+        "cep95_m": 6.17,
+        "convergence_s": 22.58,
+        "floor_accuracy": 0.942,
+        "floor_switch_latency_s": 0.58,
+        "mean_m": 2.189,
+        "unconverged_runs": 0
+      },
+      "wcl": {
+        "availability": 1.0,
+        "cep50_m": 2.551,
+        "cep95_m": 5.299,
+        "convergence_s": 64.32,
+        "floor_accuracy": 0.952,
+        "floor_switch_latency_s": 2.12,
+        "mean_m": 2.647,
+        "unconverged_runs": 5
       }
     },
     "office_mag_disturbance": {
@@ -201,6 +327,48 @@
         "cep95_m": 4.884,
         "convergence_s": 49.029,
         "mean_m": 2.407,
+        "unconverged_runs": 3
+      }
+    },
+    "office_stairs_up_down": {
+      "ekf": {
+        "availability": 1.0,
+        "cep50_m": 0.969,
+        "cep95_m": 2.258,
+        "convergence_s": 3.0,
+        "floor_accuracy": 0.987,
+        "floor_switch_latency_s": 0.96,
+        "mean_m": 1.069,
+        "unconverged_runs": 0
+      },
+      "pf": {
+        "availability": 1.0,
+        "cep50_m": 0.782,
+        "cep95_m": 3.218,
+        "convergence_s": 11.18,
+        "floor_accuracy": 0.995,
+        "floor_switch_latency_s": 0.36,
+        "mean_m": 1.113,
+        "unconverged_runs": 0
+      },
+      "pf-nomap": {
+        "availability": 1.0,
+        "cep50_m": 1.121,
+        "cep95_m": 2.607,
+        "convergence_s": 10.56,
+        "floor_accuracy": 0.993,
+        "floor_switch_latency_s": 0.31,
+        "mean_m": 1.256,
+        "unconverged_runs": 0
+      },
+      "wcl": {
+        "availability": 1.0,
+        "cep50_m": 2.583,
+        "cep95_m": 5.561,
+        "convergence_s": 41.114,
+        "floor_accuracy": 0.981,
+        "floor_switch_latency_s": 1.4,
+        "mean_m": 2.743,
         "unconverged_runs": 3
       }
     },

@@ -20,6 +20,6 @@ add_custom_command(TARGET ipe_wasm POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE_DIR:ipe_wasm>/ipe_wasm.js $<TARGET_FILE_DIR:ipe_wasm>/ipe_wasm.wasm
           ${IPE_SITE_DIR}
   COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/index.html ${CMAKE_CURRENT_SOURCE_DIR}/app.js
-          ${CMAKE_CURRENT_SOURCE_DIR}/style.css ${IPE_SITE_DIR}
+          ${CMAKE_CURRENT_SOURCE_DIR}/map3d.js ${CMAKE_CURRENT_SOURCE_DIR}/style.css ${IPE_SITE_DIR}
   COMMAND ${CMAKE_COMMAND} -E copy_directory ${PROJECT_SOURCE_DIR}/data ${IPE_SITE_DIR}/data
   COMMENT "Assembling web demo in ${IPE_SITE_DIR}")

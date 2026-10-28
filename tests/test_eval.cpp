@@ -32,6 +32,27 @@ TEST(Eval, MetricsRespectWarmupAndAvailability) {
   EXPECT_DOUBLE_EQ(m.cep50_m, 1.0);
   EXPECT_DOUBLE_EQ(m.time_to_first_fix_s, 2.0);
   EXPECT_DOUBLE_EQ(m.convergence_s, 10.0);
+  EXPECT_DOUBLE_EQ(m.floor_accuracy, 1.0);
+  EXPECT_DOUBLE_EQ(m.floor_switch_latency_s, -1.0);
+}
+
+TEST(Eval, FloorMetricsCountWrongLevelSeparately) {
+  // Truth goes up at t = 10 s; the estimate follows 2 s later.
+  std::vector<EstimateRecord> recs;
+  for (int i = 0; i < 40; ++i) {
+    EstimateRecord r;
+    r.t = i * 0.5;
+    r.has_fix = true;
+    r.truth_level = r.t >= 10.0 ? 1 : 0;
+    r.est_level = r.t >= 12.0 ? 1 : 0;
+    r.error_m = r.truth_level == r.est_level ? 1.0 : 30.0;
+    recs.push_back(r);
+  }
+  const auto m = compute_metrics(recs, 0.0);
+  EXPECT_EQ(m.level_changes, 1);
+  EXPECT_DOUBLE_EQ(m.floor_switch_latency_s, 2.0);
+  EXPECT_DOUBLE_EQ(m.floor_accuracy, 36.0 / 40.0);
+  EXPECT_DOUBLE_EQ(m.max_m, 1.0);  // wrong-floor fixes are not horizontal errors
 }
 
 TEST(Eval, PresetsDiffer) {

@@ -37,6 +37,16 @@ struct Metrics {
   double max_m = 0.0;
   std::uint64_t steps = 0;
   double compute_us_per_update = 0.0;  ///< Wall-clock, not deterministic.
+
+  /// Fraction of evaluated samples with a fix on the true level. Horizontal
+  /// error statistics above only include those samples; time on the wrong
+  /// floor shows up here instead of as a huge metric error.
+  double floor_accuracy = 1.0;
+  /// Mean delay from a true level change until the estimate reports the new
+  /// level (-1 if the walk never changes level). An estimate that never
+  /// catches up counts the time until the next true change.
+  double floor_switch_latency_s = -1.0;
+  int level_changes = 0;
 };
 
 struct EstimateRecord {
@@ -46,11 +56,13 @@ struct EstimateRecord {
   double sigma_m = 0.0;
   double error_m = 0.0;
   bool has_fix = false;
+  int truth_level = 0;
+  int est_level = 0;
 };
 
 struct ParticleSnapshot {
   double t = 0.0;
-  std::vector<std::array<float, 3>> particles;  ///< x, y, weight
+  std::vector<std::array<float, 4>> particles;  ///< x, y, weight, level
 };
 
 struct ReplayOptions {

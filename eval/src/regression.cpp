@@ -69,7 +69,10 @@ std::vector<BenchmarkCase> run_benchmark(const std::string& scenario_dir, const 
       BenchmarkCase c;
       c.scenario = scenarios[si].name;
       c.preset = opts.presets[pi];
-      int converged = 0;
+      c.multi_level = venues.at(scenarios[si].venue_path)->multi_level();
+      c.floor_accuracy = 0.0;
+      c.floor_switch_latency_s = 0.0;
+      int converged = 0, with_changes = 0;
       for (const auto& jr : job_results) {
         if (jr.scenario != si) continue;
         const Metrics& m = jr.per_preset[pi];
@@ -79,6 +82,11 @@ std::vector<BenchmarkCase> run_benchmark(const std::string& scenario_dir, const 
         c.cep95_m += m.cep95_m;
         c.availability += m.availability;
         c.compute_us_per_update += m.compute_us_per_update;
+        c.floor_accuracy += m.floor_accuracy;
+        if (m.floor_switch_latency_s >= 0.0) {
+          c.floor_switch_latency_s += m.floor_switch_latency_s;
+          ++with_changes;
+        }
         if (m.convergence_s >= 0.0) {
           c.convergence_s += m.convergence_s;
           ++converged;
@@ -92,6 +100,8 @@ std::vector<BenchmarkCase> run_benchmark(const std::string& scenario_dir, const 
       c.cep95_m /= n;
       c.availability /= n;
       c.compute_us_per_update /= n;
+      c.floor_accuracy /= n;
+      c.floor_switch_latency_s = with_changes ? c.floor_switch_latency_s / with_changes : -1.0;
       c.convergence_s = converged ? c.convergence_s / converged : -1.0;
       cases.push_back(c);
     }
@@ -140,6 +150,17 @@ std::vector<Finding> compare_to_baseline(const std::vector<BenchmarkCase>& resul
       }
       findings.push_back(f);
     }
+    if (c.multi_level && base.contains(c.scenario) && base[c.scenario].contains(c.preset) &&
+        base[c.scenario][c.preset].contains("floor_accuracy")) {
+      Finding f{Finding::Status::Ok, c.scenario, c.preset, "floor_acc", 0.0, c.floor_accuracy};
+      f.baseline = base[c.scenario][c.preset].at("floor_accuracy").get<double>();
+      if (c.floor_accuracy < f.baseline - tol.floor_accuracy) {
+        f.status = Finding::Status::Regressed;
+      } else if (c.floor_accuracy > f.baseline + tol.floor_accuracy) {
+        f.status = Finding::Status::Improved;
+      }
+      findings.push_back(f);
+    }
   }
   for (const auto& [scenario, presets] : base.items()) {
     for (const auto& [preset, _] : presets.items()) {
@@ -160,21 +181,27 @@ std::string benchmark_to_json(const std::vector<BenchmarkCase>& results, const B
   r = nlohmann::json::object();
   auto round3 = [](double v) { return std::round(v * 1000.0) / 1000.0; };
   for (const auto& c : results) {
-    r[c.scenario][c.preset] = {{"mean_m", round3(c.mean_m)},
-                               {"cep50_m", round3(c.cep50_m)},
-                               {"cep95_m", round3(c.cep95_m)},
-                               {"availability", round3(c.availability)},
-                               {"convergence_s", round3(c.convergence_s)},
-                               {"unconverged_runs", c.unconverged_runs}};
+    auto& entry = r[c.scenario][c.preset];
+    entry = {{"mean_m", round3(c.mean_m)},
+             {"cep50_m", round3(c.cep50_m)},
+             {"cep95_m", round3(c.cep95_m)},
+             {"availability", round3(c.availability)},
+             {"convergence_s", round3(c.convergence_s)},
+             {"unconverged_runs", c.unconverged_runs}};
+    if (c.multi_level) {
+      entry["floor_accuracy"] = round3(c.floor_accuracy);
+      entry["floor_switch_latency_s"] = round3(c.floor_switch_latency_s);
+    }
   }
   return j.dump(indent);
 }
 
 std::string benchmark_to_markdown(const std::vector<BenchmarkCase>& results) {
   std::ostringstream out;
-  out << "| Scenario | Filter | Mean [m] | CEP50 [m] | CEP95 [m] | Converged in [s] | us/update |\n";
-  out << "|---|---|---:|---:|---:|---:|---:|\n";
-  char buf[256];
+  out << "| Scenario | Filter | Mean [m] | CEP50 [m] | CEP95 [m] | Converged in [s] | Floor ok | Floor switch [s] | "
+         "us/update |\n";
+  out << "|---|---|---:|---:|---:|---:|---:|---:|---:|\n";
+  char buf[320];
   for (const auto& c : results) {
     char conv[32];
     if (c.convergence_s < 0.0) {
@@ -184,8 +211,16 @@ std::string benchmark_to_markdown(const std::vector<BenchmarkCase>& results) {
     } else {
       std::snprintf(conv, sizeof(conv), "%.1f", c.convergence_s);
     }
-    std::snprintf(buf, sizeof(buf), "| %s | %s | %.2f | %.2f | %.2f | %s | %.1f |\n", c.scenario.c_str(),
-                  c.preset.c_str(), c.mean_m, c.cep50_m, c.cep95_m, conv, c.compute_us_per_update);
+    char floor_ok[16] = "-", floor_switch[16] = "-";
+    if (c.multi_level) {
+      std::snprintf(floor_ok, sizeof(floor_ok), "%.1f%%", 100.0 * c.floor_accuracy);
+      if (c.floor_switch_latency_s >= 0.0) {
+        std::snprintf(floor_switch, sizeof(floor_switch), "%.1f", c.floor_switch_latency_s);
+      }
+    }
+    std::snprintf(buf, sizeof(buf), "| %s | %s | %.2f | %.2f | %.2f | %s | %s | %s | %.1f |\n", c.scenario.c_str(),
+                  c.preset.c_str(), c.mean_m, c.cep50_m, c.cep95_m, conv, floor_ok, floor_switch,
+                  c.compute_us_per_update);
     out << buf;
   }
   return out.str();

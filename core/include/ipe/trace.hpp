@@ -16,10 +16,17 @@ struct BleSample {
   double rssi = 0.0;
 };
 
+struct BaroSample {
+  double t = 0.0;
+  double hpa = 0.0;  ///< Barometric pressure as reported by the phone.
+};
+
 struct TruthSample {
   double t = 0.0;
   Vec2 pos;
   double heading = 0.0;
+  int level = 0;   ///< Level index in the venue (nearest floor while on stairs or in a lift).
+  double z = 0.0;  ///< Height of the walker's floor surface above the venue datum [m].
 };
 
 /// A recorded or simulated session. Each stream is sorted by time.
@@ -27,6 +34,7 @@ struct Trace {
   std::map<std::string, std::string> metadata;
   std::vector<ImuSample> imu;
   std::vector<BleSample> ble;
+  std::vector<BaroSample> baro;  ///< Optional; empty when the phone has no barometer.
   std::vector<TruthSample> truth;
 
   [[nodiscard]] double duration() const;

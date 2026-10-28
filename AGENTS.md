@@ -11,11 +11,14 @@ truth; a replay tool and a regression suite measure accuracy.
 ## Layout
 
 - `core/` - the engine. No I/O beyond venue/trace parsing; this is what a mobile SDK or WASM build links.
-- `sim/` - scenario JSON to synthetic trace (IMU, BLE, ground truth).
+- `sim/` - scenario JSON to synthetic trace (IMU, BLE, barometer, ground truth).
 - `eval/` - presets, config overrides, replay runner, metrics, regression comparison.
-- `tools/` - `ipe-sim`, `ipe-replay`, `ipe-regress`.
+- `geo/` - GeoJSON / IMDF import and export (`ipe_geo`); native tooling only, not linked by the engine.
+- `tools/` - `ipe-sim`, `ipe-replay`, `ipe-regress`, `ipe-import`.
 - `tests/` - GoogleTest unit tests and the `accuracy_regression` CTest.
 - `data/venues`, `data/scenarios` - inputs. `tests/regression/baseline.json` - accepted accuracy.
+- `data/geojson`, `data/imdf` - generated from `data/venues` by `ipe-import`; a unit test fails when they
+  are stale. `data/mappings` - GeoJSON property mapping tables.
 - `viz/` - Python plotting; `web/` - Emscripten bindings and the browser demo.
 
 ## Build and test

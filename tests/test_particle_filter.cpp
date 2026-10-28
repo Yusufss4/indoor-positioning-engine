@@ -1,5 +1,8 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
+
+#include "ipe/baro.hpp"
 #include "ipe/particle_filter.hpp"
 #include "ipe/rssi_model.hpp"
 #include "test_util.hpp"
@@ -30,7 +33,62 @@ void feed_rssi(ParticleFilter& pf, const Venue& v, Vec2 pos, int rounds, double 
   }
 }
 
+void feed_rssi_on_level(ParticleFilter& pf, const Venue& v, Vec2 pos, int level, int rounds, double t0 = 0.0) {
+  const RssiModel model(v);
+  double t = t0;
+  for (int r = 0; r < rounds; ++r) {
+    for (std::size_t i = 0; i < v.beacons().size(); ++i) {
+      pf.on_rssi(t, i, model.expected_rssi(v.beacons()[i], pos, level));
+      t += 0.05;
+    }
+  }
+}
+
+/// Holds the pressure for a while, then ramps it as if the phone rose `rise_m`.
+void feed_rise(ParticleFilter& pf, double t0, double rise_m) {
+  const double p0 = 1000.0;
+  const double alt0 = pressure_to_altitude(p0);
+  for (int k = 0; k <= 100; ++k) {
+    const double t = t0 + 0.2 * k;
+    const double frac = k < 25 ? 0.0 : std::min(1.0, (k - 25) / 40.0);
+    pf.on_pressure(t, altitude_to_pressure(alt0 + frac * rise_m));
+  }
+}
+
 }  // namespace
+
+TEST(ParticleFilter, PicksTheFloorFromRssi) {
+  const Venue v = test::two_level_venue();
+  ParticleFilter pf(v, test_config(), {});
+  feed_rssi_on_level(pf, v, {15.0, 6.0}, 1, 60);
+  const auto est = pf.estimate();
+  EXPECT_EQ(est.level, 1);
+  EXPECT_DOUBLE_EQ(est.z, 4.0);
+  EXPECT_LT(distance(est.pos, {15.0, 6.0}), 1.5);
+}
+
+TEST(ParticleFilter, BarometerCannotChangeFloorOutsideConnectors) {
+  const Venue v = test::two_level_venue();
+  ParticleFilter pf(v, test_config(), {});
+  feed_rssi_on_level(pf, v, {14.0, 5.0}, 0, 60);
+  ASSERT_EQ(pf.estimate().level, 0);
+  feed_rise(pf, 20.0, 4.0);
+  EXPECT_EQ(pf.estimate().level, 0);
+  double upstairs = 0.0;
+  for (const auto& p : pf.particles()) {
+    if (p.level != 0) upstairs += p.weight;
+  }
+  EXPECT_LT(upstairs, 0.05);
+}
+
+TEST(ParticleFilter, BarometerMovesFloorInsideStairwell) {
+  const Venue v = test::two_level_venue();
+  ParticleFilter pf(v, test_config(), {});
+  feed_rssi_on_level(pf, v, {2.0, 1.5}, 0, 60);
+  ASSERT_EQ(pf.estimate().level, 0);
+  feed_rise(pf, 20.0, 4.0);
+  EXPECT_EQ(pf.estimate().level, 1);
+}
 
 TEST(ParticleFilter, ConvergesOnStaticUser) {
   const Venue v = test::two_room_venue();

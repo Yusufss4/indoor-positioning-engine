@@ -59,10 +59,88 @@ TEST(Venue, RejectsMalformedInput) {
 }
 
 TEST(Venue, ShippedVenuesLoad) {
-  for (const char* name : {"venues/office_floor.json", "venues/airport_hall.json"}) {
+  for (const char* name : {"venues/office_floor.json", "venues/airport_hall.json", "venues/office_two_floor.json"}) {
     const Venue v = load_venue_file(test::data_path(name));
     EXPECT_GT(v.walls().size(), 4u) << name;
     EXPECT_GE(v.beacons().size(), 8u) << name;
     for (const auto& beacon : v.beacons()) EXPECT_TRUE(v.bounds().contains(beacon.pos)) << beacon.id;
+    EXPECT_TRUE(v.georef().has_value()) << name;
   }
+}
+
+TEST(Venue, LegacySingleFloorFormatIsOneLevel) {
+  const Venue v = test::two_room_venue();
+  ASSERT_EQ(v.level_count(), 1);
+  EXPECT_FALSE(v.multi_level());
+  EXPECT_EQ(v.level(0).ordinal, 0);
+  EXPECT_DOUBLE_EQ(v.level(0).elevation_m, 0.0);
+  EXPECT_EQ(&v.walls(), &v.level(0).walls);
+  EXPECT_TRUE(v.connectors().empty());
+  EXPECT_FALSE(v.georef().has_value());
+  for (const auto& b : v.beacons()) EXPECT_EQ(b.level, 0);
+}
+
+TEST(Venue, LevelsAreSortedByOrdinalAndReferencedByIndex) {
+  const Venue v = test::two_level_venue();
+  ASSERT_EQ(v.level_count(), 2);
+  EXPECT_TRUE(v.multi_level());
+  EXPECT_EQ(v.level(0).name, "Ground");
+  EXPECT_EQ(v.level(1).name, "First");
+  EXPECT_EQ(v.level_index(1), 1);
+  EXPECT_FALSE(v.level_index(7).has_value());
+  EXPECT_EQ(v.beacons()[v.beacon_index("A1").value()].level, 1);
+  EXPECT_EQ(v.nearest_level(-1.0), 0);
+  EXPECT_EQ(v.nearest_level(2.1), 1);
+  EXPECT_EQ(v.nearest_level(9.0), 1);
+}
+
+TEST(Venue, WallQueriesArePerLevel) {
+  auto venue_json = R"({"bounds": [0, 0, 10, 10], "beacons": [],
+    "levels": [{"ordinal": 0, "walls": [[5, 0, 5, 10]]}, {"ordinal": 1, "walls": []}]})";
+  const Venue v = parse_venue(venue_json);
+  EXPECT_TRUE(v.crosses_wall({2, 5}, {8, 5}, 0));
+  EXPECT_FALSE(v.crosses_wall({2, 5}, {8, 5}, 1));
+  EXPECT_EQ(v.count_wall_crossings({2, 5}, {8, 5}, 0), 1);
+  EXPECT_EQ(v.count_wall_crossings({2, 5}, {8, 5}, 1), 0);
+  EXPECT_DOUBLE_EQ(v.level(1).elevation_m, 4.0);  // ordinal * default height
+}
+
+TEST(Venue, ConnectorHitTest) {
+  const Venue v = test::two_level_venue();
+  ASSERT_EQ(v.connectors().size(), 2u);
+  const Connector* stairs = v.connector_at({2, 1.5}, 0);
+  ASSERT_NE(stairs, nullptr);
+  EXPECT_EQ(stairs->id, "stairs");
+  EXPECT_EQ(stairs->kind, ConnectorKind::Stairs);
+  EXPECT_EQ(v.connector_at({2, 1.5}, 1), stairs);
+  const Connector* lift = v.connector_at({19, 9}, 1);
+  ASSERT_NE(lift, nullptr);
+  EXPECT_EQ(lift->kind, ConnectorKind::Elevator);
+  EXPECT_EQ(v.connector_at({5, 5}, 0), nullptr);
+  EXPECT_EQ(v.connector_at({4.5, 1.5}, 0), nullptr);
+}
+
+TEST(Venue, RejectsInvalidLevelReferences) {
+  EXPECT_THROW(parse_venue(R"({"bounds": [0, 0, 10, 10], "levels": [{"ordinal": 0}],
+    "beacons": [{"id": "X", "x": 1, "y": 1, "level": 3}]})"),
+               std::runtime_error);
+  EXPECT_THROW(parse_venue(R"({"bounds": [0, 0, 10, 10], "levels": [{"ordinal": 0}, {"ordinal": 0}], "beacons": []})"),
+               std::runtime_error);
+  EXPECT_THROW(parse_venue(R"({"bounds": [0, 0, 10, 10], "levels": [{"ordinal": 0}], "walls": [], "beacons": []})"),
+               std::runtime_error);
+  EXPECT_THROW(parse_venue(R"({"bounds": [0, 0, 10, 10], "levels": [{"ordinal": 0}, {"ordinal": 1}], "beacons": [],
+    "connectors": [{"id": "s", "kind": "ladder", "levels": [0, 1], "area": [[0,0],[1,0],[1,1]]}]})"),
+               std::invalid_argument);
+  EXPECT_THROW(parse_venue(R"({"bounds": [0, 0, 10, 10], "levels": [{"ordinal": 0}, {"ordinal": 1}], "beacons": [],
+    "connectors": [{"id": "s", "kind": "stairs", "levels": [0], "area": [[0,0],[1,0],[1,1]]}]})"),
+               std::runtime_error);
+}
+
+TEST(Geometry, PointInPolygon) {
+  const Polygon square = {{0, 0}, {2, 0}, {2, 2}, {0, 2}};
+  EXPECT_TRUE(point_in_polygon({1, 1}, square));
+  EXPECT_FALSE(point_in_polygon({3, 1}, square));
+  const Polygon l_shape = {{0, 0}, {4, 0}, {4, 1}, {1, 1}, {1, 4}, {0, 4}};
+  EXPECT_TRUE(point_in_polygon({0.5, 3}, l_shape));
+  EXPECT_FALSE(point_in_polygon({3, 3}, l_shape));
 }

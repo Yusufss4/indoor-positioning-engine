@@ -3,6 +3,7 @@
   "description": "80 x 40 m departure hall: three check-in islands in the open area and a row of shops along the north side. Beacons are sparse.",
   "bounds": [0, 0, 80, 40],
   "wall_attenuation_db": 3.5,
+  "georef": {"origin_lat": 40.97690, "origin_lon": 28.81460, "rotation_deg": 0},
   "walls": [
     [0, 0, 80, 0], [80, 0, 80, 40], [80, 40, 0, 40], [0, 40, 0, 0],
 
