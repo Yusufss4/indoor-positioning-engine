@@ -9,5 +9,6 @@ viz/output/
 datasets/msil/raw/
 datasets/msil/out/
 datasets/msil/out_scans/
+datasets/msil/out_doors/
 web/dist/
 .DS_Store

@@ -221,8 +221,8 @@ Held-out half, replayed once to report (no setting was chosen on it):
 | floor outline (current) | 7.07 / 9.50 | 6.98 / 9.62 |
 | doorways 3 m, 3 dB per wall | 9.59 / 13.81 | 7.39 / 9.78 |
 
-So the default stays `auto` (floor outline only), and `msil_baseline.json` and `data/real/` are
-unchanged. Shop walls would need either real doors (IMDF `opening` features) or a filter that gets out
+So the converter's default stays `auto` (floor outline only), and `msil_baseline.json` is unchanged.
+The web demo does use the shop walls (see [below](#in-the-web-demo)). Shop walls would need either real doors (IMDF `opening` features) or a filter that gets out
 of a trapped cloud faster than the current recovery proposal, which is on in the Wi-Fi config and does
 not prevent the loss.
 
@@ -278,7 +278,12 @@ The scenario menu of the [live demo](https://yusufss4.github.io/indoor-positioni
 "Real recordings" group. It holds the
 longest held-out walk on each of the three floors with the longest held-out walks, copied to
 `data/real/` by `datasets/msil/export_demo.py`. The demo replays the recorded IMU and Wi-Fi through all
-three filters, using the Wi-Fi config for the particle filter. It draws the mall's floor plan under the
+three filters, using the Wi-Fi config for the particle filter. Its venues come from
+`convert.py --walls doors`, so the shop walls of the floor plan are real walls in the demo, with the
+doorways [inferred from training walks](#shop-walls-with-doorways). That is a choice for the demo, not the
+best-scoring map. On its three walks (`ipe-replay`, pf with the Wi-Fi config, CEP50 / CEP95), the shop walls
+help site1 F2 (6.1 / 15.7 -> 2.7 / 4.5 m), hurt site1 B1 (9.2 / 15.2 -> 10.3 / 21.4 m) and are mixed on
+site2 F1 (10.6 / 13.9 -> 9.2 / 15.8 m). It draws the mall's floor plan under the
 venue and the surveyor's waypoints as squares. The black path between waypoints is interpolated and
 only used for the live error readout; mean and CEP95 are scored at the waypoints, as here. The 3D view
 with the OpenStreetMap underlay shows where the mall is (see the GCJ-02 caveat for site 2 above).
@@ -297,9 +302,9 @@ python3 -m venv .venv && .venv/bin/pip install -r datasets/msil/requirements.txt
     --presets pf,pf-nomap --config data/configs/msil_wifi.json
 ctest --test-dir build -L realdata                               # out_scans vs tests/regression/msil_baseline.json
 .venv/bin/python datasets/msil/plot.py --trace site2/F1/5dd35c9844333f00067aa0e0.csv --out docs/img/msil_trajectory.png
-.venv/bin/python datasets/msil/export_demo.py                    # refresh data/real/ from out_scans/
-.venv/bin/python datasets/msil/convert.py --wifi --scans --walls doors --out /tmp/msil_doors   # shop walls
-.venv/bin/python datasets/msil/plot.py --out-dir /tmp/msil_doors --walls-only site1/F2 --out docs/img/msil_walls.png
+.venv/bin/python datasets/msil/convert.py --wifi --scans --walls doors --out datasets/msil/out_doors   # shop walls
+.venv/bin/python datasets/msil/plot.py --out-dir datasets/msil/out_doors --walls-only site1/F2 --out docs/img/msil_walls.png
+.venv/bin/python datasets/msil/export_demo.py                    # refresh data/real/ from out_doors/
 ```
 
 `convert.py --help` lists the options: `--walls`, `--door-width`, `--scans`, the fit thresholds, `--test-every`, and

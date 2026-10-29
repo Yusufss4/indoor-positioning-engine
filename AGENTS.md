@@ -23,8 +23,9 @@ truth; a replay tool and a regression suite measure accuracy.
 - `datasets/msil` - fetch and convert scripts for the Microsoft Indoor Location sample. The raw data and
   the converted `out/` (readings one by one) and `out_scans/` (`--scans`, one batch per Wi-Fi scan) are
   git-ignored; `tests/regression/msil_baseline.json` gates the held-out walks of `out_scans/`.
-  `data/real` holds three converted walks for the web demo; regenerate it with
-  `datasets/msil/export_demo.py` (a unit test checks it against the venue export).
+  `data/real` holds three converted walks for the web demo, with shop walls (`convert.py --wifi --scans
+  --walls doors --out datasets/msil/out_doors`); regenerate it with `datasets/msil/export_demo.py`
+  (a unit test checks it against the venue export).
 - `viz/` - Python plotting; `web/` - Emscripten bindings and the browser demo.
 
 ## Build and test

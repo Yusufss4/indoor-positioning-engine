@@ -6,8 +6,10 @@ selection is mechanical rather than picked for good results. For each floor it w
 its GeoJSON export (for the 3D view), the floor image and the trace, plus data/real/demos.json,
 which the demo reads to fill its scenario menu.
 
-The sample data is MIT-licensed; its licence is copied next to the files.
+The venues carry the shop walls with inferred doorways (see docs/real_data.md). The sample data is
+MIT-licensed; its licence is copied next to the files.
 
+    .venv/bin/python datasets/msil/convert.py --wifi --scans --walls doors --out datasets/msil/out_doors
     .venv/bin/python datasets/msil/export_demo.py
 """
 
@@ -35,7 +37,8 @@ def waypoints(trace: Path) -> list[tuple[float, float]]:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--out-dir", type=Path, default=HERE / "out_scans", help="converter output folder")
+    ap.add_argument("--out-dir", type=Path, default=HERE / "out_doors",
+                    help="converter output folder (convert.py --wifi --scans --walls doors)")
     ap.add_argument("--raw", type=Path, default=HERE / "raw")
     ap.add_argument("--dest", type=Path, default=ROOT / "data" / "real")
     ap.add_argument("--build", type=Path, default=ROOT / "build")
