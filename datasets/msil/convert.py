@@ -4,8 +4,8 @@
 For every site and floor:
 
 * the floor plan (GCJ-02 GeoJSON scaled to the floor's width x height in metres) becomes a
-  single-level venue, with walls from the floor outline (``boundary``) or the shop outlines
-  (``units``);
+  single-level venue, with walls from the floor outline (``boundary``), the shop outlines
+  (``units``) or the shop outlines with doorways where training paths cross them (``doors``);
 * paths are split into training and test sets by path id;
 * training paths fit a radio map: position, tx power and path-loss exponent per iBeacon and,
   with ``--wifi``, per Wi-Fi access point;
@@ -258,20 +258,109 @@ def ring_segments(rings) -> np.ndarray:
     return np.array(segs) if segs else np.zeros((0, 4))
 
 
-def crossings(p, q, walls: np.ndarray) -> int:
-    """Number of wall segments properly intersected by segment p-q."""
+def dedupe_segments(segs: np.ndarray, tol: float = 0.05, max_angle_deg: float = 1.0) -> np.ndarray:
+    """Merges collinear segments that overlap or touch (within `tol` metres). Neighbouring shops
+    share edges, and a shared edge listed twice would count twice in the radio model's wall
+    attenuation."""
+    if len(segs) == 0:
+        return segs
+    cos_max = math.cos(math.radians(max_angle_deg))
+    origins, dirs, intervals = [], [], []
+    o_arr = np.zeros((len(segs), 2))
+    d_arr = np.zeros((len(segs), 2))
+    for a0, a1, b0, b1 in segs:
+        a, b = np.array([a0, a1]), np.array([b0, b1])
+        length = float(np.hypot(*(b - a)))
+        if length < tol:
+            continue
+        d = (b - a) / length
+        n = len(origins)
+        match = -1
+        if n:
+            parallel = np.abs(d_arr[:n] @ d) >= cos_max
+            rel_a, rel_b = a - o_arr[:n], b - o_arr[:n]
+            off_a = np.abs(rel_a[:, 0] * d_arr[:n, 1] - rel_a[:, 1] * d_arr[:n, 0])
+            off_b = np.abs(rel_b[:, 0] * d_arr[:n, 1] - rel_b[:, 1] * d_arr[:n, 0])
+            hits = np.flatnonzero(parallel & (off_a < tol) & (off_b < tol))
+            if len(hits):
+                match = int(hits[0])
+        if match < 0:
+            origins.append(a)
+            dirs.append(d)
+            o_arr[n], d_arr[n] = a, d
+            intervals.append([])
+            match = n
+        ta, tb = float((a - origins[match]) @ dirs[match]), float((b - origins[match]) @ dirs[match])
+        intervals[match].append((min(ta, tb), max(ta, tb)))
+    out = []
+    for o, d, ivs in zip(origins, dirs, intervals):
+        ivs.sort()
+        lo, hi = ivs[0]
+        for s, e in ivs[1:]:
+            if s <= hi + tol:
+                hi = max(hi, e)
+                continue
+            out.append([*(o + lo * d), *(o + hi * d)])
+            lo, hi = s, e
+        out.append([*(o + lo * d), *(o + hi * d)])
+    return np.array(out)
+
+
+def _orient(u, v, w):
+    return (v[..., 0] - u[..., 0]) * (w[..., 1] - u[..., 1]) - (v[..., 1] - u[..., 1]) * (w[..., 0] - u[..., 0])
+
+
+def crossing_params(p, q, walls: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Indices of the wall segments properly intersected by segment p-q, and where along each
+    wall (0 at its first endpoint, 1 at its second) the intersection lies."""
     if len(walls) == 0:
-        return 0
+        return np.zeros(0, dtype=int), np.zeros(0)
     a, b = walls[:, :2], walls[:, 2:]
-
-    def orient(u, v, w):
-        return (v[..., 0] - u[..., 0]) * (w[..., 1] - u[..., 1]) - (v[..., 1] - u[..., 1]) * (w[..., 0] - u[..., 0])
-
     p = np.asarray(p)[None, :]
     q = np.asarray(q)[None, :]
-    d1, d2 = orient(a, b, p), orient(a, b, q)
-    d3, d4 = orient(p, q, a), orient(p, q, b)
-    return int(np.sum((d1 * d2 < 0) & (d3 * d4 < 0)))
+    d1, d2 = _orient(a, b, p), _orient(a, b, q)
+    d3, d4 = _orient(p, q, a), _orient(p, q, b)
+    idx = np.flatnonzero((d1 * d2 < 0) & (d3 * d4 < 0))
+    return idx, d3[idx] / (d3[idx] - d4[idx])
+
+
+def crossings(p, q, walls: np.ndarray) -> int:
+    """Number of wall segments properly intersected by segment p-q."""
+    return len(crossing_params(p, q, walls)[0])
+
+
+def cut_doors(walls: np.ndarray, paths: list[PathData], width: float, min_piece: float = 0.1) -> tuple[np.ndarray, int]:
+    """Opens a gap `width` metres wide, centred on the crossing, wherever a straight line between
+    consecutive surveyor waypoints crosses a wall. The plans have no doors; a walk through a wall
+    is the evidence for one. Returns the cut walls and the centre of each merged gap."""
+    cuts: dict[int, list[float]] = {}
+    for pd in paths:
+        for a, b in zip(pd.waypoints[:-1], pd.waypoints[1:]):
+            idx, u = crossing_params(a[1:], b[1:], walls)
+            for i, ui in zip(idx, u):
+                cuts.setdefault(int(i), []).append(float(ui))
+    out, centres = [], []
+    for i, w in enumerate(walls):
+        if i not in cuts:
+            out.append(w)
+            continue
+        a, b = w[:2], w[2:]
+        length = float(np.hypot(*(b - a)))
+        holes = sorted((u * length - width / 2, u * length + width / 2) for u in cuts[i])
+        merged = [list(holes[0])]
+        for s, e in holes[1:]:
+            if s <= merged[-1][1]:
+                merged[-1][1] = max(merged[-1][1], e)
+            else:
+                merged.append([s, e])
+        centres += [[*(a + (b - a) * ((s + e) / 2 / length))] for s, e in merged]
+        pos = 0.0
+        for s, e in merged + [[length, length]]:
+            if s - pos >= min_piece:
+                p0, p1 = a + (b - a) * (pos / length), a + (b - a) * (min(s, length) / length)
+                out.append([*p0, *p1])
+            pos = max(pos, e)
+    return (np.array(out) if out else np.zeros((0, 4))), centres
 
 
 def point_in_rings(pt, rings) -> bool:
@@ -449,15 +538,22 @@ def convert_floor(site: str, floor_name: str, floor_dir: Path, paths: list[PathD
     test = [p for p in paths if is_test(p.path_id, args.test_every)]
 
     outline = ring_segments(floor.outline)
-    units = ring_segments(floor.units)
-    wall_sets = {"none": np.zeros((0, 4)), "boundary": outline, "units": np.vstack([outline, units])}
+    units = dedupe_segments(np.vstack([outline, ring_segments(floor.units)]))
+    # Doors come from training walks only, so test walks can still run into a wall.
+    doors, door_centres = cut_doors(units, train, args.door_width)
+    wall_sets = {"none": np.zeros((0, 4)), "boundary": outline, "units": units, "doors": doors}
     report = {"site": site, "floor": floor_name, "train_paths": len(train), "test_paths": len(test)}
+    report["wall_segments"] = {k: len(v) for k, v in wall_sets.items()}
+    report["doors_cut"] = len(door_centres)
+    report["door_centres"] = [[round(float(v), 2) for v in c] for c in door_centres]
 
     # Ground truth vs map: a surveyor path that crosses a wall means that wall set would kill
     # the true hypothesis in the particle filter.
     wp_inside = wp_total = 0
+    test_ids = {p.path_id for p in test}
     cross = {k: 0 for k in wall_sets}
     paths_crossing = {k: 0 for k in wall_sets}
+    cross_test = {k: 0 for k in wall_sets}
     for pd in paths:
         for _, x, y in pd.waypoints:
             wp_total += 1
@@ -466,8 +562,11 @@ def convert_floor(site: str, floor_name: str, floor_dir: Path, paths: list[PathD
             n = sum(crossings(a[1:], b[1:], walls) for a, b in zip(pd.waypoints[:-1], pd.waypoints[1:]))
             cross[k] += n
             paths_crossing[k] += n > 0
+            if pd.path_id in test_ids:
+                cross_test[k] += n
     report["waypoints_inside_outline"] = wp_inside / max(wp_total, 1)
     report["truth_wall_crossings"] = cross
+    report["truth_wall_crossings_test"] = cross_test
     report["paths_crossing_walls"] = paths_crossing
 
     mode = args.walls
@@ -530,7 +629,9 @@ def main():
     ap.add_argument("--wifi", action="store_true", help="also fit and replay Wi-Fi access points")
     ap.add_argument("--scans", action="store_true",
                     help="with --wifi, write each Wi-Fi scan as one batch (scan column, newest reading's time)")
-    ap.add_argument("--walls", choices=["auto", "none", "boundary", "units"], default="auto")
+    ap.add_argument("--walls", choices=["auto", "none", "boundary", "units", "doors"], default="auto",
+                    help="doors: shop outlines with gaps where training walks cross them")
+    ap.add_argument("--door-width", type=float, default=3.0, help="metres; gap cut per doors crossing")
     ap.add_argument("--test-every", type=int, default=5, help="every N-th path (by id hash) is a test path")
     ap.add_argument("--min-samples", type=int, default=30)
     ap.add_argument("--min-spread", type=float, default=3.0, help="metres; transmitters heard from one spot are dropped")
@@ -557,7 +658,7 @@ def main():
             entries, report = convert_floor(site_dir.name, f.name, f, parsed[f.name], offset, args, args.out)
             report["heading_offset_deg"] = math.degrees(offset)
             report["heading_spread_deg"] = math.degrees(spread)
-            print(json.dumps(report))
+            print(json.dumps({k: v for k, v in report.items() if k != "door_centres"}))
             manifest += entries
             reports.append(report)
 

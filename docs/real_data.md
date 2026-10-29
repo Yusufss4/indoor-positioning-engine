@@ -43,7 +43,7 @@ in `data/real/` for the web demo (see below), with the sample's MIT licence next
 | Unknown transmitter positions | Robust least squares (soft-L1, 4 dB scale) of position, tx power and path-loss exponent for each transmitter, on interpolated positions from training walks. Keeps transmitters with at least 30 samples, at least 3 m of spatial spread, RMS of 8 dB or less, inside the floor | 252-887 transmitters per floor; median fit RMS 4.5-5.9 dB |
 | Virtual access points | One radio advertises up to 6 SSIDs under BSSIDs that differ only in the first octet. These are merged into one transmitter, keeping one reading per access point per 50 ms | In 40 walks on site1 F1, half of the Wi-Fi readings were duplicates and 162 of 715 physical access points had 6 BSSIDs |
 | Scans | With `--scans`, the Wi-Fi readings of one scan are written as one batch (a `scan` column on the `ble` rows), stamped with the scan's newest `last_seen`. A phone only gets the readings when the scan completes, so applying each at its own `last_seen` (the default) is slightly optimistic | Median 14 scans per walk, 38 transmitters per scan after the fit and the merge |
-| Walls | Floor outline as walls (`boundary`). Shop outlines (`units`) have no doors, so the surveyor's path crosses them. The outline is tagged `type: floor` on site 1 and by a `floor` property on site 2 | `units`: 8-132 truth crossings on every floor, so never used. `boundary`: 0 crossings, except site1 F4 (2), which therefore gets no walls |
+| Walls | Floor outline as walls (`boundary`). Shop outlines (`units`, with edges shared by neighbouring shops merged into one) have no doors, so the surveyor's path crosses them. `--walls doors` cuts doorways into them from the training walks (see [below](#shop-walls-with-doorways)); it is not the default. The outline is tagged `type: floor` on site 1 and by a `floor` property on site 2 | `units`: 4-112 truth crossings on every floor, so never used. `boundary`: 0 crossings, except site1 F4 (2), which therefore gets no walls |
 
 Two more data facts shaped the setup:
 
@@ -181,6 +181,51 @@ The EKF's covariance is the most overconfident of all (coverage 0%), likely beca
 updates per scan each shrink it as if independent. Inflating its measurement noise per scan is the
 matching change there and is not done yet.
 
+## Shop walls with doorways
+
+The floor images show every shop outline, and the venues use none of them: the plans have no doors, so
+true walks pass through the outlines. `convert.py --walls doors` tries to recover the doors from the
+data. Wherever a straight line between two consecutive waypoints of a **training** walk crosses a shop
+edge or the floor outline, it cuts a gap of `--door-width` (3 m) centred on the crossing. Edges shared by
+two shops are merged first, so the radio model does not count them twice. `plot.py --walls-only` draws the
+result over the floor image. On all 14 floors the walls lie on the plan's shop lines, and most doorways
+sit on shop fronts and on corners that the straight waypoint lines cut.
+
+![doors-mode walls on site1 F2](img/msil_walls.png)
+
+Each floor gets 391-2,214 wall segments and 2-76 doorways. No training walk crosses a wall any more, but
+test walks still do, 97 times in total over 222 test walks (0-26 per floor), through doors the
+training walks never used.
+
+Tune half, scan traces, `pf` and `pf-nomap` with the Wi-Fi config, median CEP50 / CEP95 [m] over walks:
+
+| Walls | pf | pf-nomap |
+|---|---:|---:|
+| **floor outline (current)** | **6.37 / 10.19** | 6.61 / 9.96 |
+| doorways 3 m, 3 dB per wall | 8.18 / 12.55 | 6.90 / 10.14 |
+| doorways 3 m, 0 dB per wall (motion constraint only) | 7.82 / 12.87 | 6.90 / 10.14 |
+| doorways 6 m, 3 dB per wall | 8.37 / 13.03 | 6.90 / 10.14 |
+
+The loss is not mainly the missing doors. Split by walk, the 89 tune walks whose waypoint line crosses no
+doors-mode wall go from 6.37 / 9.99 to 7.53 / 12.87 m (3 dB) as well; the 22 that do cross one go from 6.18 /
+11.78 to 7.71 / 11.91 m. Removing the radio attenuation or doubling the door width does not recover it either.
+The likely mechanism is that the corridors trap the particle cloud. Wi-Fi alone leaves the estimate 6-8 m off
+on these floors, often in a parallel corridor. Without shop walls, steps and jitter let the cloud slide
+across to the right one; with them, the wrong hypothesis is boxed in until it walks out through a doorway.
+`pf-nomap` moves only because its resampling jitter still respects walls.
+
+Held-out half, replayed once to report (no setting was chosen on it):
+
+| Walls | pf | pf-nomap |
+|---|---:|---:|
+| floor outline (current) | 7.07 / 9.50 | 6.98 / 9.62 |
+| doorways 3 m, 3 dB per wall | 9.59 / 13.81 | 7.39 / 9.78 |
+
+So the default stays `auto` (floor outline only), and `msil_baseline.json` and `data/real/` are
+unchanged. Shop walls would need either real doors (IMDF `opening` features) or a filter that gets out
+of a trapped cloud faster than the current recovery proposal, which is on in the Wi-Fi config and does
+not prevent the loss.
+
 ## Simulation vs. real data
 
 | | pf CEP50 / CEP95 [m] | EKF CEP50 / CEP95 [m] |
@@ -222,7 +267,8 @@ resampling jitter still refuses to cross walls whatever `wall_constraint` says.
   measurement age. Scan traces apply the whole scan at its newest reading, which on these walks was
   better than applying each reading at its own `last_seen` (tune half: 7.4 / 11.2 vs 8.1 / 12.7 m).
 - **Doors.** The shop outlines would be useful walls if the doors were known. IMDF `opening` features
-  carry exactly that; this GeoJSON does not.
+  carry exactly that; this GeoJSON does not. Doorways inferred from training walks make the particle
+  filter worse, not better ([above](#shop-walls-with-doorways)).
 - **site2 F5** (2 walks) is lost by every filter. Its transmitter density is average (9 per 1,000 m^2),
   so the cause is not established; two walks are too few to tell.
 
@@ -251,9 +297,11 @@ python3 -m venv .venv && .venv/bin/pip install -r datasets/msil/requirements.txt
     --presets pf,pf-nomap --config data/configs/msil_wifi.json
 ctest --test-dir build -L realdata                               # out_scans vs tests/regression/msil_baseline.json
 .venv/bin/python datasets/msil/plot.py --trace site2/F1/5dd35c9844333f00067aa0e0.csv --out docs/img/msil_trajectory.png
-.venv/bin/python datasets/msil/export_demo.py                    # refresh data/real/ for the web demo
+.venv/bin/python datasets/msil/export_demo.py                    # refresh data/real/ from out_scans/
+.venv/bin/python datasets/msil/convert.py --wifi --scans --walls doors --out /tmp/msil_doors   # shop walls
+.venv/bin/python datasets/msil/plot.py --out-dir /tmp/msil_doors --walls-only site1/F2 --out docs/img/msil_walls.png
 ```
 
-`convert.py --help` lists the options: `--walls`, `--scans`, the fit thresholds, `--test-every`, and
+`convert.py --help` lists the options: `--walls`, `--door-width`, `--scans`, the fit thresholds, `--test-every`, and
 `--sites` / `--floors` to convert part of the data. The `real_data_regression` CTest is skipped when
 `datasets/msil/out_scans/` is missing, so CI stays green without the dataset.

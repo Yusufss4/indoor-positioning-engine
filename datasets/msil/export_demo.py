@@ -35,7 +35,7 @@ def waypoints(trace: Path) -> list[tuple[float, float]]:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--out-dir", type=Path, default=HERE / "out", help="converter output folder")
+    ap.add_argument("--out-dir", type=Path, default=HERE / "out_scans", help="converter output folder")
     ap.add_argument("--raw", type=Path, default=HERE / "raw")
     ap.add_argument("--dest", type=Path, default=ROOT / "data" / "real")
     ap.add_argument("--build", type=Path, default=ROOT / "build")
