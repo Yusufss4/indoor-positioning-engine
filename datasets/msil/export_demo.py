@@ -43,6 +43,7 @@ def main():
     ap.add_argument("--dest", type=Path, default=ROOT / "data" / "real")
     ap.add_argument("--build", type=Path, default=ROOT / "build")
     ap.add_argument("--count", type=int, default=3, help="number of floors (one walk each)")
+    ap.add_argument("--default", default="site1_F2", help="floor whose walk the demo opens with")
     args = ap.parse_args()
 
     traces = json.loads((args.out_dir / "manifest_holdout.json").read_text())["traces"]
@@ -93,6 +94,7 @@ def main():
         "source": "Microsoft Indoor Location Competition 2.0 sample data, "
                   "https://github.com/location-competition/indoor-location-competition-20 (MIT, see LICENSE)",
         "selection": "longest held-out walk on each of the floors with the longest held-out walks",
+        "default": next((d["id"] for d in demos if d["id"].startswith(args.default + "_")), demos[0]["id"]),
         "demos": demos,
     }
     (args.dest / "demos.json").write_text(json.dumps(index, indent=1) + "\n")

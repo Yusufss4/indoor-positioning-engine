@@ -165,8 +165,8 @@ python3 -m http.server -d build-wasm/site 8000   # open http://localhost:8000
 The 2D view draws one floor at a time: the walker's floor by default, or any floor picked in the Floor
 menu. Trails show only that floor, estimates on another floor are drawn as dashed rings, and the stats
 table adds a floor column for two-floor scenarios. The "Real recordings" scenarios replay phone walks from
-two shopping malls instead of simulating one, over the mall's floor plan, with the surveyor's waypoints as
-squares.
+two shopping malls instead of simulating one, over the mall's floor plan, with its shop walls and the
+surveyor's waypoints as squares. The demo opens on one of them (site1 F2).
 
 The **3D** button switches to a MapLibre GL view of the venue: walls extruded per floor, translucent slabs,
 stair and lift shafts, the walker, each filter's estimate with its uncertainty, and the particles coloured

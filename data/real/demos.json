@@ -1,6 +1,7 @@
 {
  "source": "Microsoft Indoor Location Competition 2.0 sample data, https://github.com/location-competition/indoor-location-competition-20 (MIT, see LICENSE)",
  "selection": "longest held-out walk on each of the floors with the longest held-out walks",
+ "default": "site1_F2_5dda5afc",
  "demos": [
   {
    "id": "site1_B1_5dda14bf",

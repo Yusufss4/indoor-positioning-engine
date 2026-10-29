@@ -40,7 +40,8 @@ function loadImage(url) {
   });
 }
 
-/// Adds the recordings listed in data/real/demos.json to the scenario menu (if the file exists).
+/// Adds the recordings listed in data/real/demos.json to the scenario menu (if the file exists) and
+/// selects its default recording.
 async function loadRealDemos() {
   let index;
   try {
@@ -55,6 +56,7 @@ async function loadRealDemos() {
     group.append(new Option(d.title, `real:${d.id}`));
   }
   el("scenario").append(group);
+  if (realDemos.has(index.default)) el("scenario").value = `real:${index.default}`;
 }
 
 function parseWaypoints(traceText) {
