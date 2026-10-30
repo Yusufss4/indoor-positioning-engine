@@ -40,6 +40,8 @@ void expect_same_venue(const Venue& a, const Venue& b, double tol = 0.01) {
     EXPECT_NEAR(a.georef()->origin_lon, b.georef()->origin_lon, 1e-8);
     EXPECT_NEAR(a.georef()->rotation_deg, b.georef()->rotation_deg, 1e-9);
   }
+  ASSERT_EQ(a.footprint().size(), b.footprint().size());
+  for (std::size_t i = 0; i < a.footprint().size(); ++i) EXPECT_TRUE(near(a.footprint()[i], b.footprint()[i], tol));
 
   ASSERT_EQ(a.level_count(), b.level_count());
   for (int i = 0; i < a.level_count(); ++i) {
@@ -96,15 +98,31 @@ fs::path fresh_dir(const std::string& name) {
 }
 
 const char* const kShippedVenues[] = {"office_floor", "office_two_floor", "airport_hall"};
+// Imported from OpenStreetMap. Its walls are only nearly collinear, so a second import merges a few
+// more of them and an exact round trip does not hold; only the committed export is checked.
+const char* const kImportedVenues[] = {"kit_informatikbau"};
 
 }  // namespace
 
 TEST(Import, VenueJsonRoundTrip) {
-  for (const char* name : kShippedVenues) {
-    SCOPED_TRACE(name);
-    const Venue v = load_venue_file(test::data_path(std::string("venues/") + name + ".json"));
-    expect_same_venue(v, parse_venue(geo::venue_to_json(v)), 1e-9);
+  for (const auto& names : {std::vector<const char*>(std::begin(kShippedVenues), std::end(kShippedVenues)),
+                            std::vector<const char*>(std::begin(kImportedVenues), std::end(kImportedVenues))}) {
+    for (const char* name : names) {
+      SCOPED_TRACE(name);
+      const Venue v = load_venue_file(test::data_path(std::string("venues/") + name + ".json"));
+      expect_same_venue(v, parse_venue(geo::venue_to_json(v)), 1e-9);
+    }
   }
+}
+
+TEST(Import, FootprintRoundTripsThroughGeoJsonAndImdf) {
+  const Venue v = test::with_footprint(test::two_level_venue(), test::l_footprint());
+  ASSERT_FALSE(v.footprint().empty());
+  expect_same_venue(v, parse_venue(geo::venue_to_json(v)), 1e-9);
+  expect_same_venue(v, geo::import_geojson(geo::export_geojson(v), geo::Mapping{}).venue);
+  const fs::path dir = fresh_dir("ipe_imdf_footprint");
+  geo::export_imdf(v, dir.string());
+  expect_same_venue(v, geo::import_imdf(dir.string()).venue);
 }
 
 TEST(Import, GeoJsonRoundTripWithinOneCentimetre) {
@@ -138,7 +156,9 @@ TEST(Import, CommittedImdfSampleMatchesVenue) {
 
 TEST(Import, CommittedExportsAreUpToDate) {
   // Regenerate with: ipe-import export data/venues/X.json --out data/geojson/X.geojson
-  for (const char* name : kShippedVenues) {
+  std::vector<const char*> names(std::begin(kShippedVenues), std::end(kShippedVenues));
+  names.insert(names.end(), std::begin(kImportedVenues), std::end(kImportedVenues));
+  for (const char* name : names) {
     SCOPED_TRACE(name);
     const Venue v = load_venue_file(test::data_path(std::string("venues/") + name + ".json"));
     EXPECT_EQ(geo::export_geojson(v), slurp(test::data_path(std::string("geojson/") + name + ".geojson")));

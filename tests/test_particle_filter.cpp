@@ -217,6 +217,42 @@ TEST(ParticleFilter, BeaconSeedWeightsRecoverTheUniformPrior) {
   EXPECT_NEAR(std::sqrt(var), cfg.rssi_offset_sigma, 0.5);
 }
 
+TEST(ParticleFilter, FootprintBoundsEveryDraw) {
+  // Uniform start, beacon-ring seed and recovery all stay inside the L.
+  const Venue v = test::with_footprint(test::two_room_venue(), test::l_footprint());
+  const auto all_inside = [&](const ParticleFilter& pf) {
+    return std::all_of(pf.particles().begin(), pf.particles().end(),
+                       [&](const Particle& p) { return v.inside(p.pos); });
+  };
+  ParticleFilter pf(v, proposal_config(), {});
+  EXPECT_TRUE(all_inside(pf));
+  // Beacon D at (18, 8) is outside the footprint; its ring mostly misses it.
+  pf.seed_from_beacon(3, -65.0);
+  EXPECT_TRUE(all_inside(pf));
+
+  ParticleFilter rec(v, test_config(), {});
+  feed_rssi(rec, v, {5.0, 2.0}, 60);
+  StepEvent step;
+  step.t = 1.0;
+  step.length = 30.0;
+  rec.on_step(step);
+  EXPECT_EQ(rec.recovery_count(), 1u);
+  EXPECT_TRUE(all_inside(rec));
+}
+
+TEST(ParticleFilter, BeaconSeedWeightsRecoverTheFootprintPrior) {
+  const Venue v = test::with_footprint(test::two_room_venue(), test::l_footprint());
+  ParticleFilter pf(v, proposal_config(), {});
+  pf.seed_from_beacon(0, -65.0);
+  // Six 5 x 5 m cells make up the L, each with a sixth of the prior.
+  for (double x0 : {0.0, 5.0, 10.0, 15.0}) {
+    for (double y0 : {0.0, 5.0}) {
+      const double expected = x0 >= 10.0 && y0 >= 5.0 ? 0.0 : 1.0 / 6.0;
+      EXPECT_NEAR(weighted_share(pf, x0, x0 + 5.0, y0, y0 + 5.0), expected, 0.02) << x0 << "," << y0;
+    }
+  }
+}
+
 TEST(ParticleFilter, BeaconSeedWeightsRecoverTheLevelPrior) {
   const Venue v = test::two_level_venue();
   ParticleFilter pf(v, proposal_config(), {});

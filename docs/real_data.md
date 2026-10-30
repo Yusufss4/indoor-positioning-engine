@@ -29,7 +29,7 @@ Android phones held flat in front of the body. Each walk has:
 
 There is no barometer data, and every walk stays on one floor. The full Kaggle release has 200+
 buildings in the same format; its competition rules restrict redistribution, so nothing from it is used.
-`datasets/msil/fetch.sh` downloads the sample. The only converted data committed is three held-out walks
+`datasets/msil/fetch.sh` downloads the sample. The only converted data committed is ten held-out walks
 in `data/real/` for the web demo (see below), with the sample's MIT licence next to them.
 
 ## Conversion (`datasets/msil/convert.py`)
@@ -276,14 +276,29 @@ resampling jitter still refuses to cross walls whatever `wall_constraint` says.
 
 The scenario menu of the [live demo](https://yusufss4.github.io/indoor-positioning-engine/) has a
 "Real recordings" group, and the demo opens on the site1 F2 walk (`default` in `demos.json`). It holds the
-longest held-out walk on each of the three floors with the longest held-out walks, copied to
-`data/real/` by `datasets/msil/export_demo.py`. The demo replays the recorded IMU and Wi-Fi through all
-three filters, using the Wi-Fi config for the particle filter. Its venues come from
-`convert.py --walls doors`, so the shop walls of the floor plan are real walls in the demo, with the
-doorways [inferred from training walks](#shop-walls-with-doorways). That is a choice for the demo, not the
-best-scoring map. On its three walks (`ipe-replay`, pf with the Wi-Fi config, CEP50 / CEP95), the shop walls
-help site1 F2 (6.1 / 15.7 -> 2.7 / 4.5 m), hurt site1 B1 (9.2 / 15.2 -> 10.3 / 21.4 m) and are mixed on
-site2 F1 (10.6 / 13.9 -> 9.2 / 15.8 m). It draws the mall's floor plan under the
+longest held-out walk on every floor where that walk lasts at least 60 s (10 of the 14 floors; the other
+four have no held-out walk longer than 47 s), copied to `data/real/` by `datasets/msil/export_demo.py`.
+The demo replays the recorded IMU and Wi-Fi through all three filters, using the Wi-Fi config for the
+particle filter. Its venues come from `convert.py --walls doors`, so the shop walls of the floor plan are
+real walls in the demo, with the doorways [inferred from training walks](#shop-walls-with-doorways).
+That is a choice for the demo, not the best-scoring map: on these ten walks the shop walls help on two,
+are mixed on one and hurt on seven, badly on site1 F4 and site2 F3, F6, F7 and F8 (`ipe-replay`, pf with
+the Wi-Fi config, CEP50 / CEP95 [m]):
+
+| Walk | Floor outline only (`out_scans`) | Shop walls with doorways (demo) |
+|---|---:|---:|
+| site1 B1, 231 s | 9.2 / 15.2 | 10.3 / 21.4 |
+| site1 F1, 98 s | 7.8 / 11.2 | 8.2 / 15.8 |
+| site1 F2, 160 s | 6.1 / 15.7 | 2.6 / 4.5 |
+| site1 F3, 133 s | 2.7 / 4.1 | 1.3 / 3.3 |
+| site1 F4, 106 s | 8.0 / 10.1 | 23.6 / 70.9 |
+| site2 F1, 217 s | 10.6 / 13.9 | 9.2 / 15.8 |
+| site2 F3, 122 s | 11.4 / 13.8 | 31.7 / 52.0 |
+| site2 F6, 70 s | 8.8 / 9.6 | 19.1 / 31.6 |
+| site2 F7, 75 s | 10.6 / 16.4 | 21.5 / 24.2 |
+| site2 F8, 86 s | 4.4 / 8.2 | 31.1 / 40.4 |
+
+It draws the mall's floor plan under the
 venue and the surveyor's waypoints as squares. The black path between waypoints is interpolated and
 only used for the live error readout; mean and CEP95 are scored at the waypoints, as here. The 3D view
 with the OpenStreetMap underlay shows where the mall is (see the GCJ-02 caveat for site 2 above).

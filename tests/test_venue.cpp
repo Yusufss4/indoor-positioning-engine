@@ -56,6 +56,32 @@ TEST(Venue, RejectsMalformedInput) {
   EXPECT_THROW(parse_venue(R"({"bounds": [0, 0, 0, 10], "beacons": []})"), std::runtime_error);
   EXPECT_THROW(parse_venue(R"({"bounds": [0, 0, 10, 10], "walls": [[1, 2, 3]], "beacons": []})"), std::runtime_error);
   EXPECT_ANY_THROW(parse_venue("not json"));
+  EXPECT_THROW(parse_venue(R"({"bounds": [0, 0, 10, 10], "footprint": [[0, 0], [5, 5]], "beacons": []})"),
+               std::runtime_error);
+  EXPECT_THROW(parse_venue(R"({"bounds": [0, 0, 10, 10], "footprint": [[0, 0, 1], [5, 0], [5, 5]], "beacons": []})"),
+               std::runtime_error);
+}
+
+TEST(Venue, FootprintLimitsTheWalkableArea) {
+  const Venue v = parse_venue(R"({"bounds": [0, 0, 20, 10], "beacons": [],
+                                  "footprint": [[0, 0], [20, 0], [20, 5], [10, 5], [10, 10], [0, 10]]})");
+  ASSERT_EQ(v.footprint().size(), 6u);
+  EXPECT_TRUE(v.inside({15, 2}));
+  EXPECT_TRUE(v.inside({5, 8}));
+  EXPECT_FALSE(v.inside({15, 8}));
+  EXPECT_FALSE(v.inside({-1, 2}));
+  EXPECT_DOUBLE_EQ(v.walkable_area(), 150.0);
+
+  const Venue plain = test::two_room_venue();
+  EXPECT_TRUE(plain.footprint().empty());
+  EXPECT_TRUE(plain.inside({15, 8}));
+  EXPECT_DOUBLE_EQ(plain.walkable_area(), 200.0);
+}
+
+TEST(Venue, FootprintCoveringTheBoundsIsDropped) {
+  const Venue v = test::with_footprint(test::two_room_venue(), {{0, 0}, {20, 0}, {20, 9.95}, {0, 10}});
+  EXPECT_TRUE(v.footprint().empty());
+  EXPECT_DOUBLE_EQ(v.walkable_area(), 200.0);
 }
 
 TEST(Venue, ShippedVenuesLoad) {

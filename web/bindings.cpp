@@ -32,11 +32,13 @@ struct Track {
 
 class Demo {
  public:
-  /// Simulates the scenario and runs every filter with its preset config.
-  Demo(const std::string& venue_json, const std::string& scenario_json, unsigned seed)
+  /// Simulates the scenario and runs every filter with its preset config. `pf_config_patch` (may be
+  /// empty) applies to the particle filter only.
+  Demo(const std::string& venue_json, const std::string& scenario_json, unsigned seed,
+       const std::string& pf_config_patch)
       : venue_(ipe::parse_venue(venue_json)) {
     trace_ = ipe::sim::simulate(ipe::sim::parse_scenario(scenario_json), venue_, seed);
-    init("");
+    init(pf_config_patch);
   }
 
   /// Replays a recorded trace. `pf_config_patch` (may be empty) applies to the particle filter only.
@@ -229,7 +231,7 @@ class Demo {
 
 EMSCRIPTEN_BINDINGS(ipe) {
   emscripten::class_<Demo>("Demo")
-      .constructor<std::string, std::string, unsigned>()
+      .constructor<std::string, std::string, unsigned, std::string>()
       .class_function("replay", &Demo::replay, emscripten::return_value_policy::take_ownership())
       .function("time", &Demo::time)
       .function("duration", &Demo::duration)

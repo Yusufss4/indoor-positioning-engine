@@ -68,4 +68,7 @@ using Polygon = std::vector<Vec2>;
 /// Even-odd point-in-polygon test. Points exactly on an edge may go either way.
 bool point_in_polygon(Vec2 p, const Polygon& poly);
 
+/// Unsigned area of a simple polygon (shoelace formula).
+double polygon_area(const Polygon& poly);
+
 }  // namespace ipe

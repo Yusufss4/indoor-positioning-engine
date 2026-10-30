@@ -46,9 +46,10 @@ Venue::Venue(std::string name, Bounds bounds, std::vector<Segment> walls, std::v
 
 Venue::Venue(std::string name, Bounds bounds, std::vector<Level> levels, std::vector<Beacon> beacons,
              std::vector<Connector> connectors, double wall_attenuation_db, double floor_attenuation_db,
-             std::optional<GeoRef> georef)
+             std::optional<GeoRef> georef, Polygon footprint)
     : name_(std::move(name)),
       bounds_(bounds),
+      footprint_(std::move(footprint)),
       levels_(std::move(levels)),
       beacons_(std::move(beacons)),
       connectors_(std::move(connectors)),
@@ -56,6 +57,9 @@ Venue::Venue(std::string name, Bounds bounds, std::vector<Level> levels, std::ve
       floor_attenuation_db_(floor_attenuation_db),
       georef_(georef) {
   for (auto& c : connectors_) std::sort(c.levels.begin(), c.levels.end());
+  if (footprint_.size() < 3 || polygon_area(footprint_) >= 0.99 * bounds_.width() * bounds_.height()) {
+    footprint_.clear();
+  }
   validate();
   build_grids();
 }
@@ -285,9 +289,16 @@ Venue parse_venue(std::string_view json_text) {
     georef = GeoRef{g.at("origin_lat").get<double>(), g.at("origin_lon").get<double>(), g.value("rotation_deg", 0.0)};
   }
 
+  Polygon footprint;
+  for (const auto& p : j.value("footprint", json::array())) {
+    if (!p.is_array() || p.size() != 2) throw std::runtime_error("venue: footprint points must be [x, y]");
+    footprint.push_back({p[0].get<double>(), p[1].get<double>()});
+  }
+  if (!footprint.empty() && footprint.size() < 3) throw std::runtime_error("venue: footprint needs 3 or more points");
+
   return Venue(j.value("name", std::string("unnamed")), bounds, std::move(levels), std::move(beacons),
                std::move(connectors), j.value("wall_attenuation_db", 3.0), j.value("floor_attenuation_db", 15.0),
-               georef);
+               georef, std::move(footprint));
 }
 
 Venue load_venue_file(const std::string& path) {

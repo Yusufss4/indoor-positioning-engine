@@ -52,6 +52,10 @@ Instead of top-level `walls`, a multi-floor venue has `levels`, and may add `con
 - `georef` anchors the local frame on the globe: `origin_lat`/`origin_lon` is local (0, 0), and
   `rotation_deg` is the counter-clockwise angle from east to local +x. It is needed for GeoJSON/IMDF export
   and the 3D view, and is optional for everything else.
+- `footprint` (optional, `[[x, y], ...]`) is the outline of the walkable area on every floor, for buildings
+  that fill only part of their bounds (an L or a U). The particle filter then starts, recovers and keeps
+  particles inside it, and the beacon-ring proposal weights use its area. Without it the whole bounds
+  rectangle is walkable; one covering 99% or more of the bounds is ignored.
 - A file has either top-level `walls` (one floor, ordinal 0) or `levels`, not both.
 
 ## Scenario (`data/scenarios/*.json`)
@@ -60,6 +64,7 @@ Instead of top-level `walls`, a multi-floor venue has `levels`, and may add `con
 |---|---|---|
 | top | `venue` | Venue file, relative to the scenario file |
 | top | `seed` | Default simulation seed |
+| top | `demo_config` | Optional particle-filter config patch the web demo applies, relative to the scenario file. `ipe-regress` ignores it and uses the presets |
 | `walk` | `waypoints` | Polyline followed by a pure-pursuit walker: `[x, y]` or `[x, y, level_ordinal]` |
 | `walk` | `step_frequency_hz`, `step_length_m`, `step_length_sigma`, `turn_rate_deg_s` | Gait |
 | `walk` | `stairs_speed_factor` | Horizontal speed on stairs relative to walking (0.6) |
@@ -166,7 +171,8 @@ ipe-import imdf imdf_dir/ --out venue.json                                      
 ```
 
 Import options: `--name`, `--beacons FILE`, `--beacon-grid M`, `--level-height M`,
-`--wall-attenuation DB`, `--floor-attenuation DB`, `--origin LAT,LON[,ROT]`. Warnings (unmapped feature
+`--wall-attenuation DB`, `--floor-attenuation DB`, `--min-wall M` (drop wall pieces shorter than this
+after doors are cut; default 0.01), `--origin LAT,LON[,ROT]`. Warnings (unmapped feature
 types, connectors that serve one floor, missing beacons) go to stderr.
 
 ### Exported GeoJSON
@@ -175,7 +181,7 @@ One `FeatureCollection` in WGS84, one feature per line. `properties.feature_type
 
 | `feature_type` | Geometry | Properties |
 |---|---|---|
-| `venue` | bounds polygon | `name`, `wall_attenuation_db`, `floor_attenuation_db`, `origin_lat`, `origin_lon`, `rotation_deg` |
+| `venue` | footprint, else bounds polygon | `name`, `wall_attenuation_db`, `floor_attenuation_db`, `origin_lat`, `origin_lon`, `rotation_deg` |
 | `level` | bounds polygon | `level`, `ordinal`, `name`, `elevation_m`, `height_m` |
 | `wall` | 0.2 m wide rectangle around the wall | `level`, `elevation_m`, `height_m` |
 | `stairs` / `elevator` / `escalator` | connector footprint | `id`, `level` (lowest), `levels`, `elevation_m`, `height_m` (shaft) |
@@ -209,6 +215,7 @@ mean what. Supporting another platform's export means writing a table, not code.
 - Connector features: one feature per floor is normal. Footprints of the same kind whose centroids are
   within 1 m (or that share an id) become one shaft serving all their levels. A connector on one floor
   only is dropped with a warning.
+- `venue` features: the largest polygon ring becomes the venue `footprint` (holes are ignored).
 - `level` values can be numbers or numeric strings. Without a venue georef, the local frame is anchored at
   the south-west corner of the level outlines.
 - `ipe.json` describes the exported scheme (also the built-in default).
@@ -218,6 +225,7 @@ mean what. Supporting another platform's export means writing a table, not code.
 `ipe-import imdf` reads `venue.geojson`, `level.geojson` (required), `unit.geojson` and `opening.geojson`:
 
 - Level `ordinal` and `name` (the `en` label) map directly. Features refer to levels through `level_id`.
+  The venue polygon becomes the `footprint`.
 - Unit categories `structure`, `concrete`, `brick`, `drywall`, `glass`, `wood` and `column` are walls;
   `stairs`, `elevator` and `escalator` are connectors; open areas (`walkway`, `lobby`, `opentobelow`,
   `unenclosedarea`, ...) are skipped; every other unit is a room.
@@ -234,3 +242,40 @@ mean what. Supporting another platform's export means writing a table, not code.
 
 `data/imdf/office_two_floor/` is exported from `data/venues/office_two_floor.json`; the tests import it and
 check walls, beacons, levels and connectors match within 1 cm.
+
+### OpenStreetMap (`datasets/osm/`)
+
+OpenStreetMap indoor data ([Simple Indoor Tagging](https://wiki.openstreetmap.org/wiki/Simple_Indoor_Tagging))
+needs geometry work before `ipe-import`, so `datasets/osm/convert.py` writes GeoJSON in the `ipe` scheme:
+
+- `indoor=room` outlines (ways and multipolygons) are rooms on every level they list, `indoor=wall` ways
+  are walls, and the building outline is a wall on every level and the venue polygon, so it becomes the
+  `footprint`. Corridors and areas have walls only where rooms border them, so they add none.
+- Door nodes within 10 cm of a room or building outline cut a doorway of their `width` (default 1 m),
+  centred on the node.
+- Closed stairs (`highway=steps`, `stairs=yes`, `room=stairs`, `indoor=stairs`) and lifts
+  (`highway=elevator`, `room=elevator`) listing two or more levels (`level=-1;0;1`) are connectors.
+- Beacons go on a 10 m grid, keeping points inside a mapped room, corridor or area of each level.
+
+The Overpass response is committed (`data/osm/kit_informatikbau.osm.json`, (c) OpenStreetMap
+contributors, [ODbL](../data/osm/LICENSE)), so the venue regenerates without network access; `--fetch`
+refreshes it. Rebuild the venue and the planned walk with:
+
+```bash
+python3 datasets/osm/convert.py --out /tmp/kit.geojson
+./build/tools/ipe-import geojson /tmp/kit.geojson --name kit_informatikbau --level-height 3.5 --min-wall 0.2 \
+    --out data/venues/kit_informatikbau.json
+./build/tools/ipe-import export data/venues/kit_informatikbau.json --out data/geojson/kit_informatikbau.geojson
+.venv/bin/python datasets/osm/plan_walk.py --venue data/venues/kit_informatikbau.json --name kit_tour \
+    --seed 501 --demo-config ../configs/open_venue.json --out data/scenarios/kit_tour.json \
+    --goals 66,13.5,1 20,12,1 7,35,1 @osm_w1120093940 13,45,2 13,68,2 @osm_w1120094033 13,60,0 13,35,0 \
+            7,25,0 38,8,0
+```
+
+`--min-wall 0.2` drops wall stubs shorter than the exported wall thickness, left where doorways meet
+corners. `plan_walk.py` works on any venue: goals are `x,y,level`, snapped to the nearest point the
+walker can reach, and `@ID` names the stairwell or lift between two levels. Without `--description` it
+keeps the description already in the `--out` file. Each leg is A* on a 0.2 m
+grid that keeps 0.25 m from walls, shortened to straight segments with the same clearance. The OSM
+venue is not in the exact GeoJSON round-trip test: its walls are only nearly collinear, and a second
+import merges a few more of them.

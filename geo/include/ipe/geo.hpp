@@ -69,6 +69,7 @@ struct ImportOptions {
   std::string beacons_json;                    ///< Sidecar beacon list; replaces beacons in the data.
   double beacon_grid_m = 0.0;                  ///< When > 0 and there are no beacons, place them on this grid.
   double connector_merge_m = 1.0;              ///< Connector footprints on different floors this close are one shaft.
+  double min_wall_m = 0.01;                    ///< Wall pieces shorter than this (after cutting doors) are dropped.
 };
 
 struct ImportResult {

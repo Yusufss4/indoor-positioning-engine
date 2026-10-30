@@ -71,7 +71,10 @@ void export_imdf(const Venue& v, const std::string& dir, const ExportOptions& op
   const GeoRef& g = *v.georef();
   const fs::path out(dir);
   const Bounds& b = v.bounds();
-  const std::vector<Vec2> outline{{b.min_x, b.min_y}, {b.max_x, b.min_y}, {b.max_x, b.max_y}, {b.min_x, b.max_y}};
+  const std::vector<Vec2> outline =
+      v.footprint().empty()
+          ? std::vector<Vec2>{{b.min_x, b.min_y}, {b.max_x, b.min_y}, {b.max_x, b.max_y}, {b.min_x, b.max_y}}
+          : v.footprint();
   const ojson center{{"type", "Point"},
                      {"coordinates", position(g, {0.5 * (b.min_x + b.max_x), 0.5 * (b.min_y + b.max_y)})}};
   const auto uuid = [&](const std::string& key) { return make_uuid(v.name() + "/" + key); };

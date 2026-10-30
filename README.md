@@ -114,10 +114,34 @@ closest-looking access point, and it pulls ahead on CEP95 once each Wi-Fi scan i
 instead of 40 separate ones. Its uncertainty is still far too small: a new calibration metric
 (`coverage95`) shows the 95% ellipse holding the truth for under a fifth of the fixes. Method, per-floor
 numbers and failure modes: [docs/real_data.md](docs/real_data.md).
-Three of the held-out walks play in the [live demo](https://yusufss4.github.io/indoor-positioning-engine/)
-under "Real recordings", over the mall's floor plan.
+Ten held-out walks, one on each floor whose longest held-out walk lasts at least a minute, play in the
+[live demo](https://yusufss4.github.io/indoor-positioning-engine/) under "Real recordings", over the
+mall's floor plan.
 
 ![held-out walk](docs/img/msil_trajectory.png)
+
+### A real building from OpenStreetMap
+
+[`datasets/osm/`](datasets/osm/) turns a building mapped with OpenStreetMap's indoor tagging into a venue:
+the KIT Informatikbau in Karlsruhe, 7 levels, 1,273 walls from room outlines with 282 doorways cut out,
+5 stairwells and 3 lifts. The walk in `kit_tour` is planned through the mapped doors and stairs (A* on the
+plan, checked by `ipe-sim` for wall crossings), and the phone is simulated. Mean over 10 seeds:
+
+| Filter | CEP50 / CEP95 [m] | Converged |
+|---|---|---|
+| PF, default | 2.27 / 11.10 | 9/10 |
+| PF, [open-venue config](data/configs/open_venue.json) (beacon-driven start) | **0.71** / **3.45** | 10/10 |
+| PF without map, open-venue config | 2.07 / 5.01 | 10/10 |
+| EKF | 1.41 / 5.33 | 10/10 |
+| Weighted centroid | 2.74 / 7.26 | 9/10 |
+
+The L-shaped building covers 38% of its bounding box. The building outline is the venue's
+[`footprint`](docs/formats.md#venue-datavenuesjson), so the particle filter starts, recovers and keeps
+particles only inside it. With the open-venue config every run converges (CEP50 0.5-1.0 m, CEP95
+1.6-6.9 m). Before the footprint, particles were drawn anywhere in the bounds. Then 3 of 10 runs locked
+onto a spot up to 61 m away, outside the building, and the outline walls kept them there: CEP50 2.68 m and
+CEP95 14.60 m, and the default PF reached 2.94 / 29.16 m. The synthetic venues fill their bounds and have
+no footprint, so their results are bit-identical. The web demo plays this walk with the open-venue config.
 
 <details>
 <summary>Tracks and error CDF on office_nominal</summary>
@@ -166,7 +190,8 @@ The 2D view draws one floor at a time: the walker's floor by default, or any flo
 menu. Trails show only that floor, estimates on another floor are drawn as dashed rings, and the stats
 table adds a floor column for two-floor scenarios. The "Real recordings" scenarios replay phone walks from
 two shopping malls instead of simulating one, over the mall's floor plan, with its shop walls and the
-surveyor's waypoints as squares. The demo opens on one of them (site1 F2).
+surveyor's waypoints as squares. The demo opens on one of them (site1 F2). `kit_tour` simulates a walk
+through a real seven-floor university building imported from OpenStreetMap.
 
 The **3D** button switches to a MapLibre GL view of the venue: walls extruded per floor, translucent slabs,
 stair and lift shafts, the walker, each filter's estimate with its uncertainty, and the particles coloured
@@ -194,6 +219,9 @@ platforms publish, using the venue's `georef` (origin latitude/longitude and rot
 - **Any GeoJSON** goes through a mapping table that names the property and values meaning wall, room,
   door, level, stairs, lift or beacon. Supporting a new platform's export is a JSON file, not code;
   [`data/mappings/ipe.json`](data/mappings/ipe.json) is the table for this project's own export.
+- **OpenStreetMap** indoor data (Simple Indoor Tagging) needs geometry work a table cannot do (doors are
+  points on room outlines; stairwells list several levels), so
+  [`datasets/osm/convert.py`](datasets/osm/convert.py) writes it out in the `ipe` scheme first.
 - Map data has no beacons, so they come from a sidecar file (`--beacons`, with lat/lon) or a grid.
 
 Formats in detail: [docs/formats.md](docs/formats.md#geojson-and-imdf-ipe-import).
@@ -220,8 +248,9 @@ geo/      GeoJSON / IMDF import and export
 tools/    ipe-sim, ipe-replay, ipe-regress, ipe-import
 tests/    GoogleTest unit tests, regression baseline
 data/     venues, scenarios, engine config patches, GeoJSON exports, IMDF sample, mapping tables,
-          three real recordings for the web demo
+          ten real recordings for the web demo, an OpenStreetMap building snapshot (ODbL)
 datasets/ fetch + convert scripts for public real-data recordings (the raw data is not committed)
+          and for OpenStreetMap indoor maps
 viz/      matplotlib figures and animation
 web/      embind bindings, 2D canvas and 3D MapLibre front end
 docs/     design notes, file formats, experiment log, results, real-data evaluation

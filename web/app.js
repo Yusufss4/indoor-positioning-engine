@@ -88,11 +88,14 @@ async function startSimulated(name) {
   const venueText = await loadJson(venueUrl);
   venue = normalizeVenue(JSON.parse(venueText));
   geojsonUrl = new URL(venueUrl.href.replace(/\/venues\/([^/]+)\.json$/, "/geojson/$1.geojson"));
+  const configText = scenario.demo_config ? await loadJson(new URL(scenario.demo_config, scenarioUrl)) : "";
   background = null;
   waypoints = [];
-  el("description").textContent = scenario.description || "";
+  el("description").textContent =
+    (scenario.description || "") +
+    (scenario.demo_config ? ` The particle filter uses ${scenario.demo_config.replace(/^(\.\.\/)+/, "data/")}.` : "");
   if (demo) demo.delete();
-  demo = new Module.Demo(venueText, scenarioText, Number(el("seed").value) >>> 0);
+  demo = new Module.Demo(venueText, scenarioText, Number(el("seed").value) >>> 0, configText);
 }
 
 async function startRecording(entry) {

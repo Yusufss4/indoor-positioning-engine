@@ -45,4 +45,11 @@ bool point_in_polygon(Vec2 p, const Polygon& poly) {
   return inside;
 }
 
+double polygon_area(const Polygon& poly) {
+  double twice = 0.0;
+  const std::size_t n = poly.size();
+  for (std::size_t i = 0, j = n - 1; i < n; j = i++) twice += cross(poly[j], poly[i]);
+  return 0.5 * std::abs(twice);
+}
+
 }  // namespace ipe

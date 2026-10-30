@@ -28,6 +28,7 @@ import options:
   --level-height M         floor-to-floor height when levels have no elevation (default 4)
   --wall-attenuation DB    override the per-wall radio loss
   --floor-attenuation DB   override the per-slab radio loss
+  --min-wall M             drop wall pieces shorter than M after cutting doors (default 0.01)
   --origin LAT,LON[,ROT]   anchor the local frame here instead of the data's georef
 )";
 
@@ -57,6 +58,7 @@ ipe::geo::ImportOptions import_options(const ipe::cli::Args& args) {
   if (args.has("level-height")) o.level_height_m = std::stod(args.get("level-height"));
   if (args.has("wall-attenuation")) o.wall_attenuation_db = std::stod(args.get("wall-attenuation"));
   if (args.has("floor-attenuation")) o.floor_attenuation_db = std::stod(args.get("floor-attenuation"));
+  if (args.has("min-wall")) o.min_wall_m = std::stod(args.get("min-wall"));
   if (args.has("origin")) {
     std::stringstream ss(args.get("origin"));
     std::string part;

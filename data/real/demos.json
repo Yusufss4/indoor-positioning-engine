@@ -1,6 +1,6 @@
 {
  "source": "Microsoft Indoor Location Competition 2.0 sample data, https://github.com/location-competition/indoor-location-competition-20 (MIT, see LICENSE)",
- "selection": "longest held-out walk on each of the floors with the longest held-out walks",
+ "selection": "longest held-out walk on each floor where it lasts at least 60 s",
  "default": "site1_F2_5dda5afc",
  "demos": [
   {
@@ -21,21 +21,21 @@
    "waypoints": 33
   },
   {
-   "id": "site2_F1_5dd35c98",
-   "title": "site2 F1, 217 s walk",
-   "venue": "site2_F1/venue.json",
-   "geojson": "site2_F1/venue.geojson",
-   "image": "site2_F1/floor.png",
-   "trace": "site2_F1/5dd35c9844333f00067aa0e0.csv",
+   "id": "site1_F1_5dd9fd51",
+   "title": "site1 F1, 98 s walk",
+   "venue": "site1_F1/venue.json",
+   "geojson": "site1_F1/venue.geojson",
+   "image": "site1_F1/floor.png",
+   "trace": "site1_F1/5dd9fd519191710006b570e4.csv",
    "config": "../configs/msil_wifi.json",
    "view": [
-    63.8,
-    117.7,
-    146.1,
-    211.6
+    165.3,
+    94.5,
+    239.8,
+    165.5
    ],
-   "duration_s": 217.0,
-   "waypoints": 38
+   "duration_s": 97.8,
+   "waypoints": 13
   },
   {
    "id": "site1_F2_5dda5afc",
@@ -53,6 +53,125 @@
    ],
    "duration_s": 160.5,
    "waypoints": 20
+  },
+  {
+   "id": "site1_F3_5dda7456",
+   "title": "site1 F3, 133 s walk",
+   "venue": "site1_F3/venue.json",
+   "geojson": "site1_F3/venue.geojson",
+   "image": "site1_F3/floor.png",
+   "trace": "site1_F3/5dda74569191710006b574c6.csv",
+   "config": "../configs/msil_wifi.json",
+   "view": [
+    97.1,
+    35.5,
+    205.3,
+    141.7
+   ],
+   "duration_s": 133.3,
+   "waypoints": 28
+  },
+  {
+   "id": "site1_F4_5ddb656f",
+   "title": "site1 F4, 106 s walk",
+   "venue": "site1_F4/venue.json",
+   "geojson": "site1_F4/venue.geojson",
+   "image": "site1_F4/floor.png",
+   "trace": "site1_F4/5ddb656fc5b77e0006b1792e.csv",
+   "config": "../configs/msil_wifi.json",
+   "view": [
+    145.5,
+    22.2,
+    213.1,
+    126.5
+   ],
+   "duration_s": 106.0,
+   "waypoints": 21
+  },
+  {
+   "id": "site2_F1_5dd35c98",
+   "title": "site2 F1, 217 s walk",
+   "venue": "site2_F1/venue.json",
+   "geojson": "site2_F1/venue.geojson",
+   "image": "site2_F1/floor.png",
+   "trace": "site2_F1/5dd35c9844333f00067aa0e0.csv",
+   "config": "../configs/msil_wifi.json",
+   "view": [
+    63.8,
+    117.7,
+    146.1,
+    211.6
+   ],
+   "duration_s": 217.0,
+   "waypoints": 38
+  },
+  {
+   "id": "site2_F3_5dd3902e",
+   "title": "site2 F3, 122 s walk",
+   "venue": "site2_F3/venue.json",
+   "geojson": "site2_F3/venue.geojson",
+   "image": "site2_F3/floor.png",
+   "trace": "site2_F3/5dd3902e27889b0006b76ae6.csv",
+   "config": "../configs/msil_wifi.json",
+   "view": [
+    6.6,
+    35.4,
+    94.7,
+    132.0
+   ],
+   "duration_s": 121.5,
+   "waypoints": 21
+  },
+  {
+   "id": "site2_F6_5dd4ae33",
+   "title": "site2 F6, 70 s walk",
+   "venue": "site2_F6/venue.json",
+   "geojson": "site2_F6/venue.geojson",
+   "image": "site2_F6/floor.png",
+   "trace": "site2_F6/5dd4ae3327889b0006b77697.csv",
+   "config": "../configs/msil_wifi.json",
+   "view": [
+    140.8,
+    21.5,
+    223.0,
+    115.6
+   ],
+   "duration_s": 69.8,
+   "waypoints": 12
+  },
+  {
+   "id": "site2_F7_5dd4d36f",
+   "title": "site2 F7, 75 s walk",
+   "venue": "site2_F7/venue.json",
+   "geojson": "site2_F7/venue.geojson",
+   "image": "site2_F7/floor.png",
+   "trace": "site2_F7/5dd4d36fd48f840006f1447a.csv",
+   "config": "../configs/msil_wifi.json",
+   "view": [
+    127.0,
+    68.0,
+    197.3,
+    137.1
+   ],
+   "duration_s": 75.0,
+   "waypoints": 16
+  },
+  {
+   "id": "site2_F8_5dd4daa2",
+   "title": "site2 F8, 86 s walk",
+   "venue": "site2_F8/venue.json",
+   "geojson": "site2_F8/venue.geojson",
+   "image": "site2_F8/floor.png",
+   "trace": "site2_F8/5dd4daa2d48f840006f144e5.csv",
+   "config": "../configs/msil_wifi.json",
+   "view": [
+    55.6,
+    110.8,
+    149.1,
+    190.9
+   ],
+   "duration_s": 85.8,
+   "waypoints": 19
   }
  ]
 }

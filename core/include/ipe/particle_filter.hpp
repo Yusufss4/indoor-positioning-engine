@@ -151,6 +151,7 @@ class ParticleFilter final : public Filter {
   };
 
   static constexpr int kRingTries = 4;
+  static constexpr int kFootprintTries = 64;  ///< Enough for a footprint covering 10% of the bounds.
 
   [[nodiscard]] Ring ring_for(const Beacon& beacon, double rssi, double rssi_offset) const;
   /// Draws a particle whose device offset and distance from `beacon` are
@@ -172,6 +173,8 @@ class ParticleFilter final : public Filter {
   bool check_beacon(std::size_t beacon_index, double rssi);
 
   void initialize_uniform();
+  /// Uniform over the venue's walkable area (its footprint, else its bounds).
+  Vec2 sample_position();
   Particle sample_uniform_particle();
   /// Moves a particle standing in a connector to an adjacent level with probability `prob`.
   void maybe_change_level(Particle& p, double prob);

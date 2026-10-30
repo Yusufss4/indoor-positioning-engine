@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Copies a few held-out walks into data/real/ for the web demo.
+"""Copies held-out walks into data/real/ for the web demo.
 
-Picks the longest held-out walk on each of the floors with the longest held-out walks, so the
-selection is mechanical rather than picked for good results. For each floor it writes the venue,
+Picks the longest held-out walk on every floor whose longest held-out walk lasts at least
+--min-duration seconds, so the selection is mechanical rather than picked for good results. For each
+floor it writes the venue,
 its GeoJSON export (for the 3D view), the floor image and the trace, plus data/real/demos.json,
 which the demo reads to fill its scenario menu.
 
@@ -42,7 +43,9 @@ def main():
     ap.add_argument("--raw", type=Path, default=HERE / "raw")
     ap.add_argument("--dest", type=Path, default=ROOT / "data" / "real")
     ap.add_argument("--build", type=Path, default=ROOT / "build")
-    ap.add_argument("--count", type=int, default=3, help="number of floors (one walk each)")
+    ap.add_argument("--min-duration", type=float, default=60.0,
+                    help="skip floors whose longest held-out walk is shorter than this [s]")
+    ap.add_argument("--count", type=int, default=None, help="at most this many floors (one walk each)")
     ap.add_argument("--default", default="site1_F2", help="floor whose walk the demo opens with")
     args = ap.parse_args()
 
@@ -51,7 +54,9 @@ def main():
     for t in traces:
         if t["group"] not in longest or t["duration_s"] > longest[t["group"]]["duration_s"]:
             longest[t["group"]] = t
-    picks = sorted(longest.values(), key=lambda t: -t["duration_s"])[: args.count]
+    picks = [t for t in sorted(longest.values(), key=lambda t: -t["duration_s"])
+             if t["duration_s"] >= args.min_duration][: args.count]
+    picks.sort(key=lambda t: t["group"])
 
     if args.dest.exists():
         shutil.rmtree(args.dest)
@@ -93,7 +98,7 @@ def main():
     index = {
         "source": "Microsoft Indoor Location Competition 2.0 sample data, "
                   "https://github.com/location-competition/indoor-location-competition-20 (MIT, see LICENSE)",
-        "selection": "longest held-out walk on each of the floors with the longest held-out walks",
+        "selection": f"longest held-out walk on each floor where it lasts at least {args.min_duration:g} s",
         "default": next((d["id"] for d in demos if d["id"].startswith(args.default + "_")), demos[0]["id"]),
         "demos": demos,
     }

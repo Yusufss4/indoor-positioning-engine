@@ -56,13 +56,25 @@ class Venue {
   Venue(std::string name, Bounds bounds, std::vector<Segment> walls, std::vector<Beacon> beacons,
         double wall_attenuation_db);
   /// Multi-level venue. `levels` are sorted by ordinal; beacon and connector
-  /// level indices refer to the sorted order.
+  /// level indices refer to the sorted order. `footprint` is the outline of
+  /// the walkable area on every level (e.g. the building outline); a footprint
+  /// covering at least 99% of `bounds` adds nothing and is dropped.
   Venue(std::string name, Bounds bounds, std::vector<Level> levels, std::vector<Beacon> beacons,
         std::vector<Connector> connectors, double wall_attenuation_db, double floor_attenuation_db,
-        std::optional<GeoRef> georef = std::nullopt);
+        std::optional<GeoRef> georef = std::nullopt, Polygon footprint = {});
 
   [[nodiscard]] const std::string& name() const { return name_; }
   [[nodiscard]] const Bounds& bounds() const { return bounds_; }
+  /// Empty when the whole bounds rectangle is walkable.
+  [[nodiscard]] const Polygon& footprint() const { return footprint_; }
+  /// True inside the bounds and, if there is one, the footprint.
+  [[nodiscard]] bool inside(Vec2 p) const {
+    return bounds_.contains(p) && (footprint_.empty() || point_in_polygon(p, footprint_));
+  }
+  /// Area a position can be in: the footprint's, else the bounds'.
+  [[nodiscard]] double walkable_area() const {
+    return footprint_.empty() ? bounds_.width() * bounds_.height() : polygon_area(footprint_);
+  }
   [[nodiscard]] const std::vector<Segment>& walls(int level = 0) const;
   [[nodiscard]] const std::vector<Beacon>& beacons() const { return beacons_; }
   [[nodiscard]] double wall_attenuation_db() const { return wall_attenuation_db_; }
@@ -107,6 +119,7 @@ class Venue {
 
   std::string name_;
   Bounds bounds_{};
+  Polygon footprint_;
   std::vector<Level> levels_;
   std::vector<Beacon> beacons_;
   std::vector<Connector> connectors_;

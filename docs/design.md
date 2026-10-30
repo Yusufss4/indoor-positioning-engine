@@ -33,6 +33,10 @@ State per particle: position, heading, step-length scale, device RSSI offset.
 - **Motion**: `psi += dpsi + noise`, move `L * scale + noise` along `psi`. A particle whose move crosses a
   wall or leaves the venue gets weight zero. This is the main reason to use a particle filter here: the
   floor plan is a hard, non-Gaussian constraint that an EKF cannot express.
+- **Venue area**: "the venue" is its bounds rectangle, intersected with the `footprint` polygon when the
+  venue has one. Uniform draws (start, recovery, ring fallback) are rejection-sampled inside the footprint.
+  The footprint matters for buildings that fill a small part of their bounds: in an L-shaped building,
+  particles started in the empty corner sit outside the outline walls, and the walls keep them there.
 - **RSSI likelihood**: log-distance path loss, minus `wall_attenuation_db` per wall on the straight radio
   path, plus the particle's device offset. The likelihood is a Gaussian/uniform mixture so one bad packet
   cannot wipe out the cloud.

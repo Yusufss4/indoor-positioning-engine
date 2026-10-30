@@ -36,6 +36,11 @@ std::string venue_to_json(const Venue& v) {
     o << "  \"georef\": {\"origin_lat\": " << number(g->origin_lat) << ", \"origin_lon\": " << number(g->origin_lon)
       << ", \"rotation_deg\": " << number(g->rotation_deg) << "},\n";
   }
+  if (!v.footprint().empty()) {
+    o << "  \"footprint\": [";
+    for (std::size_t k = 0; k < v.footprint().size(); ++k) o << (k ? ", " : "") << point(v.footprint()[k]);
+    o << "],\n";
+  }
   o << "  \"levels\": [\n";
   for (int i = 0; i < v.level_count(); ++i) {
     const Level& l = v.level(i);
@@ -95,13 +100,14 @@ const GeoRef& require_georef(const Venue& v) {
 std::string export_geojson(const Venue& v, const ExportOptions& opts) {
   const GeoRef& g = require_georef(v);
   std::vector<ojson> fs;
-  fs.push_back(feature(polygon(g, bounds_ring(v.bounds())), {{"feature_type", "venue"},
-                                                             {"name", v.name()},
-                                                             {"wall_attenuation_db", v.wall_attenuation_db()},
-                                                             {"floor_attenuation_db", v.floor_attenuation_db()},
-                                                             {"origin_lat", g.origin_lat},
-                                                             {"origin_lon", g.origin_lon},
-                                                             {"rotation_deg", g.rotation_deg}}));
+  const std::vector<Vec2> outline = v.footprint().empty() ? bounds_ring(v.bounds()) : v.footprint();
+  fs.push_back(feature(polygon(g, outline), {{"feature_type", "venue"},
+                                             {"name", v.name()},
+                                             {"wall_attenuation_db", v.wall_attenuation_db()},
+                                             {"floor_attenuation_db", v.floor_attenuation_db()},
+                                             {"origin_lat", g.origin_lat},
+                                             {"origin_lon", g.origin_lon},
+                                             {"rotation_deg", g.rotation_deg}}));
   for (const Level& l : v.levels()) {
     fs.push_back(feature(polygon(g, bounds_ring(v.bounds())), {{"feature_type", "level"},
                                                                {"level", l.ordinal},
@@ -312,6 +318,7 @@ struct Local {
   std::map<int, std::vector<std::vector<Vec2>>> openings;
   std::vector<RawConnector> connectors;
   std::vector<RawBeacon> beacons;
+  Polygon footprint;
   Bounds level_extent{1e300, 1e300, -1e300, -1e300};
   Bounds all_extent{1e300, 1e300, -1e300, -1e300};
   std::map<std::string, int> unmapped;
@@ -346,9 +353,22 @@ Local to_local(const json& features, const Mapping& m, const GeoRef& g, double c
       ++out.unmapped[type.value_or("(none)")];
       continue;
     }
-    if (kind == Kind::Venue) continue;
-
     const Parts geom = read_geometry(f.contains("geometry") ? f.at("geometry") : json());
+    if (kind == Kind::Venue) {
+      // The outline becomes the footprint; holes and smaller parts are ignored.
+      if (!geom.closed) continue;
+      for (const auto& part : geom.parts) {
+        Polygon ring;
+        for (const LatLon& ll : part) {
+          const Vec2 p = g.to_local(ll);
+          ring.push_back({round_mm(p.x), round_mm(p.y)});
+        }
+        if (ring.size() > 3 && distance(ring.front(), ring.back()) < 1e-6) ring.pop_back();
+        if (ring.size() >= 3 && polygon_area(ring) > polygon_area(out.footprint)) out.footprint = std::move(ring);
+      }
+      continue;
+    }
+
     std::vector<std::vector<Vec2>> parts;
     for (const auto& part : geom.parts) {
       std::vector<Vec2> pts;
@@ -551,7 +571,7 @@ ImportResult import_geojson(std::string_view geojson, const Mapping& m, const Im
     walls = cut_openings(walls, local.openings[ordinal], 0.5 * m.wall_max_thickness_m);
     for (auto& s : walls) {
       s = {{round_mm(s.a.x), round_mm(s.a.y)}, {round_mm(s.b.x), round_mm(s.b.y)}};
-      if (distance(s.a, s.b) >= 0.01) l.walls.push_back(s);
+      if (distance(s.a, s.b) >= opts.min_wall_m) l.walls.push_back(s);
     }
     index[ordinal] = static_cast<int>(levels.size());
     levels.push_back(std::move(l));
@@ -600,8 +620,9 @@ ImportResult import_geojson(std::string_view geojson, const Mapping& m, const Im
     beacons.push_back({rb.id, {round_mm(rb.pos.x), round_mm(rb.pos.y)}, it->second, rb.tx_power, rb.path_loss_exp});
   }
 
-  result.venue = Venue(name.empty() ? "imported" : name, bounds, std::move(levels), std::move(beacons),
-                       std::move(connectors), wall_att.value_or(3.5), floor_att.value_or(15.0), georef);
+  result.venue =
+      Venue(name.empty() ? "imported" : name, bounds, std::move(levels), std::move(beacons), std::move(connectors),
+            wall_att.value_or(3.5), floor_att.value_or(15.0), georef, std::move(local.footprint));
   return result;
 }
 

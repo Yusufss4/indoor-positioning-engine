@@ -56,4 +56,12 @@ inline Venue two_level_venue() {
   })");
 }
 
+/// The 20 x 10 m box above without its north-east quarter: 150 of 200 m^2.
+inline Polygon l_footprint() { return {{0, 0}, {20, 0}, {20, 5}, {10, 5}, {10, 10}, {0, 10}}; }
+
+inline Venue with_footprint(const Venue& v, Polygon footprint) {
+  return Venue(v.name(), v.bounds(), v.levels(), v.beacons(), v.connectors(), v.wall_attenuation_db(),
+               v.floor_attenuation_db(), v.georef(), std::move(footprint));
+}
+
 }  // namespace ipe::test

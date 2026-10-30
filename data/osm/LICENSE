@@ -1,0 +1,8 @@
+Map data (c) OpenStreetMap contributors, https://www.openstreetmap.org/copyright
+
+kit_informatikbau.osm.json is an Overpass API extract of OpenStreetMap, available under the Open Data
+Commons Open Database License (ODbL) 1.0: https://opendatacommons.org/licenses/odbl/1-0/
+
+The venue and GeoJSON derived from it (data/venues/kit_informatikbau.json,
+data/geojson/kit_informatikbau.geojson) are Derivative Databases of OpenStreetMap and are likewise
+available under the ODbL 1.0. The rest of this repository is MIT-licensed.

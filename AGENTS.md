@@ -23,9 +23,13 @@ truth; a replay tool and a regression suite measure accuracy.
 - `datasets/msil` - fetch and convert scripts for the Microsoft Indoor Location sample. The raw data and
   the converted `out/` (readings one by one) and `out_scans/` (`--scans`, one batch per Wi-Fi scan) are
   git-ignored; `tests/regression/msil_baseline.json` gates the held-out walks of `out_scans/`.
-  `data/real` holds three converted walks for the web demo, with shop walls (`convert.py --wifi --scans
+  `data/real` holds ten converted walks for the web demo, with shop walls (`convert.py --wifi --scans
   --walls doors --out datasets/msil/out_doors`); regenerate it with `datasets/msil/export_demo.py`
   (a unit test checks it against the venue export).
+- `datasets/osm` - OpenStreetMap indoor data to venue (`convert.py`, from the committed Overpass snapshot
+  in `data/osm/`, ODbL) and an A* walk planner that writes scenarios (`plan_walk.py`). They produce
+  `data/venues/kit_informatikbau.json` and `data/scenarios/kit_tour.json`; the commands are in
+  [docs/formats.md](docs/formats.md#openstreetmap-datasetsosm).
 - `viz/` - Python plotting; `web/` - Emscripten bindings and the browser demo.
 
 ## Build and test
