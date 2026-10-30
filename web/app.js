@@ -1,6 +1,10 @@
 "use strict";
 
-const COLORS = { truth: "#222", pf: "#d62728", ekf: "#1f77b4", wcl: "#2ca02c", wall: "#555", beacon: "#7f3fbf" };
+const COLORS = {
+  truth: "#222", pf: "#d62728", ekf: "#1f77b4", wcl: "#2ca02c", beacon: "#7f3fbf",
+  wall: "rgba(29, 78, 137, 0.45)", ink: "#1d4e89", paper: "#f4f7fb",
+};
+const LABEL_FONT = '500 11px "Barlow Condensed", "Arial Narrow", sans-serif';
 const FILTERS = ["pf", "ekf", "wcl"];
 
 const el = (id) => document.getElementById(id);
@@ -182,7 +186,7 @@ function dot(x, y, T, color, r, ring = false, hollow = false) {
   ctx.fillStyle = color;
   ctx.fill();
   if (ring) {
-    ctx.strokeStyle = "#fff";
+    ctx.strokeStyle = COLORS.paper;
     ctx.lineWidth = 2;
     ctx.stroke();
   }
@@ -206,13 +210,13 @@ function draw(level) {
     ctx.closePath();
     ctx.fillStyle = c.kind === "elevator" ? "rgba(255, 159, 28, 0.3)" : "rgba(46, 196, 182, 0.3)";
     ctx.fill();
-    ctx.fillStyle = "#555";
-    ctx.font = "10px system-ui";
-    ctx.fillText(c.kind, T.toX(c.area[0][0]) + 3, T.toY(c.area[0][1]) - 3);
+    ctx.fillStyle = COLORS.ink;
+    ctx.font = LABEL_FONT;
+    ctx.fillText(c.kind.toUpperCase(), T.toX(c.area[0][0]) + 3, T.toY(c.area[0][1]) - 3);
   }
 
   ctx.strokeStyle = COLORS.wall;
-  ctx.lineWidth = 3;
+  ctx.lineWidth = 1.5;
   ctx.lineCap = "round";
   for (const [ax, ay, bx, by] of venue.levels[level].walls) {
     ctx.beginPath();
@@ -246,7 +250,8 @@ function draw(level) {
     ctx.lineTo(T.toX(b.x) + 6, T.toY(b.y) + 5);
     ctx.closePath();
     ctx.fill();
-    ctx.font = "10px system-ui";
+    ctx.fillStyle = COLORS.ink;
+    ctx.font = LABEL_FONT;
     ctx.fillText(b.id, T.toX(b.x) + 7, T.toY(b.y) - 6);
   }
 

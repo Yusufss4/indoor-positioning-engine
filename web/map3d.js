@@ -111,7 +111,7 @@ class Map3D {
           },
         },
         layers: [
-          { id: "background", type: "background", paint: { "background-color": "#f3f2ee" } },
+          { id: "background", type: "background", paint: { "background-color": "#f4f7fb" } },
           { id: "osm", type: "raster", source: "osm", layout: { visibility: "none" }, paint: { "raster-opacity": 0.6 } },
         ],
       },
@@ -197,9 +197,9 @@ class Map3D {
   rebuildStatic() {
     if (!this.map || !this.levels.length) return;
     this.levels.forEach((l, i) => {
-      const fs = [extruded(l.outline, this.z(i, -0.15), this.z(i), "#dcd9d0")];
+      const fs = [extruded(l.outline, this.z(i, -0.15), this.z(i), "#dfe6ef")];
       for (const w of this.static.walls) {
-        if (w.level === i) fs.push(extruded(w.geometry, this.z(i), this.z(i, this.wallHeight(i)), "#7d838c"));
+        if (w.level === i) fs.push(extruded(w.geometry, this.z(i), this.z(i, this.wallHeight(i)), "#88a2c2"));
       }
       for (const b of this.static.beacons) {
         if (b.level !== i) continue;
