@@ -111,7 +111,7 @@ class Map3D {
           },
         },
         layers: [
-          { id: "background", type: "background", paint: { "background-color": "#f4f7fb" } },
+          { id: "background", type: "background", paint: { "background-color": "#fbfcfe" } },
           { id: "osm", type: "raster", source: "osm", layout: { visibility: "none" }, paint: { "raster-opacity": 0.6 } },
         ],
       },

@@ -2,7 +2,7 @@
 
 const COLORS = {
   truth: "#222", pf: "#d62728", ekf: "#1f77b4", wcl: "#2ca02c", beacon: "#7f3fbf",
-  wall: "rgba(29, 78, 137, 0.45)", ink: "#1d4e89", paper: "#f4f7fb",
+  wall: "rgba(29, 78, 137, 0.45)", ink: "#1d4e89", paper: "#fbfcfe",
 };
 const LABEL_FONT = '500 11px "Barlow Condensed", "Arial Narrow", sans-serif';
 const FILTERS = ["pf", "ekf", "wcl"];
@@ -198,8 +198,10 @@ function draw(level) {
 
   if (background) {
     const [bx0, by0, bx1, by1] = venue.bounds;
-    ctx.globalAlpha = 0.5;
+    ctx.globalAlpha = 0.3;
+    ctx.filter = "grayscale(1)";
     ctx.drawImage(background, T.toX(bx0), T.toY(by1), (bx1 - bx0) * T.s, (by1 - by0) * T.s);
+    ctx.filter = "none";
     ctx.globalAlpha = 1;
   }
 

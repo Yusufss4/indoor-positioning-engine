@@ -5,14 +5,13 @@
   --rule-faint: rgba(29, 78, 137, 0.18);
   --text: #1b2a3d;
   --muted: #4d6380;
+  --sheet: #fbfcfe;
   --grid:
-    linear-gradient(rgba(29, 78, 137, 0.11) 1px, transparent 1px) 0 0 / 50px 50px,
-    linear-gradient(90deg, rgba(29, 78, 137, 0.11) 1px, transparent 1px) 0 0 / 50px 50px,
-    linear-gradient(rgba(29, 78, 137, 0.05) 1px, transparent 1px) 0 0 / 10px 10px,
-    linear-gradient(90deg, rgba(29, 78, 137, 0.05) 1px, transparent 1px) 0 0 / 10px 10px;
+    linear-gradient(rgba(29, 78, 137, 0.06) 1px, transparent 1px) 0 0 / 40px 40px,
+    linear-gradient(90deg, rgba(29, 78, 137, 0.06) 1px, transparent 1px) 0 0 / 40px 40px;
   font-family: "Barlow Condensed", "Barlow", "Roboto Condensed", "Arial Narrow", sans-serif;
   color: var(--text);
-  background: var(--grid), var(--paper);
+  background: var(--paper);
 }
 body { margin: 0 auto; max-width: 1340px; padding: 20px 16px; font-size: 15px; line-height: 1.35; }
 a { color: var(--ink); }
@@ -51,7 +50,7 @@ button {
 button:hover { border-color: var(--ink); }
 
 main { display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; }
-canvas { background: var(--grid), var(--paper); border: 1px solid var(--rule); max-width: 100%; }
+canvas { background: var(--grid), var(--sheet); border: 1px solid var(--rule); max-width: 100%; }
 aside { min-width: 280px; flex: 1; }
 #clock {
   font-variant-numeric: tabular-nums; font-size: 0.9rem; letter-spacing: 0.06em; text-transform: uppercase;
@@ -82,9 +81,6 @@ td:first-child { text-transform: uppercase; letter-spacing: 0.08em; }
 
 .view { display: flex; flex-direction: column; gap: 4px; }
 #map3d {
-  position: relative; width: 1000px; height: 620px; max-width: 100%;
-  border: 1px solid var(--rule); background: var(--paper); overflow: hidden;
-}
-#map3d::after {
-  content: ""; position: absolute; inset: 0; z-index: 1; pointer-events: none; background: var(--grid);
+  width: 1000px; height: 620px; max-width: 100%;
+  border: 1px solid var(--rule); background: var(--sheet); overflow: hidden;
 }
