@@ -202,6 +202,9 @@ class ParticleFilter final : public Filter {
   double w_fast_ = 0.0;
   double now_ = 0.0;
   bool radio_seeded_ = false;
+  /// The estimate stays invalid until radio has been applied: the uniform
+  /// prior's mean and spread are not a position.
+  bool localized_ = false;
   std::array<Packet, kMaxProposalHistory> history_{};
   std::size_t history_head_ = 0;
   std::size_t history_count_ = 0;

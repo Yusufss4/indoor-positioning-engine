@@ -288,6 +288,28 @@ TEST(ParticleFilter, BeaconSeedWaitsForTheInitWindow) {
   EXPECT_LT(distance(pf.estimate().pos, {5.0, 5.0}), std::max(1.5, distance(uniform.estimate().pos, {5.0, 5.0})));
 }
 
+TEST(ParticleFilter, EstimateIsInvalidUntilRadioIsApplied) {
+  const Venue v = test::two_room_venue();
+  auto cfg = proposal_config();
+  cfg.num_particles = 800;
+  cfg.init_window_s = 1.0;
+  ParticleFilter pf(v, cfg, {});
+  EXPECT_FALSE(pf.estimate().valid);
+  pf.on_heading(0.0, 0.0, 0.1);
+  EXPECT_FALSE(pf.estimate().valid);
+  feed_rssi(pf, v, {5.0, 5.0}, 4, 0.1);  // 16 packets over 0.8 s, still inside the init window
+  EXPECT_FALSE(pf.estimate().valid);
+  feed_rssi(pf, v, {5.0, 5.0}, 2, 1.2);
+  ASSERT_TRUE(pf.radio_seeded());
+  EXPECT_TRUE(pf.estimate().valid);
+
+  cfg.init_proposal = false;
+  ParticleFilter plain(v, cfg, {});
+  EXPECT_FALSE(plain.estimate().valid);
+  plain.on_rssi(0.0, 0, -70.0);
+  EXPECT_TRUE(plain.estimate().valid);
+}
+
 TEST(ParticleFilter, ProposalSettingsAreInertWhenDisabled) {
   const Venue v = test::two_room_venue();
   auto tuned = test_config();

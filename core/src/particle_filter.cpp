@@ -186,6 +186,7 @@ void ParticleFilter::seed_from_beacon(std::size_t beacon_index, double rssi) {
   }
   for (auto& p : particles_) p.weight /= sum;
   radio_seeded_ = true;
+  localized_ = true;
   update_estimate(now_);
 }
 
@@ -375,6 +376,7 @@ void ParticleFilter::update_rssi(double t, std::span<const RssiReading> readings
   apply_log_likelihoods(loglik_);
   normalize_or_recover();
   resample_if_needed();
+  localized_ = true;
   update_estimate(t);
 }
 
@@ -543,7 +545,7 @@ void ParticleFilter::update_estimate(double t) {
   estimate_.cov_xx = cxx;
   estimate_.cov_xy = cxy;
   estimate_.cov_yy = cyy;
-  estimate_.valid = true;
+  estimate_.valid = localized_;
 }
 
 }  // namespace ipe
