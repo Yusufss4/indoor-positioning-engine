@@ -190,8 +190,8 @@ The 2D view draws one floor at a time: the walker's floor by default, or any flo
 menu. Trails show only that floor, estimates on another floor are drawn as dashed rings, and the stats
 table adds a floor column for two-floor scenarios. The "Real recordings" scenarios replay phone walks from
 two shopping malls instead of simulating one, over the mall's floor plan, with its shop walls and the
-surveyor's waypoints as squares. The demo opens on one of them (site1 F2). `kit_tour` simulates a walk
-through a real seven-floor university building imported from OpenStreetMap.
+surveyor's waypoints as squares. `kit_tour` simulates a walk through a real seven-floor university
+building imported from OpenStreetMap; the demo opens on it, in the 3D view.
 
 The **3D** button switches to a MapLibre GL view of the venue: walls extruded per floor, translucent slabs,
 stair and lift shafts, the walker, each filter's estimate with its uncertainty, and the particles coloured

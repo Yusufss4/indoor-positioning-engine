@@ -20,8 +20,10 @@ let lastFrame = null;
 let truthTrail = [];
 let trails = {};
 let pings = new Map();
-let view = "2d";
+let view = "3d";
 let map3d = null;
+let map3dReady = null; // promise of map3d.init(), shared by overlapping show3d() calls
+let show3dRequest = 0;
 let realDemos = new Map(); // id -> entry of data/real/demos.json
 let real = null; // entry being replayed, null for simulated scenarios
 let background = null; // floor plan image of a recording
@@ -45,8 +47,7 @@ function loadImage(url) {
   });
 }
 
-/// Adds the recordings listed in data/real/demos.json to the scenario menu (if the file exists) and
-/// selects its default recording.
+/// Adds the recordings listed in data/real/demos.json to the scenario menu (if the file exists).
 async function loadRealDemos() {
   let index;
   try {
@@ -61,7 +62,6 @@ async function loadRealDemos() {
     group.append(new Option(d.title, `real:${d.id}`));
   }
   el("scenario").append(group);
-  if (realDemos.has(index.default)) el("scenario").value = `real:${index.default}`;
 }
 
 function parseWaypoints(traceText) {
@@ -386,21 +386,29 @@ function tick(ts) {
 
 async function show3d() {
   const status = el("view3d-status");
+  const request = ++show3dRequest;
   try {
     status.textContent = "loading 3D view...";
-    if (!map3d) {
-      map3d = new Map3D(el("map3d"));
-      await map3d.init();
-      map3d.exploded = Number(el("exploded").value);
-      map3d.follow = el("follow").checked;
+    if (!map3dReady) {
+      const m = new Map3D(el("map3d"));
+      map3dReady = m.init().then(() => {
+        m.exploded = Number(el("exploded").value);
+        m.follow = el("follow").checked;
+        map3d = m;
+      });
     }
+    await map3dReady;
     const res = await fetch(geojsonUrl);
     if (!res.ok) throw new Error(`no GeoJSON export for this venue (${geojsonUrl.pathname}); run ipe-import export`);
-    map3d.setVenue(await res.json());
+    const geojson = await res.json();
+    if (request !== show3dRequest) return;
+    map3d.setVenue(geojson);
     map3d.setUnderlay(el("underlay").checked);
     map3d.resize();
     status.textContent = "";
   } catch (err) {
+    if (request !== show3dRequest) return;
+    if (!map3d) map3dReady = null;
     status.textContent = `3D view unavailable: ${err.message}`;
     setView("2d");
   }

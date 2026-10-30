@@ -14,9 +14,9 @@
     <h1>Indoor Positioning Engine</h1>
     <p>The C++ engine compiled to WebAssembly: a simulated walker, BLE beacons, phone IMU and barometer, fused by a
       particle filter (red), an EKF (blue) and a weighted-centroid baseline (green). Everything runs in your browser.
-      It opens on a real phone recording from a shopping mall, with the shop walls of its floor plan (3D with the
-      OpenStreetMap underlay shows where it is); pick a simulated two-floor scenario and switch to 3D to watch the
-      floor estimate.
+      It opens in 3D on a simulated walk through a real seven-floor university building imported from
+      OpenStreetMap; the "Real recordings" scenarios replay phone walks from two shopping malls over their floor
+      plans.
       <a href="https://github.com/Yusufss4/indoor-positioning-engine">Source on GitHub</a></p>
   </header>
 
@@ -39,7 +39,7 @@
           <option value="baro_drift_long">baro_drift_long</option>
         </optgroup>
         <optgroup label="Real building (OpenStreetMap), simulated walk">
-          <option value="kit_tour">kit_tour</option>
+          <option value="kit_tour" selected>kit_tour</option>
         </optgroup>
       </select>
     </label>
@@ -60,15 +60,15 @@
     <label><input id="show-wcl" type="checkbox" checked> WCL</label>
     <label id="floor-control" hidden>Floor <select id="floor"></select></label>
     <span class="toggle">
-      <button id="view2d" class="active">2D</button><button id="view3d">3D</button>
+      <button id="view2d">2D</button><button id="view3d" class="active">3D</button>
     </span>
-    <span id="zoom2d" class="toggle">
+    <span id="zoom2d" class="toggle" hidden>
       <button id="zoom-out" title="Zoom out">&minus;</button><button id="zoom-in" title="Zoom in">+</button><button
         id="zoom-fit" title="Fit the whole floor">Fit</button>
     </span>
-    <span id="hint2d" class="hint">Scroll to zoom, drag to pan, double-click to fit.</span>
+    <span id="hint2d" class="hint" hidden>Scroll to zoom, drag to pan, double-click to fit.</span>
   </section>
-  <section id="controls3d" class="controls" hidden>
+  <section id="controls3d" class="controls">
     <label>Exploded <input id="exploded" type="range" min="0" max="2" step="0.1" value="0.6"></label>
     <label><input id="follow" type="checkbox"> follow</label>
     <label><input id="underlay" type="checkbox"> OpenStreetMap underlay</label>
@@ -77,8 +77,8 @@
 
   <main>
     <div class="view">
-      <canvas id="map" width="1000" height="620"></canvas>
-      <div id="map3d" hidden></div>
+      <canvas id="map" width="1000" height="620" hidden></canvas>
+      <div id="map3d"></div>
       <div id="view3d-status" class="hint"></div>
     </div>
     <aside>

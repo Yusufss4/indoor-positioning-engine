@@ -166,12 +166,14 @@ class Map3D {
       this.sourceIds.push(id);
       this.layerIds.push(id);
     };
+    // Extrusion layers share one depth buffer, so a nearly transparent floor drawn first would still hide
+    // everything behind it: the live layers go first and the building is blended over them.
+    add("dots", 1.0);
+    add("particles", 0.7);
+    add("uncertainty", 0.25);
     // fill-extrusion-opacity is per layer, hence one layer per floor.
     this.levels.forEach((_, i) => add(`level-${i}`, 0.85));
     add("connectors", 0.35);
-    add("particles", 0.7);
-    add("uncertainty", 0.25);
-    add("dots", 1.0);
 
     this.rebuildStatic();
     const [minLng, minLat, maxLng, maxLat] = this.bbox(venueFeature.geometry.coordinates[0]);

@@ -275,8 +275,8 @@ resampling jitter still refuses to cross walls whatever `wall_constraint` says.
 ## In the web demo
 
 The scenario menu of the [live demo](https://yusufss4.github.io/indoor-positioning-engine/) has a
-"Real recordings" group, and the demo opens on the site1 F2 walk (`default` in `demos.json`). It holds the
-longest held-out walk on every floor where that walk lasts at least 60 s (10 of the 14 floors; the other
+"Real recordings" group (the demo itself opens on `kit_tour`; `default` in `demos.json` is not used).
+It holds the longest held-out walk on every floor where that walk lasts at least 60 s (10 of the 14 floors; the other
 four have no held-out walk longer than 47 s), copied to `data/real/` by `datasets/msil/export_demo.py`.
 The demo replays the recorded IMU and Wi-Fi through all three filters, using the Wi-Fi config for the
 particle filter. Its venues come from `convert.py --walls doors`, so the shop walls of the floor plan are
