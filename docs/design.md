@@ -141,6 +141,47 @@ free-space prediction; because the linearised model is nearly flat at long range
 the estimate a metre or two away from the beacon, and the filter drifted outside the building
 (CEP50 21.6 m on `office_nominal`, 0.56 m with the threshold).
 
+## Room enter and exit events
+
+A venue can name rooms (polygons per floor, see [formats.md](formats.md#rooms)); `PositioningEngine`
+then owns a `RoomTracker` and reports `Enter`/`Exit` events through `take_room_events()`.
+
+- **Room probability.** With the particle filter it is the normalised particle weight inside the room on
+  the room's floor, so a cloud split across a doorway gives both rooms a share. The EKF and weighted
+  centroid have no cloud; their mean position gives 1 or 0. Without a valid fix every room is at 0.
+  Candidate rooms come from a 5 m grid per floor, so a particle costs one cell lookup and a
+  point-in-polygon test for the few rooms in that cell.
+- **Debounce.** Each room has its own two-state machine, so overlapping rooms (a shop inside a hall) are
+  independent. Outside, the probability must stay at or above `enter_prob` (0.6) for `enter_dwell_s`
+  (1.5 s) before `Enter`; inside, at or below `exit_prob` (0.3) for `exit_dwell_s` (1.5 s) before `Exit`.
+  The gap between the thresholds keeps a cloud hovering at 50% in a doorway from toggling, and the dwell
+  removes short excursions. Exits at an update come before enters, so walking through a door reads
+  "exit A, enter B". A lost fix exits every room after the exit dwell.
+- **Cost.** Probabilities are recomputed at most every `update_period_s` (0.25 s), after any sensor
+  update, so the cost does not scale with the IMU rate. The per-particle loop does not allocate; only
+  emitting an event does.
+- **Ground truth.** Replay runs the same tracker on the true position with a 0.5 threshold and no
+  dwell, and scores the engine's events against it (metrics in
+  [formats.md](formats.md#replay-outputs)). The dwell is a deliberate delay, so latency is at least
+  1.5 s and `room_accuracy` loses a few samples at every transition even for a perfect estimate.
+
+One seed each, default config:
+
+| Scenario | Filter | True events | Precision | Recall | Median latency | Room accuracy |
+|---|---|---|---|---|---|---|
+| office_nominal | PF | 16 | 1.00 | 1.00 | 1.5 s | 0.89 |
+| office_nominal | EKF | 16 | 0.72 | 0.81 | 1.6 s | 0.73 |
+| office_nominal | WCL | 16 | 0.88 | 0.88 | 3.5 s | 0.79 |
+| office_stairs_up_down | PF | 24 | 1.00 | 1.00 | 2.2 s | 0.83 |
+| office_stairs_up_down | EKF | 24 | 0.96 | 0.96 | 1.7 s | 0.81 |
+| office_stairs_up_down | WCL | 24 | 0.71 | 0.83 | 2.7 s | 0.74 |
+| kit_tour (open-venue config) | PF | 34 | 0.96 | 0.79 | 1.9 s | 0.77 |
+
+The particle filter's walls keep its cloud on the right side of a door, which is what room events need;
+the EKF is more accurate than the centroid but cuts corners through walls, producing short visits to the
+wrong office. In the KIT building most misses are short corridor segments and small rooms passed in
+under the dwell time.
+
 ## Determinism
 
 All sampling uses `ipe::Rng` (xoshiro256** + Box-Muller). `std::normal_distribution` is
@@ -161,3 +202,7 @@ Emscripten) and MSVC. A golden-value test pins the generator.
 - Connectors are polygons on the plan, so a long staircase that is itself inside a corridor polygon must be
   drawn tightly, or particles can change level on the corridor floor next to it.
 - Shadowing is correlated in time per beacon, not in space.
+- Room events are only as good as the position. In the MSIL malls (7-11 m typical error) the recorded
+  walks stay in the corridors, so every event the engine reports there is a false enter into a shop
+  next to the corridor; rooms smaller than the error, or visits shorter than the dwell time, are not
+  detectable. The malls' room events are a demo of the plumbing, not a result.

@@ -22,6 +22,7 @@ options:
   --set JSON             inline JSON merge patch, e.g. '{"pf":{"num_particles":500}}'
   --warmup SECONDS       exclude the first seconds from error stats (default 5)
   --out FILE             per-truth-sample estimates CSV
+  --events FILE          room enter/exit events CSV, estimated and true (venues with rooms)
   --metrics FILE         write metrics JSON to a file as well
   --particles FILE       particle snapshots CSV (particle filter only)
   --particles-every N    snapshot every N truth samples (default 5)
@@ -73,6 +74,7 @@ int main(int argc, char** argv) {
     const auto result = ipe::eval::replay(venue, trace, cfg, opts);
     if (args.has("out")) ipe::eval::write_estimates_csv(args.get("out"), result);
     if (args.has("particles")) ipe::eval::write_particles_csv(args.get("particles"), result);
+    if (args.has("events")) ipe::eval::write_room_events_csv(args.get("events"), venue, result);
 
     auto metrics = nlohmann::json::parse(ipe::eval::metrics_to_json(result.metrics));
     metrics["filter"] = args.get("filter", "pf");

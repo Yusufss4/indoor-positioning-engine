@@ -6,6 +6,8 @@ OSM needs geometry work that a mapping table cannot express, so this script does
 - `indoor=room` outlines (closed ways and multipolygons) become `room` features on every level they list;
   `indoor=wall` ways become `wall` features. Corridors and areas only have walls where rooms border them,
   so they are not walls themselves. The building outline is a wall on every level.
+- Rooms, corridors and areas also become `space` features (outer rings only), the named areas that room
+  enter/exit events refer to. They are named from `ref` and `name`.
 - Doors are nodes on room outlines. Each becomes `opening` segments reaching half its `width` (default
   1 m) along both outline edges at the node, so the importer cuts a doorway into those walls.
 - Closed stairs (`highway=steps`, `stairs=yes`, `room=stairs`, `indoor=stairs`) and lift
@@ -139,6 +141,25 @@ def feature(geom_type: str, coords, **props) -> dict:
     return {"type": "Feature", "properties": props, "geometry": {"type": geom_type, "coordinates": coords}}
 
 
+def space_features(e: dict, indoor: str, levels: list[int]) -> list[dict]:
+    """`space` features (named areas for room enter/exit events) for the outer rings of a room, corridor
+    or area. Ids are unique per level and ring; the name is "ref name", either one, or a generic label."""
+    t = e.get("tags", {})
+    osm_id = f"osm_{e['type'][0]}{e['id']}"
+    if e["type"] == "relation":
+        rings = assemble_rings(e.get("members", []), "outer")
+    else:
+        rings = polygons(e)
+    name, ref = t.get("name"), t.get("ref")
+    label = f"{ref} {name}" if name and ref and name != ref else name or ref or f"{indoor.capitalize()} {osm_id}"
+    out = []
+    for lv in levels:
+        for k, ring in enumerate(rings):
+            sid = osm_id + (f"_L{lv}" if len(levels) > 1 else "") + (f"_{k + 1}" if len(rings) > 1 else "")
+            out.append(feature("Polygon", [ring], feature_type="space", id=sid, name=label, level=lv))
+    return out
+
+
 def is_stairs(t: dict) -> bool:
     return (t.get("highway") == "steps" or t.get("stairs") == "yes" or t.get("room") == "stairs"
             or t.get("indoor") == "stairs")
@@ -158,6 +179,7 @@ def convert(osm: dict, name: str, way: int, door_width: float, beacon_grid: floa
     rooms_by_level: dict[int, list] = defaultdict(list)  # ring -> door lookup and beacon placement
     spaces_by_level: dict[int, list] = defaultdict(list)
     used_levels: set[int] = set()
+    space_outlines: set = set()
     for e in elements:
         t = e.get("tags", {})
         if e is building or "level" not in t:
@@ -177,6 +199,16 @@ def convert(osm: dict, name: str, way: int, door_width: float, beacon_grid: floa
             else:
                 stats[f"skipped: {connector} on one level"] += 1
         indoor = t.get("indoor")
+        if indoor in ("room", "corridor", "area") and rings:
+            for s in space_features(e, indoor, levels):
+                # A room mapped both as a way and as a multipolygon of that way would fire every event twice.
+                key = (s["properties"]["level"], frozenset(map(tuple, s["geometry"]["coordinates"][0])))
+                if key in space_outlines:
+                    stats["skipped: space with the outline of another"] += 1
+                    continue
+                space_outlines.add(key)
+                features.append(s)
+                stats["space"] += 1
         if indoor == "room" and rings:
             for lv in levels:
                 for ring in rings:

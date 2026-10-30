@@ -66,6 +66,17 @@ std::string venue_to_json(const Venue& v) {
     o << "]}";
   }
   o << (v.connectors().empty() ? "],\n" : "\n  ],\n");
+  if (!v.rooms().empty()) {
+    o << "  \"rooms\": [";
+    for (std::size_t k = 0; k < v.rooms().size(); ++k) {
+      const Room& r = v.rooms()[k];
+      o << (k ? ",\n    " : "\n    ") << "{\"id\": " << quoted(r.id) << ", \"name\": " << quoted(r.name)
+        << ", \"level\": " << v.level(r.level).ordinal << ", \"area\": [";
+      for (std::size_t i = 0; i < r.area.size(); ++i) o << (i ? ", " : "") << point(r.area[i]);
+      o << "]}";
+    }
+    o << "\n  ],\n";
+  }
   o << "  \"beacons\": [";
   for (std::size_t k = 0; k < v.beacons().size(); ++k) {
     const Beacon& bc = v.beacons()[k];
@@ -135,6 +146,14 @@ std::string export_geojson(const Venue& v, const ExportOptions& opts) {
                                               {"elevation_m", lo.elevation_m},
                                               {"height_m", hi.elevation_m + hi.height_m - lo.elevation_m}}));
   }
+  for (const Room& r : v.rooms()) {
+    const Level& l = v.level(r.level);
+    fs.push_back(feature(polygon(g, r.area), {{"feature_type", "space"},
+                                              {"id", r.id},
+                                              {"name", r.name},
+                                              {"level", l.ordinal},
+                                              {"elevation_m", l.elevation_m}}));
+  }
   for (const Beacon& b : v.beacons()) {
     const Level& l = v.level(b.level);
     fs.push_back(
@@ -168,8 +187,8 @@ Mapping parse_mapping(std::string_view json_text) {
   str("path_loss_property", m.path_loss_property);
   if (j.contains("wall_max_thickness_m")) m.wall_max_thickness_m = j.at("wall_max_thickness_m").get<double>();
   if (j.contains("types")) {
-    static const std::set<std::string> known{"wall",  "room",   "opening",  "level",    "beacon",
-                                             "venue", "stairs", "elevator", "escalator"};
+    static const std::set<std::string> known{"wall",  "room",   "opening",  "level",     "beacon",
+                                             "venue", "stairs", "elevator", "escalator", "space"};
     for (const auto& [key, values] : j.at("types").items()) {
       if (!known.count(key)) throw std::runtime_error("mapping: unknown type '" + key + "'");
       auto list = values.is_array() ? values.get<std::vector<std::string>>()
@@ -183,6 +202,7 @@ Mapping parse_mapping(std::string_view json_text) {
       if (key == "stairs") m.stairs = list;
       if (key == "elevator") m.elevator = list;
       if (key == "escalator") m.escalator = list;
+      if (key == "space") m.space = list;
     }
   }
   return m;
@@ -194,7 +214,7 @@ Mapping load_mapping_file(const std::string& path) { return parse_mapping(read_f
 
 namespace {
 
-enum class Kind { Wall, Room, Opening, Level, Beacon, Venue, Stairs, Elevator, Escalator, Other };
+enum class Kind { Wall, Room, Opening, Level, Beacon, Venue, Stairs, Elevator, Escalator, Space, Other };
 
 bool contains(const std::vector<std::string>& list, const std::string& v) {
   return std::find(list.begin(), list.end(), v) != list.end();
@@ -210,6 +230,7 @@ Kind classify(const Mapping& m, const std::string& type) {
   if (contains(m.stairs, type)) return Kind::Stairs;
   if (contains(m.elevator, type)) return Kind::Elevator;
   if (contains(m.escalator, type)) return Kind::Escalator;
+  if (contains(m.space, type)) return Kind::Space;
   return Kind::Other;
 }
 
@@ -311,6 +332,13 @@ struct RawBeacon {
   double path_loss_exp;
 };
 
+struct RawRoom {
+  std::string id;
+  std::optional<std::string> name;
+  int ordinal;
+  Polygon area;
+};
+
 /// Everything in the local frame of one georef.
 struct Local {
   std::map<int, RawLevel> levels;
@@ -318,6 +346,7 @@ struct Local {
   std::map<int, std::vector<std::vector<Vec2>>> openings;
   std::vector<RawConnector> connectors;
   std::vector<RawBeacon> beacons;
+  std::vector<RawRoom> rooms;
   Polygon footprint;
   Bounds level_extent{1e300, 1e300, -1e300, -1e300};
   Bounds all_extent{1e300, 1e300, -1e300, -1e300};
@@ -466,6 +495,20 @@ Local to_local(const json& features, const Mapping& m, const GeoRef& g, double c
         } else {
           out.connectors.push_back(std::move(c));
         }
+        break;
+      }
+      case Kind::Space: {
+        // Only the outer ring of the first polygon; holes and further parts are ignored.
+        if (!geom.closed || parts.empty() || parts.front().size() < 3) break;
+        out.levels.try_emplace(*ordinal);
+        RawRoom r;
+        r.id = prop_string(props, m.id_property)
+                   .value_or(f.contains("id") && f.at("id").is_string() ? f.at("id").get<std::string>() : "");
+        r.name = prop_string(props, m.name_property);
+        r.ordinal = *ordinal;
+        r.area = parts.front();
+        if (r.area.size() > 3 && distance(r.area.front(), r.area.back()) < 1e-6) r.area.pop_back();
+        out.rooms.push_back(std::move(r));
         break;
       }
       default:
@@ -620,9 +663,36 @@ ImportResult import_geojson(std::string_view geojson, const Mapping& m, const Im
     beacons.push_back({rb.id, {round_mm(rb.pos.x), round_mm(rb.pos.y)}, it->second, rb.tx_power, rb.path_loss_exp});
   }
 
+  std::vector<Room> rooms;
+  std::set<std::string> room_ids;
+  int duplicate_ids = 0;
+  unnamed = 0;
+  for (const auto& rr : local.rooms) {
+    Room r;
+    r.id = rr.id.empty() ? "space_" + std::to_string(++unnamed) : rr.id;
+    if (room_ids.count(r.id)) {
+      ++duplicate_ids;
+      int k = 2;
+      while (room_ids.count(r.id + "_" + std::to_string(k))) ++k;
+      r.id += "_" + std::to_string(k);
+    }
+    room_ids.insert(r.id);
+    r.name = rr.name.value_or(r.id);
+    r.level = index.at(rr.ordinal);
+    for (const Vec2& p : rr.area) r.area.push_back({round_mm(p.x), round_mm(p.y)});
+    if (polygon_area(r.area) < 1e-6) {
+      result.warnings.push_back("space " + r.id + " has no area; dropped");
+      continue;
+    }
+    rooms.push_back(std::move(r));
+  }
+  if (duplicate_ids > 0) {
+    result.warnings.push_back(std::to_string(duplicate_ids) + " space(s) reused an id and got a numeric suffix");
+  }
+
   result.venue =
       Venue(name.empty() ? "imported" : name, bounds, std::move(levels), std::move(beacons), std::move(connectors),
-            wall_att.value_or(3.5), floor_att.value_or(15.0), georef, std::move(local.footprint));
+            wall_att.value_or(3.5), floor_att.value_or(15.0), georef, std::move(local.footprint), std::move(rooms));
   return result;
 }
 

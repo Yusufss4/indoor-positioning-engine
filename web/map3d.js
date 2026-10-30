@@ -6,7 +6,7 @@
 //
 // Input is the GeoJSON written by `ipe-import export` (data/geojson/*.geojson):
 // walls are thin polygons extruded per floor, levels become slabs, connectors
-// become shafts. Everything dynamic (dots, uncertainty, particles) is drawn as
+// become shafts and spaces (rooms) are tinted on their floor. Everything dynamic (dots, uncertainty, particles) is drawn as
 // small extruded polygons because circle layers cannot be lifted off the ground.
 
 const MAPLIBRE = {
@@ -152,7 +152,11 @@ class Map3D {
         .filter((f) => ["stairs", "elevator", "escalator"].includes(f.properties.feature_type))
         .map((f) => ({ levels: f.properties.levels.map((o) => indexOf.get(o)), geometry: f.geometry,
                        kind: f.properties.feature_type })),
+      spaces: byType("space").map((f) => ({ level: indexOf.get(f.properties.level), id: f.properties.id,
+                                            geometry: f.geometry })),
     };
+    this.spaceById = new Map(this.static.spaces.map((s) => [s.id, s]));
+    this.activeRooms = "";
 
     const paint = (opacity) => ({
       "fill-extrusion-color": ["get", "color"],
@@ -171,6 +175,7 @@ class Map3D {
     add("dots", 1.0);
     add("particles", 0.7);
     add("uncertainty", 0.25);
+    add("rooms", 0.3);
     // fill-extrusion-opacity is per layer, hence one layer per floor.
     this.levels.forEach((_, i) => add(`level-${i}`, 0.85));
     add("connectors", 0.35);
@@ -200,6 +205,9 @@ class Map3D {
     if (!this.map || !this.levels.length) return;
     this.levels.forEach((l, i) => {
       const fs = [extruded(l.outline, this.z(i, -0.15), this.z(i), "#dfe6ef")];
+      for (const s of this.static.spaces) {
+        if (s.level === i) fs.push(extruded(s.geometry, this.z(i), this.z(i, 0.02), "#cfdcec"));
+      }
       for (const w of this.static.walls) {
         if (w.level === i) fs.push(extruded(w.geometry, this.z(i), this.z(i, this.wallHeight(i)), "#88a2c2"));
       }
@@ -218,6 +226,7 @@ class Map3D {
                       c.kind === "elevator" ? "#ff9f1c" : "#2ec4b6");
     });
     this.map.getSource("connectors").setData({ type: "FeatureCollection", features: shafts });
+    this.activeRooms = null;
     this.applyFocus();
   }
 
@@ -250,7 +259,8 @@ class Map3D {
     if (this.map) this.map.resize();
   }
 
-  /// frame: {truth, estimates: [{name, color, e}], particles: Float32Array (x, y, w, level), focusLevel}
+  /// frame: {truth, estimates: [{name, color, e}], particles: Float32Array (x, y, w, level), rooms: [room id],
+  /// focusLevel}
   update(frame, force = false) {
     if (!this.map || !this.levels.length) return;
     const now = performance.now();
@@ -260,6 +270,14 @@ class Map3D {
     if (frame.focusLevel !== this.focus) {
       this.focus = frame.focusLevel;
       this.applyFocus();
+    }
+
+    const roomKey = (frame.rooms || []).join("\n");
+    if (roomKey !== this.activeRooms) {
+      this.activeRooms = roomKey;
+      const fs = (frame.rooms || []).map((id) => this.spaceById.get(id)).filter(Boolean)
+        .map((s) => extruded(s.geometry, this.z(s.level, 0.02), this.z(s.level, 0.08), "#d62728"));
+      this.map.getSource("rooms").setData({ type: "FeatureCollection", features: fs });
     }
 
     const dots = [];

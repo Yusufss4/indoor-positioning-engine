@@ -303,6 +303,13 @@ venue and the surveyor's waypoints as squares. The black path between waypoints 
 only used for the live error readout; mean and CEP95 are scored at the waypoints, as here. The 3D view
 with the OpenStreetMap underlay shows where the mall is (see the GCJ-02 caveat for site 2 above).
 
+`export_demo.py` also gives each demo venue `rooms` from the floor plan's unit polygons (2,004 over the
+ten floors): shops keep their name, or "Unit" and the last six characters of the unit id; service units
+get an English name (toilets, lifts, rest areas); atrium voids, non-public and auxiliary areas are dropped. The Rooms panel
+shows the engine's Enter/Exit events for them. The surveyors walk the corridors, so the true walks
+enter no room, and every event there is a false enter into a shop next to the corridor (2 on the site1
+F2 walk, 8 on site2 F1, pf with the Wi-Fi config): with 7-11 m errors, shop-level events are out of reach.
+
 ## Reproduce
 
 ```bash

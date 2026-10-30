@@ -5,7 +5,8 @@ For every site and floor:
 
 * the floor plan (GCJ-02 GeoJSON scaled to the floor's width x height in metres) becomes a
   single-level venue, with walls from the floor outline (``boundary``), the shop outlines
-  (``units``) or the shop outlines with doorways where training paths cross them (``doors``);
+  (``units``) or the shop outlines with doorways where training paths cross them (``doors``),
+  and the named shop outlines as ``rooms`` for enter/exit events;
 * paths are split into training and test sets by path id;
 * training paths fit a radio map: position, tx power and path-loss exponent per iBeacon and,
   with ``--wifi``, per Wi-Fi access point;
@@ -177,6 +178,7 @@ class Floor:
     lat1: float
     outline: list  # rings of the floor polygon, metres
     units: list  # rings of the shop polygons, metres
+    rooms: list = field(default_factory=list)  # (id, name, outer ring in metres) per named area
 
     def to_xy(self, lon, lat):
         x = (np.asarray(lon) - self.lon0) / (self.lon1 - self.lon0) * self.width
@@ -219,10 +221,39 @@ def _rings(geom):
     return []
 
 
+def _outer_rings(geom):
+    if geom["type"] == "Polygon":
+        return [geom["coordinates"][0]]
+    if geom["type"] == "MultiPolygon":
+        return [poly[0] for poly in geom["coordinates"]]
+    return []
+
+
+# Generic unit names in the plans (pinyin) and the English room names they get. None drops the unit:
+# atrium voids, staff-only areas and decorative "auxiliary surfaces" are not places a visitor can be.
+UNIT_NAMES = {
+    "zhongkong": None,
+    "feikaifangquyu": None,
+    "fuzhumian": None,
+    "louti": "Stairs",
+    "zidongfuti": "Escalator",
+    "dianti": "Lift",
+    "huoti": "Freight lift",
+    "xiuxiqu": "Rest area",
+    "xishoujianfuzhumian": "Washroom area",
+    "nanweishengjian": "Men's toilet",
+    "nvweishengjian": "Women's toilet",
+    "canjirenweishengjian": "Accessible toilet",
+    "churukou": "Entrance",
+    "tingchechangchurukou": "Car park entrance",
+    "kongpu": "Vacant unit",
+}
+
+
 def load_floor(floor_dir: Path) -> Floor:
     info = json.loads((floor_dir / "floor_info.json").read_text())["map_info"]
     gj = json.loads((floor_dir / "geojson_map.json").read_text())
-    floor_rings, unit_rings = [], []
+    floor_rings, unit_rings, room_rings = [], [], []
     for feat in gj["features"]:
         rings = _rings(feat["geometry"])
         props = feat.get("properties", {})
@@ -231,6 +262,14 @@ def load_floor(floor_dir: Path) -> Floor:
             floor_rings += rings
         else:
             unit_rings += rings
+            raw = (props.get("name") or "").strip()
+            name = UNIT_NAMES.get(raw, raw)
+            if name is None:
+                continue
+            uid = str(props.get("id") or f"unit{len(room_rings) + 1}")
+            outer = _outer_rings(feat["geometry"])
+            for k, ring in enumerate(outer):
+                room_rings.append((uid + (f"_{k + 1}" if len(outer) > 1 else ""), name or f"Unit {uid[-6:]}", ring))
     # The floor's lon/lat bounding box spans the floor image, which is width x height metres.
     ref = floor_rings or unit_rings
     pts = np.array([p[:2] for ring in ref for p in ring])
@@ -246,7 +285,25 @@ def load_floor(floor_dir: Path) -> Floor:
 
     floor.outline = convert(floor_rings)
     floor.units = convert(unit_rings)
+    floor.rooms = [(uid, name, ring) for (uid, name, _), ring in
+                   zip(room_rings, convert([r for _, _, r in room_rings]))]
     return floor
+
+
+def room_list(floor: Floor) -> list[dict]:
+    """The venue's ``rooms``: one per unit outline (outer ring, closing point dropped), named for enter/exit
+    events. Slivers under 0.5 m² are left out."""
+    rooms, seen = [], set()
+    for uid, name, ring in floor.rooms:
+        pts = [[round(float(x), 3), round(float(y), 3)] for x, y in ring]
+        if len(pts) > 3 and pts[0] == pts[-1]:
+            pts.pop()
+        x, y = np.array(pts).T
+        if len(pts) < 3 or 0.5 * abs(np.dot(x, np.roll(y, 1)) - np.dot(y, np.roll(x, 1))) < 0.5 or uid in seen:
+            continue
+        seen.add(uid)
+        rooms.append({"id": uid, "name": name, "area": pts})
+    return rooms
 
 
 def ring_segments(rings) -> np.ndarray:
@@ -588,6 +645,7 @@ def convert_floor(site: str, floor_name: str, floor_dir: Path, paths: list[PathD
         "wall_attenuation_db": args.wall_attenuation_db,
         "georef": {"origin_lat": origin_lat, "origin_lon": origin_lon, "rotation_deg": 0},
         "walls": [[round(float(v), 3) for v in w] for w in wall_sets[mode]],
+        "rooms": room_list(floor),
         "beacons": [
             {"id": t.id, "x": round(t.x, 3), "y": round(t.y, 3), "tx_power": round(t.tx_power, 2), "path_loss_exp": round(t.path_loss_exp, 3)}
             for t in txs

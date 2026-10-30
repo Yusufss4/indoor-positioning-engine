@@ -54,6 +54,14 @@ struct Metrics {
   /// for filters that report no covariance.
   double coverage95 = -1.0;  ///< Share of fixes with NEES <= 5.991.
   double nees_median = -1.0;
+
+  /// Room Enter/Exit events against ground truth (see score_room_events).
+  /// The ratios are -1 for venues without rooms; with nothing to score they are 1.
+  int room_events = 0;                        ///< True events after warm-up.
+  double room_event_precision = -1.0;         ///< Share of estimated events matching a true one.
+  double room_event_recall = -1.0;            ///< Share of true events detected.
+  double room_event_latency_median_s = -1.0;  ///< Estimated minus true event time, matched events.
+  double room_accuracy = -1.0;                ///< Share of evaluated samples with the true set of rooms.
 };
 
 struct EstimateRecord {
@@ -68,6 +76,8 @@ struct EstimateRecord {
   bool has_fix = false;
   int truth_level = 0;
   int est_level = 0;
+  /// 1 if the engine's current rooms equal the true ones, 0 if not, -1 for venues without rooms.
+  int rooms_match = -1;
 };
 
 struct ParticleSnapshot {
@@ -85,6 +95,8 @@ struct ReplayResult {
   std::string filter;
   std::vector<EstimateRecord> records;
   std::vector<ParticleSnapshot> snapshots;
+  std::vector<RoomEvent> room_events;        ///< From the engine.
+  std::vector<RoomEvent> truth_room_events;  ///< From the ground-truth positions.
   Metrics metrics;
 };
 
@@ -96,8 +108,17 @@ ReplayResult replay(const Venue& venue, const Trace& trace, const EngineConfig& 
 Metrics compute_metrics(const std::vector<EstimateRecord>& records, double warmup_s);
 double percentile(std::vector<double> values, double p);
 
+/// Fills the room_event_* fields. A true event is detected by the earliest
+/// unmatched estimated event of the same room and type within `window_s` of
+/// it. Only events at or after `t_from` are counted, but they may match
+/// events before it.
+void score_room_events(Metrics& m, const std::vector<RoomEvent>& estimated, const std::vector<RoomEvent>& truth,
+                       double t_from, double window_s = 5.0);
+
 std::string metrics_to_json(const Metrics& m, int indent = 2);
 void write_estimates_csv(const std::string& path, const ReplayResult& result);
 void write_particles_csv(const std::string& path, const ReplayResult& result);
+/// t,source,room_id,room_name,type,probability with source "estimate" or "truth", sorted by time.
+void write_room_events_csv(const std::string& path, const Venue& venue, const ReplayResult& result);
 
 }  // namespace ipe::eval

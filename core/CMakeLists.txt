@@ -6,6 +6,7 @@ add_library(ipe_core STATIC
   src/georef.cpp
   src/particle_filter.cpp
   src/pdr.cpp
+  src/rooms.cpp
   src/rssi_model.cpp
   src/trace.cpp
   src/venue.cpp

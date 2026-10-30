@@ -7,8 +7,10 @@
 #include <algorithm>
 #include <cmath>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "ipe/engine.hpp"
@@ -56,6 +58,7 @@ class Demo {
   bool advance(double dt) {
     const double until = now_ + dt;
     recent_ble_.clear();
+    recent_rooms_.clear();
     while (g_ < trace_.truth.size()) {
       const double ti = i_ < trace_.imu.size() ? trace_.imu[i_].t : 1e300;
       const double tb = b_ < trace_.ble.size() ? trace_.ble[b_].t : 1e300;
@@ -86,6 +89,14 @@ class Demo {
         ++p_;
       } else {
         truth_ = trace_.truth[g_++];
+        if (truth_rooms_) {
+          ipe::Estimate at_truth;
+          at_truth.pos = truth_.pos;
+          at_truth.level = truth_.level;
+          at_truth.valid = true;
+          truth_rooms_->update(truth_.t, at_truth, nullptr);
+          for (const auto& e : truth_rooms_->take_events()) recent_rooms_.push_back({"truth", e});
+        }
         for (auto& tr : tracks_) {
           const auto e = tr.engine->estimate();
           if (!e.valid || truth_.t < 5.0) continue;
@@ -99,6 +110,11 @@ class Demo {
         }
       }
     }
+    for (auto& tr : tracks_) {
+      for (const auto& e : tr.engine->take_room_events()) recent_rooms_.push_back({tr.name, e});
+    }
+    std::stable_sort(recent_rooms_.begin(), recent_rooms_.end(),
+                     [](const auto& a, const auto& b) { return a.second.t < b.second.t; });
     now_ = until;
     return !finished();
   }
@@ -173,6 +189,39 @@ class Demo {
     return arr;
   }
 
+  /// Room enter/exit events during the last advance(), oldest first:
+  /// [{t, filter ("pf", "ekf", "wcl" or "truth"), room (index into the venue's rooms), roomId, name, type}].
+  val roomEvents() const {
+    val arr = val::array();
+    for (const auto& [source, e] : recent_rooms_) {
+      const auto& room = venue_.rooms()[e.room];
+      val o = val::object();
+      o.set("t", e.t);
+      o.set("filter", source);
+      o.set("room", static_cast<int>(e.room));
+      o.set("roomId", room.id);
+      o.set("name", room.name);
+      o.set("type", std::string(ipe::to_string(e.type)));
+      arr.call<void>("push", o);
+    }
+    return arr;
+  }
+
+  /// Indices into the venue's rooms that `name` ("pf", "ekf", "wcl" or "truth") is currently in.
+  val currentRooms(const std::string& name) const {
+    std::vector<std::size_t> rooms;
+    if (name == "truth") {
+      if (truth_rooms_) truth_rooms_->current_rooms(rooms);
+    } else {
+      for (const auto& tr : tracks_) {
+        if (tr.name == name) rooms = tr.engine->current_rooms();
+      }
+    }
+    val arr = val::array();
+    for (std::size_t r : rooms) arr.call<void>("push", static_cast<int>(r));
+    return arr;
+  }
+
   int steps() const { return static_cast<int>(tracks_.front().engine->step_count()); }
 
  private:
@@ -192,6 +241,7 @@ class Demo {
     }
     ble_index_.reserve(trace_.ble.size());
     for (const auto& b : trace_.ble) ble_index_.push_back(venue_.beacon_index(b.beacon_id).value_or(SIZE_MAX));
+    if (!venue_.rooms().empty()) truth_rooms_.emplace(venue_, ipe::truth_room_config());
   }
 
   ipe::TruthSample truth_now() const {
@@ -220,6 +270,8 @@ class Demo {
   std::vector<Track> tracks_;
   std::vector<std::size_t> ble_index_;
   std::vector<std::size_t> recent_ble_;
+  std::vector<std::pair<std::string, ipe::RoomEvent>> recent_rooms_;
+  std::optional<ipe::RoomTracker> truth_rooms_;
   std::vector<ipe::RssiReading> scan_;
   std::vector<float> particle_buf_;
   ipe::TruthSample truth_{};
@@ -243,5 +295,7 @@ EMSCRIPTEN_BINDINGS(ipe) {
       .function("floorAccuracy", &Demo::floorAccuracy)
       .function("particles", &Demo::particles)
       .function("recentBle", &Demo::recentBle)
+      .function("roomEvents", &Demo::roomEvents)
+      .function("currentRooms", &Demo::currentRooms)
       .function("steps", &Demo::steps);
 }

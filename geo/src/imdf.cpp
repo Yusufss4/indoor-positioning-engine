@@ -141,6 +141,11 @@ void export_imdf(const Venue& v, const std::string& dir, const ExportOptions& op
           imdf_feature(uuid("connector/" + c.id + "/" + std::to_string(l.ordinal)), "unit", polygon(g, c.area), props));
     }
   }
+  for (const Room& r : v.rooms()) {
+    ojson props = unit_props("room", uuid("level/" + std::to_string(v.level(r.level).ordinal)), label(r.name));
+    props["ipe:room_id"] = r.id;
+    units.push_back(imdf_feature(uuid("room/" + r.id), "unit", polygon(g, r.area), props));
+  }
   write_file((out / "unit.geojson").string(), feature_collection(units));
   write_file((out / "opening.geojson").string(), feature_collection({}));
 
@@ -213,6 +218,14 @@ ImportResult import_imdf(const std::string& dir, const ImportOptions& opts) {
     for (const auto& f : read_collection(in / "unit.geojson")) {
       const json& p = f.at("properties");
       const std::string category = p.value("category", "unspecified");
+      if (p.contains("ipe:room_id")) {
+        const auto ordinal = level_of(p, "unit");
+        if (!ordinal) continue;
+        json props{{"feature_type", "space"}, {"level", *ordinal}, {"id", p.at("ipe:room_id")}};
+        if (p.contains("name") && !p.at("name").is_null()) props["name"] = label_text(p.at("name"));
+        features.push_back({{"type", "Feature"}, {"properties", props}, {"geometry", f.at("geometry")}});
+        continue;
+      }
       std::string type;
       if (kWallCategories.count(category)) {
         type = "wall";

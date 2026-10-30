@@ -29,6 +29,8 @@ let real = null; // entry being replayed, null for simulated scenarios
 let background = null; // floor plan image of a recording
 let waypoints = []; // [t, x, y] surveyor waypoints of a recording
 let zoom = { k: 1, x: 0, y: 0 }; // 2D view: canvas px = k * fitted px + (x, y)
+let roomLog = []; // room enter/exit events so far, newest first
+const ROOM_LOG_MAX = 200;
 
 const REAL_BASE = new URL("data/real/", window.location.href);
 
@@ -82,6 +84,7 @@ function normalizeVenue(v) {
     levels,
     beacons: v.beacons.map((b) => ({ ...b, level: levelOf(b.level) })),
     connectors: (v.connectors || []).map((c) => ({ ...c, levels: c.levels.map(levelOf) })),
+    rooms: (v.rooms || []).map((r) => ({ ...r, name: r.name || r.id, level: levelOf(r.level) })),
   };
 }
 
@@ -131,6 +134,9 @@ async function start() {
   trails = Object.fromEntries(FILTERS.map((f) => [f, []]));
   pings = new Map();
   lastFrame = null;
+  roomLog = [];
+  el("rooms-panel").hidden = venue.rooms.length === 0;
+  renderRoomLog();
 
   const floorSel = el("floor");
   floorSel.innerHTML = `<option value="auto">follow walker</option>` +
@@ -233,6 +239,53 @@ function drawGrid(T) {
   ctx.fillText(`GRID ${metres} M`, 8, canvas.height - 8);
 }
 
+/// Room outlines on `level`: a faint fill, the particle filter's current rooms tinted red, the true ones
+/// outlined, and a name wherever it fits inside the room's on-screen box.
+function drawRooms(T, level) {
+  if (!venue.rooms.length) return;
+  const pfIn = new Set(el("show-pf").checked ? demo.currentRooms("pf") : []);
+  const truthIn = new Set(demo.currentRooms("truth"));
+  ctx.font = LABEL_FONT;
+  venue.rooms.forEach((r, i) => {
+    if (r.level !== level) return;
+    ctx.beginPath();
+    r.area.forEach(([x, y], k) => (k ? ctx.lineTo(T.toX(x), T.toY(y)) : ctx.moveTo(T.toX(x), T.toY(y))));
+    ctx.closePath();
+    ctx.fillStyle = pfIn.has(i) ? "rgba(214, 39, 40, 0.14)" : "rgba(29, 78, 137, 0.035)";
+    ctx.fill();
+    if (truthIn.has(i)) {
+      ctx.strokeStyle = "rgba(34, 34, 34, 0.55)";
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([5, 4]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    const xs = r.area.map((p) => T.toX(p[0]));
+    const ys = r.area.map((p) => T.toY(p[1]));
+    const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+    const w = ctx.measureText(r.name).width;
+    if (x1 - x0 < w + 8 || y1 - y0 < 16) return;
+    ctx.fillStyle = "rgba(29, 78, 137, 0.55)";
+    ctx.fillText(r.name, (x0 + x1 - w) / 2, (y0 + y1) / 2 + 4);
+  });
+}
+
+function renderRoomLog() {
+  const shown = new Set(["truth", ...visibleFilters()]);
+  const fmt = (r) => venue.levels.length > 1 ? `${r.name} (${venue.levels[r.level].name})` : r.name;
+  el("room-log").innerHTML = roomLog.filter((e) => shown.has(e.filter)).slice(0, 60).map((e) =>
+    `<li class="${e.type}"><span class="t">${e.t.toFixed(1)} s</span>` +
+    `<span class="swatch" style="background:${COLORS[e.filter]}"></span>${e.filter} ` +
+    `<b>${e.type}</b> ${escapeHtml(fmt(venue.rooms[e.room]))}</li>`).join("");
+  const now = (f) => demo.currentRooms(f).map((i) => escapeHtml(fmt(venue.rooms[i]))).join(", ") || "-";
+  el("rooms-now").innerHTML = [...shown].map((f) =>
+    `<span class="swatch" style="background:${COLORS[f]}"></span>${f}: ${now(f)}`).join("<br>");
+}
+
+function escapeHtml(s) {
+  return s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+}
+
 function draw(level) {
   const T = transform();
   ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -246,6 +299,8 @@ function draw(level) {
     ctx.filter = "none";
     ctx.globalAlpha = 1;
   }
+
+  drawRooms(T, level);
 
   for (const c of venue.connectors) {
     if (!c.levels.includes(level)) continue;
@@ -357,6 +412,7 @@ function currentFrame(level) {
     truth: demo.truth(),
     estimates: visibleFilters().map((f) => ({ name: f, color: COLORS[f], e: demo.estimate(f) })),
     particles: el("show-particles").checked ? demo.particles().slice() : null,
+    rooms: el("show-pf").checked ? demo.currentRooms("pf").map((i) => venue.rooms[i].id) : [],
     focusLevel: level,
     levels: venue.levels,
   };
@@ -374,6 +430,11 @@ function tick(ts) {
         if (e.valid && demo.time() > 3) trails[f].push([e.x, e.y, e.level]);
       }
       for (const b of demo.recentBle()) pings.set(b.id, { t: demo.time(), rssi: b.rssi });
+      const events = demo.roomEvents();
+      if (events.length) {
+        roomLog = events.reverse().concat(roomLog).slice(0, ROOM_LOG_MAX);
+        renderRoomLog();
+      }
     }
     lastFrame = ts;
     const level = shownLevel();
@@ -430,6 +491,7 @@ el("play").addEventListener("click", () => {
   el("play").textContent = playing ? "Pause" : "Play";
 });
 el("restart").addEventListener("click", start);
+for (const f of FILTERS) el(`show-${f}`).addEventListener("change", () => venue && renderRoomLog());
 el("scenario").addEventListener("change", () => {
   zoom = { k: 1, x: 0, y: 0 };
   start();

@@ -7,8 +7,8 @@ floor it writes the venue,
 its GeoJSON export (for the 3D view), the floor image and the trace, plus data/real/demos.json,
 which the demo reads to fill its scenario menu.
 
-The venues carry the shop walls with inferred doorways (see docs/real_data.md). The sample data is
-MIT-licensed; its licence is copied next to the files.
+The venues carry the shop walls with inferred doorways (see docs/real_data.md) and the shop outlines
+as rooms. The sample data is MIT-licensed; its licence is copied next to the files.
 
     .venv/bin/python datasets/msil/convert.py --wifi --scans --walls doors --out datasets/msil/out_doors
     .venv/bin/python datasets/msil/export_demo.py
@@ -21,6 +21,8 @@ import json
 import shutil
 import subprocess
 from pathlib import Path
+
+from convert import load_floor, room_list
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
@@ -70,7 +72,10 @@ def main():
         src_trace = args.out_dir / t["trace"]
         floor_dir = args.dest / group
         floor_dir.mkdir()
-        shutil.copy(args.out_dir / t["venue"], floor_dir / "venue.json")
+        # Rooms come from the raw plan, so converter output from before rooms existed needs no re-fit.
+        venue = json.loads((args.out_dir / t["venue"]).read_text())
+        venue["rooms"] = room_list(load_floor(args.raw / "data" / site / floor))
+        (floor_dir / "venue.json").write_text(json.dumps(venue))
         shutil.copy(args.raw / "data" / site / floor / "floor_image.png", floor_dir / "floor.png")
         shutil.copy(src_trace, floor_dir / src_trace.name)
         subprocess.run([str(args.build / "tools" / "ipe-import"), "export", str(floor_dir / "venue.json"),

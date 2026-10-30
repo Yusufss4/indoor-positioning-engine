@@ -1,14 +1,17 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "ipe/baro.hpp"
 #include "ipe/ekf.hpp"
 #include "ipe/filter.hpp"
 #include "ipe/particle_filter.hpp"
 #include "ipe/pdr.hpp"
+#include "ipe/rooms.hpp"
 #include "ipe/rssi_model.hpp"
 #include "ipe/venue.hpp"
 #include "ipe/wcl.hpp"
@@ -29,6 +32,7 @@ struct EngineConfig {
   ParticleFilterConfig pf;
   EkfConfig ekf;
   WclConfig wcl;
+  RoomEventConfig rooms;
   double mag_heading_sigma_deg = 12.0;
 };
 
@@ -53,13 +57,27 @@ class PositioningEngine {
   [[nodiscard]] std::uint64_t step_count() const { return steps_; }
 
   /// Null unless the active filter is the particle filter.
-  [[nodiscard]] const ParticleFilter* particle_filter() const;
+  [[nodiscard]] const ParticleFilter* particle_filter() const { return pf_; }
+
+  /// Room Enter/Exit events since the last call, oldest first. Always empty
+  /// for venues without rooms.
+  [[nodiscard]] std::vector<RoomEvent> take_room_events();
+  /// Indices into Venue::rooms() of the rooms the device is currently in.
+  [[nodiscard]] std::vector<std::size_t> current_rooms() const;
+  /// Null for venues without rooms.
+  [[nodiscard]] const RoomTracker* room_tracker() const { return rooms_ ? &*rooms_ : nullptr; }
 
  private:
+  void update_rooms(double t) {
+    if (rooms_ && rooms_->due(t)) rooms_->update(t, filter_->estimate(), pf_);
+  }
+
   const Venue* venue_;
   EngineConfig cfg_;
   PdrProcessor pdr_;
   std::unique_ptr<Filter> filter_;
+  const ParticleFilter* pf_ = nullptr;
+  std::optional<RoomTracker> rooms_;
   std::uint64_t steps_ = 0;
 };
 

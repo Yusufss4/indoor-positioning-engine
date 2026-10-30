@@ -1,6 +1,7 @@
 #pragma once
 
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -46,9 +47,22 @@ struct Connector {
   [[nodiscard]] bool contains(Vec2 p) const { return point_in_polygon(p, area); }
 };
 
+/// A named area on one level (room, shop, corridor) that enter/exit events
+/// refer to. Rooms are not obstacles; they may overlap, e.g. a wing and the
+/// rooms inside it.
+struct Room {
+  std::string id;
+  std::string name;
+  int level = 0;  ///< Level index.
+  Polygon area;
+  Bounds box{};  ///< Bounding box of `area`; filled in by Venue.
+
+  [[nodiscard]] bool contains(Vec2 p) const { return box.contains(p) && point_in_polygon(p, area); }
+};
+
 /// Static description of a venue: one or more floors with walls (impassable
-/// for pedestrians, attenuating for radio), the surveyed beacon positions and
-/// the stairs/lifts connecting the floors.
+/// for pedestrians, attenuating for radio), the surveyed beacon positions,
+/// the stairs/lifts connecting the floors and the named rooms.
 class Venue {
  public:
   Venue() = default;
@@ -61,7 +75,7 @@ class Venue {
   /// covering at least 99% of `bounds` adds nothing and is dropped.
   Venue(std::string name, Bounds bounds, std::vector<Level> levels, std::vector<Beacon> beacons,
         std::vector<Connector> connectors, double wall_attenuation_db, double floor_attenuation_db,
-        std::optional<GeoRef> georef = std::nullopt, Polygon footprint = {});
+        std::optional<GeoRef> georef = std::nullopt, Polygon footprint = {}, std::vector<Room> rooms = {});
 
   [[nodiscard]] const std::string& name() const { return name_; }
   [[nodiscard]] const Bounds& bounds() const { return bounds_; }
@@ -93,6 +107,14 @@ class Venue {
   /// A connector serving `level` whose footprint contains `p`, or null.
   [[nodiscard]] const Connector* connector_at(Vec2 p, int level) const;
 
+  [[nodiscard]] const std::vector<Room>& rooms() const { return rooms_; }
+  [[nodiscard]] std::optional<std::size_t> room_index(std::string_view id) const;
+  /// Indices of the rooms on `level` that may contain `p` (bounding-box grid
+  /// cell); callers still test Room::contains. Valid until the venue changes.
+  [[nodiscard]] std::span<const std::size_t> room_candidates(Vec2 p, int level) const;
+  /// Indices of the rooms on `level` containing `p`, ascending, into `out` (cleared first).
+  void rooms_at(Vec2 p, int level, std::vector<std::size_t>& out) const;
+
   [[nodiscard]] const std::optional<GeoRef>& georef() const { return georef_; }
 
   [[nodiscard]] std::optional<std::size_t> beacon_index(std::string_view id) const;
@@ -112,8 +134,17 @@ class Venue {
     std::vector<std::vector<std::size_t>> cells;
   };
 
+  /// Rooms bucketed by bounding box, one grid per level.
+  struct RoomGrid {
+    double cell = 5.0;
+    int nx = 0;
+    int ny = 0;
+    std::vector<std::vector<std::size_t>> cells;
+  };
+
   void validate() const;
   void build_grids();
+  void build_room_grids();
   template <typename Fn>
   void for_each_candidate_wall(Vec2 a, Vec2 b, int level, Fn&& fn) const;
 
@@ -123,10 +154,12 @@ class Venue {
   std::vector<Level> levels_;
   std::vector<Beacon> beacons_;
   std::vector<Connector> connectors_;
+  std::vector<Room> rooms_;
   double wall_attenuation_db_ = 3.0;
   double floor_attenuation_db_ = 15.0;
   std::optional<GeoRef> georef_;
   std::vector<Grid> grids_;
+  std::vector<RoomGrid> room_grids_;
 };
 
 /// Parses the venue JSON format documented in docs/formats.md.

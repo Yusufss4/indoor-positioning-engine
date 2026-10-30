@@ -24,6 +24,15 @@ inline Venue two_room_venue() {
   })");
 }
 
+/// two_room_venue() with its two rooms named: "west" (index 0) and "east" (index 1).
+inline Venue two_room_venue_with_rooms() {
+  const Venue v = two_room_venue();
+  std::vector<Room> rooms = {{"west", "West room", 0, {{0, 0}, {10, 0}, {10, 10}, {0, 10}}},
+                             {"east", "East room", 0, {{10, 0}, {20, 0}, {20, 10}, {10, 10}}}};
+  return Venue(v.name(), v.bounds(), v.levels(), v.beacons(), v.connectors(), v.wall_attenuation_db(),
+               v.floor_attenuation_db(), v.georef(), v.footprint(), std::move(rooms));
+}
+
 /// Two copies of the two-room box stacked 4 m apart, joined by a stairwell in
 /// the south-west corner and a lift in the north-east corner.
 inline Venue two_level_venue() {

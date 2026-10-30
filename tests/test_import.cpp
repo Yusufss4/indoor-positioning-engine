@@ -88,6 +88,17 @@ void expect_same_venue(const Venue& a, const Venue& b, double tol = 0.01) {
     EXPECT_DOUBLE_EQ(ba.tx_power_dbm, bb.tx_power_dbm);
     EXPECT_DOUBLE_EQ(ba.path_loss_exp, bb.path_loss_exp);
   }
+
+  ASSERT_EQ(a.rooms().size(), b.rooms().size());
+  for (std::size_t k = 0; k < a.rooms().size(); ++k) {
+    const Room& ra = a.rooms()[k];
+    const Room& rb = b.rooms()[k];
+    EXPECT_EQ(ra.id, rb.id);
+    EXPECT_EQ(ra.name, rb.name);
+    EXPECT_EQ(ra.level, rb.level);
+    ASSERT_EQ(ra.area.size(), rb.area.size()) << ra.id;
+    for (std::size_t i = 0; i < ra.area.size(); ++i) EXPECT_TRUE(near(ra.area[i], rb.area[i], tol)) << ra.id;
+  }
 }
 
 fs::path fresh_dir(const std::string& name) {
@@ -147,6 +158,58 @@ TEST(Import, ImdfRoundTrip) {
   const fs::path dir = fresh_dir("ipe_imdf_roundtrip");
   geo::export_imdf(v, dir.string());
   expect_same_venue(v, geo::import_imdf(dir.string()).venue);
+}
+
+TEST(Import, RoomsRoundTripThroughGeoJsonAndImdf) {
+  Venue v = test::two_level_venue();
+  std::vector<Room> rooms = {{"west", "West \"A\"", 0, {{0, 0}, {10, 0}, {10, 10}, {0, 10}}},
+                             {"east", "East", 0, {{10, 0}, {20, 0}, {20, 10}, {10, 10}}},
+                             {"loft", "Loft", 1, {{0, 0}, {20, 0}, {20, 10}, {0, 10}}}};
+  v = Venue(v.name(), v.bounds(), v.levels(), v.beacons(), v.connectors(), v.wall_attenuation_db(),
+            v.floor_attenuation_db(), GeoRef{49.0, 8.4, 12.0}, v.footprint(), std::move(rooms));
+  expect_same_venue(v, parse_venue(geo::venue_to_json(v)), 1e-9);
+
+  const auto r = geo::import_geojson(geo::export_geojson(v), geo::Mapping{});
+  EXPECT_TRUE(r.warnings.empty());
+  expect_same_venue(v, r.venue);  // spaces add no walls
+
+  const fs::path dir = fresh_dir("ipe_imdf_rooms");
+  geo::export_imdf(v, dir.string());
+  expect_same_venue(v, geo::import_imdf(dir.string()).venue);
+}
+
+TEST(Import, UnnamedAndDuplicateSpacesGetIds) {
+  const GeoRef g{48.0, 11.0, 0.0};
+  const auto pos = [&](double x, double y) {
+    const LatLon ll = g.to_wgs84({x, y});
+    char buf[64];
+    std::snprintf(buf, sizeof(buf), "[%.10f,%.10f]", ll.lon, ll.lat);
+    return std::string(buf);
+  };
+  const auto rect = [&](double x0, double y0, double x1, double y1) {
+    return "{\"type\":\"Polygon\",\"coordinates\":[[" + pos(x0, y0) + "," + pos(x1, y0) + "," + pos(x1, y1) + "," +
+           pos(x0, y1) + "," + pos(x0, y0) + "]]}";
+  };
+  const auto feature = [](const std::string& props, const std::string& geom) {
+    return "{\"type\":\"Feature\",\"properties\":{" + props + "},\"geometry\":" + geom + "}";
+  };
+  const std::string fc = "{\"type\":\"FeatureCollection\",\"features\":[" +
+                         feature(R"("feature_type":"level","ordinal":0)", rect(0, 0, 20, 10)) + "," +
+                         feature(R"("feature_type":"space","level":0,"id":"lab","name":"Lab")", rect(0, 0, 10, 10)) +
+                         "," + feature(R"("feature_type":"space","level":0,"id":"lab")", rect(10, 0, 20, 10)) + "," +
+                         feature(R"("feature_type":"space","level":0)", rect(5, 5, 6, 6)) + "]}";
+  const auto r = geo::import_geojson(fc, geo::Mapping{});
+  const Venue& v = r.venue;
+  ASSERT_EQ(v.rooms().size(), 3u);
+  EXPECT_EQ(v.rooms()[0].id, "lab");
+  EXPECT_EQ(v.rooms()[0].name, "Lab");
+  EXPECT_EQ(v.rooms()[1].id, "lab_2");
+  EXPECT_EQ(v.rooms()[2].id, "space_1");
+  EXPECT_EQ(v.rooms()[2].name, "space_1");
+  EXPECT_TRUE(v.walls(0).empty());
+  bool warned_duplicate = false;
+  for (const auto& w : r.warnings) warned_duplicate |= w.find("reused an id") != std::string::npos;
+  EXPECT_TRUE(warned_duplicate);
 }
 
 TEST(Import, CommittedImdfSampleMatchesVenue) {

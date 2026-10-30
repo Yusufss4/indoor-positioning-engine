@@ -72,6 +72,21 @@ th:first-child, td:first-child { text-align: left; }
 td:first-child { text-transform: uppercase; letter-spacing: 0.08em; }
 
 .hint { color: var(--muted); font-size: 0.75rem; }
+
+#rooms-panel h2 {
+  margin: 14px 0 4px; font-size: 0.8rem; font-weight: 500; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--ink); border-bottom: 1px solid var(--rule-faint); padding-bottom: 4px;
+}
+#rooms-now { font-size: 0.85rem; margin: 4px 0 6px; }
+#room-log {
+  list-style: none; margin: 0; padding: 0; max-height: 220px; overflow-y: auto;
+  font-size: 0.8rem; font-variant-numeric: tabular-nums; border-top: 1px solid var(--rule-faint);
+}
+#room-log li { padding: 2px 0; border-bottom: 1px solid var(--rule-faint); }
+#room-log li .t { display: inline-block; width: 4.5em; color: var(--muted); }
+#room-log li b { font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.72rem; }
+#room-log li.enter b { color: #2a7a3b; }
+#room-log li.exit b { color: #a33b2b; }
 .swatch { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
 [hidden] { display: none !important; }
 

@@ -58,6 +58,25 @@ Instead of top-level `walls`, a multi-floor venue has `levels`, and may add `con
   rectangle is walkable; one covering 99% or more of the bounds is ignored.
 - A file has either top-level `walls` (one floor, ordinal 0) or `levels`, not both.
 
+### Rooms
+
+`rooms` (optional) names the areas the engine reports Enter and Exit events for:
+
+```json
+"rooms": [
+  {"id": "office_n1", "name": "Office N1", "level": 0, "area": [[0, 13], [10, 13], [10, 24], [0, 24]]}
+]
+```
+
+- `id` is required and unique; `name` defaults to the id; `level` is an ordinal and defaults to the
+  lowest floor. `area` is a polygon with at least three points and a non-zero area; a repeated closing
+  point is dropped.
+- Rooms are independent of walls: they add no walls, they may overlap (a shop inside a hall, a corridor
+  crossing an open-plan area), and they need not cover the floor.
+- Every committed venue has rooms: hand-drawn for the synthetic offices and the airport hall, mapped
+  `indoor=room|corridor|area` outlines for the OSM building, and the named units (shops, toilets, ...)
+  of the MSIL malls.
+
 ## Scenario (`data/scenarios/*.json`)
 
 | Section | Key | Meaning |
@@ -122,6 +141,14 @@ JSON merge patches over a preset's engine config, the same shape as `--print-con
 `ipe-replay` and `ipe-regress` take `--config FILE`. It is applied before any `--set`, and unknown keys
 are rejected.
 
+The `rooms` section tunes the room event detector (defaults shown; see
+[design.md](design.md#room-enter-and-exit-events)):
+
+```json
+{"rooms": {"enter_prob": 0.6, "exit_prob": 0.3, "enter_dwell_s": 1.5, "exit_dwell_s": 1.5,
+           "update_period_s": 0.25}}
+```
+
 ## Trace manifest (`ipe-regress --traces`)
 
 Replays recorded traces (one run each) instead of simulating scenarios:
@@ -142,9 +169,14 @@ truth after the warm-up are skipped. `--baseline` and `--update` work as for sce
 - `--out`: `t,truth_x,truth_y,est_x,est_y,sigma_m,error_m,has_fix,truth_level,est_level,cov_xx,cov_xy,cov_yy`,
   one row per ground-truth sample.
 - `--particles`: `t,x,y,w,level`, subsampled particle cloud every N ground-truth samples.
+- `--events`: `t,source,room_id,room_name,type,probability`, the engine's room events (`source` is
+  `estimate`) and the events of the ground-truth path (`truth`), sorted by time. `type` is `enter` or
+  `exit`; `probability` is the room probability that fired the event (1 or 0 for truth). Names are
+  quoted when they contain a comma or a quote.
 - stdout / `--metrics`: JSON with `mean_m`, `rmse_m`, `cep50_m`, `cep95_m`, `max_m`, `availability`,
   `time_to_first_fix_s`, `convergence_s`, `steps`, `compute_us_per_update`, `floor_accuracy`,
-  `floor_switch_latency_s`, `level_changes`, `coverage95`, `nees_median`.
+  `floor_switch_latency_s`, `level_changes`, `coverage95`, `nees_median`, `room_events`,
+  `room_event_precision`, `room_event_recall`, `room_event_latency_median_s`, `room_accuracy`.
 
 `cep50`/`cep95` are the 50th/95th percentiles of horizontal error after a 5 s warm-up, over fixes on the
 correct floor. `floor_accuracy` is the share of fixes on the correct floor (1.0 on a single-floor venue).
@@ -157,6 +189,15 @@ NEES = e^T P^-1 e is the squared horizontal error measured against the reported 
 scores about 0.95, and lower means overconfident. `nees_median` is about 1.39 for an honest filter. Both
 are -1 for filters that report no covariance (the weighted centroid). They are reported, not gated:
 `ipe-regress` adds `coverage95` (and `median_coverage95` for recorded traces) to its JSON and tables.
+
+The room metrics compare the engine's events with those of the ground-truth path (a detector with no
+dwell and a 0.5 threshold on the true position). An estimated event matches the earliest unmatched true
+event of the same room and type within 5 s. `room_events` counts true events after the warm-up;
+`room_event_recall` is the share of them that were matched, `room_event_precision` the share of
+estimated events after the warm-up that match one, and `room_event_latency_median_s` the median of
+estimated minus true time over matches (dwell included, so about 1.5 s at best). Precision and recall
+are 1 when there is nothing to score. `room_accuracy` is the share of scored samples whose set of
+current rooms equals the true set. All are -1 for venues without rooms. They are reported, not gated.
 
 ## GeoJSON and IMDF (`ipe-import`)
 
@@ -185,6 +226,7 @@ One `FeatureCollection` in WGS84, one feature per line. `properties.feature_type
 | `level` | bounds polygon | `level`, `ordinal`, `name`, `elevation_m`, `height_m` |
 | `wall` | 0.2 m wide rectangle around the wall | `level`, `elevation_m`, `height_m` |
 | `stairs` / `elevator` / `escalator` | connector footprint | `id`, `level` (lowest), `levels`, `elevation_m`, `height_m` (shaft) |
+| `space` | room area | `id`, `name`, `level`, `elevation_m` |
 | `beacon` | point | `id`, `level`, `elevation_m`, `tx_power`, `path_loss_exp` |
 
 The committed exports in `data/geojson/` feed the 3D view; a unit test fails when they are stale.
@@ -198,7 +240,7 @@ mean what. Supporting another platform's export means writing a table, not code.
 {
   "type_property": "kind",
   "types": {"wall": [...], "room": [...], "opening": [...], "level": [...], "beacon": [...], "venue": [...],
-            "stairs": [...], "elevator": [...], "escalator": [...]},
+            "stairs": [...], "elevator": [...], "escalator": [...], "space": [...]},
   "level_property": "floor", "levels_property": "floors", "ordinal_property": "floor",
   "name_property": "name", "id_property": "uid", "elevation_property": "elevation", "height_property": "height",
   "tx_power_property": "txPower", "path_loss_property": "pathLossExponent",
@@ -216,6 +258,10 @@ mean what. Supporting another platform's export means writing a table, not code.
   within 1 m (or that share an id) become one shaft serving all their levels. A connector on one floor
   only is dropped with a warning.
 - `venue` features: the largest polygon ring becomes the venue `footprint` (holes are ignored).
+- `space` features: the outer ring of the (first) polygon becomes a venue room, with its `id` and `name`
+  properties; it adds no walls. A space without an id gets `space_N`; a reused id gets a `_2`, `_3`, ...
+  suffix and a warning. Spaces with no area are dropped with a warning. A feature that should be both a
+  wall outline and a room event area is listed twice, once as `room` and once as `space`.
 - `level` values can be numbers or numeric strings. Without a venue georef, the local frame is anchored at
   the south-west corner of the level outlines.
 - `ipe.json` describes the exported scheme (also the built-in default).
@@ -234,6 +280,9 @@ mean what. Supporting another platform's export means writing a table, not code.
   `ipe:georef`, `ipe:wall_attenuation_db` and `ipe:floor_attenuation_db` on the venue,
   `ipe:elevation_m` and `ipe:height_m` on levels, `ipe:connector_id` on connector units, and a
   `beacons.json` sidecar (`{"beacons": [{"id", "lat", "lon", "level", "tx_power", "path_loss_exp"}]}`).
+- Venue rooms are exported as `room` units with the room name as their label and an `ipe:room_id`
+  property. On import, a unit with `ipe:room_id` becomes a venue room and adds no walls; third-party
+  units are walls only.
   Third-party IMDF works without them: levels are stacked `--level-height` apart, the local frame is
   anchored at the south-west corner, and beacons come from `--beacons` or `--beacon-grid`.
 - `export-imdf` writes manifest, venue, level, unit (walls as `structure` units, connectors per floor)
@@ -256,6 +305,10 @@ needs geometry work before `ipe-import`, so `datasets/osm/convert.py` writes Geo
 - Closed stairs (`highway=steps`, `stairs=yes`, `room=stairs`, `indoor=stairs`) and lifts
   (`highway=elevator`, `room=elevator`) listing two or more levels (`level=-1;0;1`) are connectors.
 - Beacons go on a 10 m grid, keeping points inside a mapped room, corridor or area of each level.
+- Every `indoor=room`, `corridor` and `area` outline is also a `space` (a venue room for Enter/Exit
+  events), one per level it lists, with id `osm_<w|r><id>` (plus `_L<level>` for several levels and
+  `_<k>` for several outer rings) and its `ref` and `name` as the name. Identical outlines on the same
+  level are written once.
 
 The Overpass response is committed (`data/osm/kit_informatikbau.osm.json`, (c) OpenStreetMap
 contributors, [ODbL](../data/osm/LICENSE)), so the venue regenerates without network access; `--fetch`

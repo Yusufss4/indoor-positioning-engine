@@ -90,6 +90,15 @@
       </table>
       <p class="hint">Statistics exclude the first 5 s, matching the regression suite. Horizontal errors only count
         fixes on the right floor; "ok" is the share of fixes on the right floor.</p>
+      <section id="rooms-panel" hidden>
+        <h2>Rooms</h2>
+        <p id="rooms-now"></p>
+        <ol id="room-log"></ol>
+        <p class="hint">Enter/exit events, newest first. A filter enters a room once its probability (particle
+          weight inside, or the mean position for EKF and WCL) stays above 60% for 1.5 s, and exits once it stays
+          below 30% for 1.5 s. Truth events come from the true position without delay. In 2D the particle filter's
+          room is tinted red and the true room is dashed.</p>
+      </section>
     </aside>
   </main>
 

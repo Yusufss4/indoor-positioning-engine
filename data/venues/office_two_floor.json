@@ -39,6 +39,24 @@
     {"id": "stairs_sw", "kind": "stairs", "levels": [0, 1], "area": [[0.5, 0.5], [5.5, 0.5], [5.5, 2.5], [0.5, 2.5]]},
     {"id": "lift_se", "kind": "elevator", "levels": [0, 1], "area": [[37.5, 0.5], [39.5, 0.5], [39.5, 2.5], [37.5, 2.5]]}
   ],
+  "rooms": [
+    {"id": "ground_corridor",   "name": "Corridor",        "level": 0, "area": [[0, 10], [40, 10], [40, 13], [0, 13]]},
+    {"id": "ground_office_n1",  "name": "Office N1",       "level": 0, "area": [[0, 13], [10, 13], [10, 24], [0, 24]]},
+    {"id": "ground_office_n2",  "name": "Office N2",       "level": 0, "area": [[10, 13], [20, 13], [20, 24], [10, 24]]},
+    {"id": "ground_office_n3",  "name": "Office N3",       "level": 0, "area": [[20, 13], [30, 13], [30, 24], [20, 24]]},
+    {"id": "ground_office_n4",  "name": "Office N4",       "level": 0, "area": [[30, 13], [40, 13], [40, 24], [30, 24]]},
+    {"id": "ground_open_plan",  "name": "Open-plan area",  "level": 0, "area": [[0, 0], [20, 0], [20, 10], [0, 10]]},
+    {"id": "ground_meeting_s3", "name": "Meeting room S3", "level": 0, "area": [[20, 0], [30, 0], [30, 10], [20, 10]]},
+    {"id": "ground_meeting_s4", "name": "Meeting room S4", "level": 0, "area": [[30, 0], [40, 0], [40, 10], [30, 10]]},
+
+    {"id": "first_corridor",    "name": "Corridor",          "level": 1, "area": [[0, 10], [40, 10], [40, 13], [0, 13]]},
+    {"id": "first_office_n12",  "name": "Open office N1-N2", "level": 1, "area": [[0, 13], [20, 13], [20, 24], [0, 24]]},
+    {"id": "first_office_n3",   "name": "Office N3",         "level": 1, "area": [[20, 13], [30, 13], [30, 24], [20, 24]]},
+    {"id": "first_office_n4",   "name": "Office N4",         "level": 1, "area": [[30, 13], [40, 13], [40, 24], [30, 24]]},
+    {"id": "first_open_plan",   "name": "Open-plan area",    "level": 1, "area": [[0, 0], [20, 0], [20, 10], [0, 10]]},
+    {"id": "first_lounge_s3",   "name": "Lounge S3",         "level": 1, "area": [[20, 0], [30, 0], [30, 10], [20, 10]]},
+    {"id": "first_meeting_s4",  "name": "Meeting room S4",   "level": 1, "area": [[30, 0], [40, 0], [40, 10], [30, 10]]}
+  ],
   "beacons": [
     {"id": "C1", "x": 5,  "y": 11.5, "level": 0, "tx_power": -59, "path_loss_exp": 2.0},
     {"id": "C2", "x": 15, "y": 11.5, "level": 0, "tx_power": -59, "path_loss_exp": 2.0},

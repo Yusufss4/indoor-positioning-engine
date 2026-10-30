@@ -41,6 +41,7 @@ struct Mapping {
   std::vector<std::string> stairs{"stairs"};
   std::vector<std::string> elevator{"elevator"};
   std::vector<std::string> escalator{"escalator"};
+  std::vector<std::string> space{"space"};  ///< Named polygons for room enter/exit events; not walls.
 
   std::string level_property = "level";      ///< Ordinal of the floor a feature is on.
   std::string levels_property = "levels";    ///< Ordinals served by a connector feature (optional).
@@ -83,8 +84,9 @@ ImportResult import_geojson(std::string_view geojson, const Mapping& mapping, co
 
 /// Reads an IMDF directory (venue, level, unit, opening GeoJSON files). Unit
 /// categories map to walls (structure, concrete, ...), connectors (stairs,
-/// elevator, escalator) or rooms; a beacons.json sidecar in the directory is
-/// used when opts.beacons_json is empty.
+/// elevator, escalator) or rooms whose outlines are walls; units carrying
+/// "ipe:room_id" (written by export_imdf) become venue rooms. A beacons.json
+/// sidecar in the directory is used when opts.beacons_json is empty.
 ImportResult import_imdf(const std::string& dir, const ImportOptions& opts = {});
 
 }  // namespace ipe::geo

@@ -20,8 +20,9 @@ WebAssembly build that runs the same engine in the browser with a 2D and a 3D (M
 | **EKF** | `[x, y, heading]` with Jacobian-based prediction, scalar RSSI/heading updates, chi-square gating and Joseph-form covariance update; floor from an anchored barometer |
 | **Weighted centroid** | RSSI-only baseline with a beacon floor vote |
 | **Floors** | Venues with levels, stairwells, lifts and escalators; 3D radio distance with slab loss; barometric altitude with low-pass filtering; floor accuracy and floor-switch latency metrics |
+| **Room events** | Named rooms on every shipped map (hand-drawn, from OpenStreetMap, from the mall unit polygons); debounced Enter/Exit events from particle mass in each room, with hysteresis and dwell; scored against ground truth (precision, recall, latency, room accuracy); event log and room highlight in the web demo |
 | **Simulator** | Pure-pursuit walker through a floor plan, up stairs and in lifts; synthesises 50 Hz IMU, BLE with fading, shadowing, wall and slab loss, path-loss mismatch, device offsets, packet loss, magnetic anomalies, dead and moved beacons, and a phone barometer with weather drift, device bias and door spikes |
-| **Replay + metrics** | Mean, RMSE, CEP50, CEP95, availability, time to first fix, convergence time, floor accuracy, floor-switch latency, compute per update |
+| **Replay + metrics** | Mean, RMSE, CEP50, CEP95, availability, time to first fix, convergence time, floor accuracy, floor-switch latency, room-event precision/recall/latency, compute per update |
 | **Regression suite** | 11 scenarios x 4 filter presets x N seeds compared against a stored baseline in CI |
 | **Map interop** | `ipe-import`: GeoJSON (any platform, through a property mapping table) and an IMDF subset in and out, with WGS84 georeferencing |
 | **WebAssembly** | Emscripten/embind build of the unchanged core with a 2D canvas and a 3D MapLibre view, deployed to GitHub Pages |
@@ -157,7 +158,7 @@ no footprint, so their results are bit-identical. The web demo plays this walk w
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
-ctest --test-dir build --output-on-failure          # 98 unit tests + accuracy regression
+ctest --test-dir build --output-on-failure          # 122 unit tests + accuracy regression
                                                      # (+ real-data regression once datasets/msil/out_scans exists)
 
 # simulate a scenario and replay it through a filter
@@ -167,6 +168,9 @@ ctest --test-dir build --output-on-failure          # 98 unit tests + accuracy r
 # two floors: the trace also carries barometer samples; metrics add floor_accuracy and floor_switch_latency_s
 ./build/tools/ipe-sim --scenario data/scenarios/office_stairs_up_down.json --out /tmp/stairs.csv
 ./build/tools/ipe-replay --venue data/venues/office_two_floor.json --trace /tmp/stairs.csv --filter pf
+
+# room Enter/Exit events (estimated and true) as CSV; metrics add room_event_precision/recall
+./build/tools/ipe-replay --venue data/venues/office_floor.json --trace /tmp/trace.csv --filter pf --events /tmp/events.csv
 
 # A/B experiment: does the beacon integrity monitor help, across every scenario and 10 seeds?
 ./build/tools/ipe-regress --scenarios data/scenarios --no-baseline --seeds 10 --presets pf \
@@ -191,7 +195,10 @@ menu. Trails show only that floor, estimates on another floor are drawn as dashe
 table adds a floor column for two-floor scenarios. The "Real recordings" scenarios replay phone walks from
 two shopping malls instead of simulating one, over the mall's floor plan, with its shop walls and the
 surveyor's waypoints as squares. `kit_tour` simulates a walk through a real seven-floor university
-building imported from OpenStreetMap; the demo opens on it, in the 3D view.
+building imported from OpenStreetMap; the demo opens on it, in the 3D view. Rooms are drawn on the plan
+with the particle filter's current rooms tinted red and the true room outlined; the Rooms panel lists
+each filter's current rooms and a log of Enter/Exit events, the walker's true events included. The 3D
+view highlights the particle filter's current rooms.
 
 The **3D** button switches to a MapLibre GL view of the venue: walls extruded per floor, translucent slabs,
 stair and lift shafts, the walker, each filter's estimate with its uncertainty, and the particles coloured
@@ -241,7 +248,7 @@ Formats in detail: [docs/formats.md](docs/formats.md#geojson-and-imdf-ipe-import
 ## Repository layout
 
 ```
-core/     engine: PDR, RSSI model, barometer, particle filter, EKF, WCL, venue + georef + trace I/O
+core/     engine: PDR, RSSI model, barometer, particle filter, EKF, WCL, room events, venue + georef + trace I/O
 sim/      scenario -> synthetic trace
 eval/     presets, config overrides, replay, metrics, benchmark/baseline comparison
 geo/      GeoJSON / IMDF import and export

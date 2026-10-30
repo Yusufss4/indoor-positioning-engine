@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdio>
 #include <fstream>
+#include <optional>
 #include <stdexcept>
 
 #include <nlohmann/json.hpp>
@@ -29,6 +30,8 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(EkfConfig, step_length_sigma_rel
                                                 rssi_gate_chi2, heading_gate_chi2, init_min_beacons, init_window_s,
                                                 reinit_after_rejections)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(WclConfig, window_s, top_k, weight_exponent)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(RoomEventConfig, enter_prob, exit_prob, enter_dwell_s, exit_dwell_s,
+                                                update_period_s)
 
 void to_json(nlohmann::json& j, const EngineConfig& c) {
   j = nlohmann::json{{"filter", std::string(to_string(c.filter))},
@@ -38,6 +41,7 @@ void to_json(nlohmann::json& j, const EngineConfig& c) {
                      {"pf", c.pf},
                      {"ekf", c.ekf},
                      {"wcl", c.wcl},
+                     {"rooms", c.rooms},
                      {"mag_heading_sigma_deg", c.mag_heading_sigma_deg}};
 }
 
@@ -49,6 +53,7 @@ void from_json(const nlohmann::json& j, EngineConfig& c) {
   j.at("pf").get_to(c.pf);
   j.at("ekf").get_to(c.ekf);
   j.at("wcl").get_to(c.wcl);
+  if (j.contains("rooms")) j.at("rooms").get_to(c.rooms);
   j.at("mag_heading_sigma_deg").get_to(c.mag_heading_sigma_deg);
 }
 
@@ -125,10 +130,14 @@ Metrics compute_metrics(const std::vector<EstimateRecord>& records, double warmu
   }
 
   std::vector<double> errors, nees;
-  std::size_t evaluated = 0, with_fix = 0;
+  std::size_t evaluated = 0, with_fix = 0, room_scored = 0, room_ok = 0;
   for (const auto& r : records) {
     if (r.t - t0 < warmup_s) continue;
     ++evaluated;
+    if (r.rooms_match >= 0) {
+      ++room_scored;
+      room_ok += static_cast<std::size_t>(r.rooms_match);
+    }
     if (!r.has_fix) continue;
     ++with_fix;
     if (r.est_level != r.truth_level) continue;
@@ -149,6 +158,7 @@ Metrics compute_metrics(const std::vector<EstimateRecord>& records, double warmu
   m.samples = evaluated;
   m.availability = evaluated ? static_cast<double>(with_fix) / static_cast<double>(evaluated) : 0.0;
   m.floor_accuracy = with_fix ? static_cast<double>(errors.size()) / static_cast<double>(with_fix) : 0.0;
+  if (room_scored) m.room_accuracy = static_cast<double>(room_ok) / static_cast<double>(room_scored);
 
   // Floor switch latency per true level change.
   double latency_sum = 0.0;
@@ -204,6 +214,37 @@ Metrics compute_metrics(const std::vector<EstimateRecord>& records, double warmu
   return m;
 }
 
+void score_room_events(Metrics& m, const std::vector<RoomEvent>& estimated, const std::vector<RoomEvent>& truth,
+                       double t_from, double window_s) {
+  std::vector<bool> used(estimated.size(), false);
+  std::vector<double> latencies;
+  int truth_counted = 0, detected = 0;
+  for (const auto& tr : truth) {
+    const bool counted = tr.t >= t_from;
+    truth_counted += counted;
+    for (std::size_t k = 0; k < estimated.size(); ++k) {
+      const auto& e = estimated[k];
+      if (used[k] || e.room != tr.room || e.type != tr.type || std::abs(e.t - tr.t) > window_s) continue;
+      used[k] = true;
+      if (counted) {
+        ++detected;
+        latencies.push_back(e.t - tr.t);
+      }
+      break;
+    }
+  }
+  int est_counted = 0, est_matched = 0;
+  for (std::size_t k = 0; k < estimated.size(); ++k) {
+    if (estimated[k].t < t_from) continue;
+    ++est_counted;
+    est_matched += used[k];
+  }
+  m.room_events = truth_counted;
+  m.room_event_recall = truth_counted ? static_cast<double>(detected) / truth_counted : 1.0;
+  m.room_event_precision = est_counted ? static_cast<double>(est_matched) / est_counted : 1.0;
+  m.room_event_latency_median_s = latencies.empty() ? -1.0 : percentile(latencies, 0.5);
+}
+
 ReplayResult replay(const Venue& venue, const Trace& trace, const EngineConfig& cfg, const ReplayOptions& opts) {
   using clock = std::chrono::steady_clock;
   PositioningEngine engine(venue, cfg);
@@ -221,6 +262,9 @@ ReplayResult replay(const Venue& venue, const Trace& trace, const EngineConfig& 
   std::uint64_t updates = 0;
   Estimate last_fix;
   std::vector<RssiReading> scan;
+  std::optional<RoomTracker> truth_rooms;
+  if (!venue.rooms().empty()) truth_rooms.emplace(venue, truth_room_config());
+  std::vector<std::size_t> truth_in, est_in;
   std::size_t i = 0, b = 0, p = 0, g = 0, truth_seen = 0;
   while (g < trace.truth.size()) {
     const double ti = i < trace.imu.size() ? trace.imu[i].t : 1e300;
@@ -273,6 +317,17 @@ ReplayResult replay(const Venue& venue, const Trace& trace, const EngineConfig& 
         rec.error_m = distance(last_fix.pos, truth.pos);
         rec.est_level = last_fix.level;
       }
+      if (truth_rooms) {
+        Estimate at_truth;
+        at_truth.pos = truth.pos;
+        at_truth.level = truth.level;
+        at_truth.valid = true;
+        truth_rooms->update(truth.t, at_truth, nullptr);
+        truth_rooms->current_rooms(truth_in);
+        engine.room_tracker()->current_rooms(est_in);
+        rec.rooms_match = truth_in == est_in ? 1 : 0;
+        for (const auto& e : engine.take_room_events()) result.room_events.push_back(e);
+      }
       result.records.push_back(rec);
 
       const auto* pf = engine.particle_filter();
@@ -294,6 +349,12 @@ ReplayResult replay(const Venue& venue, const Trace& trace, const EngineConfig& 
   }
 
   result.metrics = compute_metrics(result.records, opts.warmup_s);
+  if (truth_rooms && !trace.truth.empty()) {
+    for (const auto& e : engine.take_room_events()) result.room_events.push_back(e);
+    result.truth_room_events = truth_rooms->take_events();
+    score_room_events(result.metrics, result.room_events, result.truth_room_events,
+                      trace.truth.front().t + opts.warmup_s);
+  }
   result.metrics.steps = engine.step_count();
   result.metrics.compute_us_per_update =
       updates ? std::chrono::duration<double, std::micro>(busy).count() / static_cast<double>(updates) : 0.0;
@@ -316,7 +377,12 @@ std::string metrics_to_json(const Metrics& m, int indent) {
                             {"floor_switch_latency_s", m.floor_switch_latency_s},
                             {"level_changes", m.level_changes},
                             {"coverage95", m.coverage95},
-                            {"nees_median", m.nees_median}};
+                            {"nees_median", m.nees_median},
+                            {"room_events", m.room_events},
+                            {"room_event_precision", m.room_event_precision},
+                            {"room_event_recall", m.room_event_recall},
+                            {"room_event_latency_median_s", m.room_event_latency_median_s},
+                            {"room_accuracy", m.room_accuracy}};
   return j.dump(indent);
 }
 
@@ -342,6 +408,37 @@ void write_particles_csv(const std::string& path, const ReplayResult& result) {
     }
   }
   std::fclose(f);
+}
+
+void write_room_events_csv(const std::string& path, const Venue& venue, const ReplayResult& result) {
+  struct Row {
+    const RoomEvent* event;
+    const char* source;
+  };
+  std::vector<Row> rows;
+  for (const auto& e : result.room_events) rows.push_back({&e, "estimate"});
+  for (const auto& e : result.truth_room_events) rows.push_back({&e, "truth"});
+  std::stable_sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) { return a.event->t < b.event->t; });
+
+  std::ofstream out(path);
+  if (!out) throw std::runtime_error("cannot write " + path);
+  // Names come from map data and may contain commas or quotes.
+  const auto quoted = [](const std::string& s) {
+    if (s.find_first_of(",\"\n") == std::string::npos) return s;
+    std::string q = "\"";
+    for (char c : s) q += c == '"' ? std::string("\"\"") : std::string(1, c);
+    return q + "\"";
+  };
+  out << "t,source,room_id,room_name,type,probability\n";
+  char num[64];
+  for (const auto& r : rows) {
+    const Room& room = venue.rooms().at(r.event->room);
+    std::snprintf(num, sizeof(num), "%.3f", r.event->t);
+    out << num << ',' << r.source << ',' << quoted(room.id) << ',' << quoted(room.name) << ','
+        << to_string(r.event->type) << ',';
+    std::snprintf(num, sizeof(num), "%.3f", r.event->probability);
+    out << num << '\n';
+  }
 }
 
 }  // namespace eval

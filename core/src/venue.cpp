@@ -46,13 +46,14 @@ Venue::Venue(std::string name, Bounds bounds, std::vector<Segment> walls, std::v
 
 Venue::Venue(std::string name, Bounds bounds, std::vector<Level> levels, std::vector<Beacon> beacons,
              std::vector<Connector> connectors, double wall_attenuation_db, double floor_attenuation_db,
-             std::optional<GeoRef> georef, Polygon footprint)
+             std::optional<GeoRef> georef, Polygon footprint, std::vector<Room> rooms)
     : name_(std::move(name)),
       bounds_(bounds),
       footprint_(std::move(footprint)),
       levels_(std::move(levels)),
       beacons_(std::move(beacons)),
       connectors_(std::move(connectors)),
+      rooms_(std::move(rooms)),
       wall_attenuation_db_(wall_attenuation_db),
       floor_attenuation_db_(floor_attenuation_db),
       georef_(georef) {
@@ -60,8 +61,20 @@ Venue::Venue(std::string name, Bounds bounds, std::vector<Level> levels, std::ve
   if (footprint_.size() < 3 || polygon_area(footprint_) >= 0.99 * bounds_.width() * bounds_.height()) {
     footprint_.clear();
   }
+  for (auto& r : rooms_) {
+    if (r.area.size() > 3 && distance(r.area.front(), r.area.back()) < 1e-9) r.area.pop_back();
+    if (r.area.empty()) continue;
+    r.box = {r.area.front().x, r.area.front().y, r.area.front().x, r.area.front().y};
+    for (const Vec2& p : r.area) {
+      r.box.min_x = std::min(r.box.min_x, p.x);
+      r.box.min_y = std::min(r.box.min_y, p.y);
+      r.box.max_x = std::max(r.box.max_x, p.x);
+      r.box.max_y = std::max(r.box.max_y, p.y);
+    }
+  }
   validate();
   build_grids();
+  build_room_grids();
 }
 
 void Venue::validate() const {
@@ -80,6 +93,17 @@ void Venue::validate() const {
     if (c.levels.size() < 2) throw std::runtime_error("venue: connector " + c.id + " must serve two or more levels");
     if (!std::all_of(c.levels.begin(), c.levels.end(), valid_level)) {
       throw std::runtime_error("venue: connector " + c.id + " serves an unknown level");
+    }
+  }
+  for (std::size_t i = 0; i < rooms_.size(); ++i) {
+    const Room& r = rooms_[i];
+    if (r.id.empty()) throw std::runtime_error("venue: room without id");
+    if (!valid_level(r.level)) throw std::runtime_error("venue: room " + r.id + " on unknown level");
+    if (r.area.size() < 3 || polygon_area(r.area) < 1e-6) {
+      throw std::runtime_error("venue: room " + r.id + " needs a polygon area");
+    }
+    for (std::size_t k = 0; k < i; ++k) {
+      if (rooms_[k].id == r.id) throw std::runtime_error("venue: duplicate room id " + r.id);
     }
   }
 }
@@ -114,6 +138,53 @@ const Connector* Venue::connector_at(Vec2 p, int level) const {
     if (c.serves(level) && c.contains(p)) return &c;
   }
   return nullptr;
+}
+
+std::optional<std::size_t> Venue::room_index(std::string_view id) const {
+  for (std::size_t i = 0; i < rooms_.size(); ++i) {
+    if (rooms_[i].id == id) return i;
+  }
+  return std::nullopt;
+}
+
+std::span<const std::size_t> Venue::room_candidates(Vec2 p, int level) const {
+  if (level < 0 || level >= static_cast<int>(room_grids_.size())) return {};
+  const RoomGrid& grid = room_grids_[static_cast<std::size_t>(level)];
+  if (grid.cells.empty() || !bounds_.contains(p)) return {};
+  const int x = std::min(static_cast<int>((p.x - bounds_.min_x) / grid.cell), grid.nx - 1);
+  const int y = std::min(static_cast<int>((p.y - bounds_.min_y) / grid.cell), grid.ny - 1);
+  return grid.cells[static_cast<std::size_t>(y * grid.nx + x)];
+}
+
+void Venue::rooms_at(Vec2 p, int level, std::vector<std::size_t>& out) const {
+  out.clear();
+  for (std::size_t r : room_candidates(p, level)) {
+    if (rooms_[r].contains(p)) out.push_back(r);
+  }
+}
+
+void Venue::build_room_grids() {
+  room_grids_.assign(levels_.size(), RoomGrid{});
+  if (rooms_.empty()) return;
+  for (auto& grid : room_grids_) {
+    grid.nx = std::max(1, static_cast<int>(std::ceil(bounds_.width() / grid.cell)));
+    grid.ny = std::max(1, static_cast<int>(std::ceil(bounds_.height() / grid.cell)));
+    grid.cells.assign(static_cast<std::size_t>(grid.nx * grid.ny), {});
+  }
+  for (std::size_t r = 0; r < rooms_.size(); ++r) {
+    const Room& room = rooms_[r];
+    RoomGrid& grid = room_grids_[static_cast<std::size_t>(room.level)];
+    auto cell_of = [&](double v, double lo, int n) {
+      return std::clamp(static_cast<int>(std::floor((v - lo) / grid.cell)), 0, n - 1);
+    };
+    const int x0 = cell_of(room.box.min_x, bounds_.min_x, grid.nx);
+    const int x1 = cell_of(room.box.max_x, bounds_.min_x, grid.nx);
+    const int y0 = cell_of(room.box.min_y, bounds_.min_y, grid.ny);
+    const int y1 = cell_of(room.box.max_y, bounds_.min_y, grid.ny);
+    for (int y = y0; y <= y1; ++y) {
+      for (int x = x0; x <= x1; ++x) grid.cells[static_cast<std::size_t>(y * grid.nx + x)].push_back(r);
+    }
+  }
 }
 
 std::optional<std::size_t> Venue::beacon_index(std::string_view id) const {
@@ -283,6 +354,19 @@ Venue parse_venue(std::string_view json_text) {
     connectors.push_back(std::move(c));
   }
 
+  std::vector<Room> rooms;
+  for (const auto& jr : j.value("rooms", json::array())) {
+    Room r;
+    r.id = jr.at("id").get<std::string>();
+    r.name = jr.value("name", r.id);
+    r.level = index_of(jr.value("level", levels.front().ordinal), "room " + r.id);
+    for (const auto& p : jr.at("area")) {
+      if (!p.is_array() || p.size() != 2) throw std::runtime_error("venue: room area points must be [x, y]");
+      r.area.push_back({p[0].get<double>(), p[1].get<double>()});
+    }
+    rooms.push_back(std::move(r));
+  }
+
   std::optional<GeoRef> georef;
   if (j.contains("georef")) {
     const auto& g = j.at("georef");
@@ -298,7 +382,7 @@ Venue parse_venue(std::string_view json_text) {
 
   return Venue(j.value("name", std::string("unnamed")), bounds, std::move(levels), std::move(beacons),
                std::move(connectors), j.value("wall_attenuation_db", 3.0), j.value("floor_attenuation_db", 15.0),
-               georef, std::move(footprint));
+               georef, std::move(footprint), std::move(rooms));
 }
 
 Venue load_venue_file(const std::string& path) {

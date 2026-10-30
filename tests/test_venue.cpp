@@ -1,6 +1,10 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <filesystem>
 #include <stdexcept>
+#include <string>
+#include <vector>
 
 #include "ipe/geometry.hpp"
 #include "ipe/rng.hpp"
@@ -144,6 +148,93 @@ TEST(Venue, ConnectorHitTest) {
   EXPECT_EQ(lift->kind, ConnectorKind::Elevator);
   EXPECT_EQ(v.connector_at({5, 5}, 0), nullptr);
   EXPECT_EQ(v.connector_at({4.5, 1.5}, 0), nullptr);
+}
+
+TEST(Venue, RoomsParseAndHitTest) {
+  const Venue v = parse_venue(R"({"bounds": [0, 0, 20, 10], "beacons": [],
+    "levels": [{"ordinal": 0}, {"ordinal": 1}],
+    "rooms": [
+      {"id": "w", "name": "West", "level": 0, "area": [[0,0],[10,0],[10,10],[0,10],[0,0]]},
+      {"id": "e", "area": [[10,0],[20,0],[20,10],[10,10]]},
+      {"id": "nook", "name": "Nook", "level": 0, "area": [[1,1],[3,1],[3,3],[1,3]]},
+      {"id": "up", "name": "Upstairs", "level": 1, "area": [[0,0],[20,0],[20,10],[0,10]]}]})");
+  ASSERT_EQ(v.rooms().size(), 4u);
+  EXPECT_EQ(v.rooms()[0].name, "West");
+  EXPECT_EQ(v.rooms()[0].area.size(), 4u);  // closing point dropped
+  EXPECT_EQ(v.rooms()[1].name, "e");        // name defaults to the id
+  EXPECT_EQ(v.rooms()[1].level, 0);         // level defaults to the lowest
+  EXPECT_EQ(v.rooms()[3].level, 1);
+  EXPECT_EQ(v.room_index("nook"), 2u);
+  EXPECT_FALSE(v.room_index("attic").has_value());
+
+  std::vector<std::size_t> in;
+  v.rooms_at({2, 2}, 0, in);
+  EXPECT_EQ(in, (std::vector<std::size_t>{0, 2}));  // rooms may overlap
+  v.rooms_at({15, 5}, 0, in);
+  EXPECT_EQ(in, std::vector<std::size_t>{1});
+  v.rooms_at({15, 5}, 1, in);
+  EXPECT_EQ(in, std::vector<std::size_t>{3});
+  v.rooms_at({25, 5}, 0, in);
+  EXPECT_TRUE(in.empty());
+  EXPECT_TRUE(v.room_candidates({25, 5}, 0).empty());
+  EXPECT_TRUE(v.room_candidates({5, 5}, 7).empty());
+}
+
+TEST(Venue, RoomGridMatchesBruteForce) {
+  const Venue v = load_venue_file(test::data_path("venues/kit_informatikbau.json"));
+  ASSERT_GT(v.rooms().size(), 100u);
+  Rng rng(5);
+  std::vector<std::size_t> fast;
+  for (int i = 0; i < 2000; ++i) {
+    const Vec2 p{rng.uniform(v.bounds().min_x - 5, v.bounds().max_x + 5),
+                 rng.uniform(v.bounds().min_y - 5, v.bounds().max_y + 5)};
+    const int level = std::min(v.level_count() - 1, static_cast<int>(rng.uniform(0.0, v.level_count())));
+    v.rooms_at(p, level, fast);
+    std::vector<std::size_t> slow;
+    for (std::size_t r = 0; r < v.rooms().size(); ++r) {
+      if (v.rooms()[r].level == level && point_in_polygon(p, v.rooms()[r].area)) slow.push_back(r);
+    }
+    EXPECT_EQ(fast, slow) << p.x << "," << p.y;
+  }
+}
+
+TEST(Venue, RejectsInvalidRooms) {
+  const auto with_rooms = [](const std::string& rooms) {
+    return parse_venue(R"({"bounds": [0, 0, 10, 10], "levels": [{"ordinal": 0}], "beacons": [], "rooms": )" + rooms +
+                       "}");
+  };
+  EXPECT_NO_THROW(with_rooms(R"([{"id": "a", "area": [[0,0],[1,0],[1,1]]}])"));
+  EXPECT_THROW(with_rooms(R"([{"id": "a", "area": [[0,0],[1,0],[1,1]]}, {"id": "a", "area": [[2,2],[3,2],[3,3]]}])"),
+               std::runtime_error);
+  EXPECT_THROW(with_rooms(R"([{"id": "a", "area": [[0,0],[1,0]]}])"), std::runtime_error);
+  EXPECT_THROW(with_rooms(R"([{"id": "a", "area": [[0,0],[1,1],[2,2]]}])"), std::runtime_error);
+  EXPECT_THROW(with_rooms(R"([{"id": "a", "level": 2, "area": [[0,0],[1,0],[1,1]]}])"), std::runtime_error);
+  EXPECT_THROW(with_rooms(R"([{"id": "", "area": [[0,0],[1,0],[1,1]]}])"), std::runtime_error);
+  EXPECT_THROW(with_rooms(R"([{"id": "a", "area": [[0,0,0],[1,0],[1,1]]}])"), std::runtime_error);
+}
+
+TEST(Venue, EveryCommittedVenueHasRoomsInsideItsBounds) {
+  std::vector<std::string> files;
+  for (const char* name : {"office_floor", "office_two_floor", "airport_hall", "kit_informatikbau"}) {
+    files.push_back(test::data_path(std::string("venues/") + name + ".json"));
+  }
+  for (const auto& floor : std::filesystem::directory_iterator(test::data_path("real"))) {
+    if (floor.is_directory()) files.push_back((floor.path() / "venue.json").string());
+  }
+  ASSERT_GT(files.size(), 4u);
+  for (const auto& file : files) {
+    SCOPED_TRACE(file);
+    const Venue v = load_venue_file(file);
+    EXPECT_FALSE(v.rooms().empty());
+    const Bounds& b = v.bounds();
+    for (const Room& r : v.rooms()) {
+      EXPECT_FALSE(r.name.empty()) << r.id;
+      EXPECT_GE(r.box.min_x, b.min_x - 0.1) << r.id;
+      EXPECT_GE(r.box.min_y, b.min_y - 0.1) << r.id;
+      EXPECT_LE(r.box.max_x, b.max_x + 0.1) << r.id;
+      EXPECT_LE(r.box.max_y, b.max_y + 0.1) << r.id;
+    }
+  }
 }
 
 TEST(Venue, RejectsInvalidLevelReferences) {

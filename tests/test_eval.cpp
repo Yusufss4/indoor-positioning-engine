@@ -58,6 +58,64 @@ TEST(Eval, FloorMetricsCountWrongLevelSeparately) {
   EXPECT_DOUBLE_EQ(m.max_m, 1.0);  // wrong-floor fixes are not horizontal errors
 }
 
+TEST(Eval, RoomEventsMatchWithinTheWindow) {
+  const auto ev = [](double t, std::size_t room, RoomEventType type) { return RoomEvent{t, room, type, 1.0}; };
+  const auto enter = RoomEventType::Enter;
+  const auto exit = RoomEventType::Exit;
+  // The first true event falls in the warm-up; so does its match.
+  const std::vector<RoomEvent> truth = {ev(0, 0, enter), ev(10, 0, enter), ev(20, 0, exit), ev(20, 1, enter)};
+  const std::vector<RoomEvent> est = {ev(2, 0, enter), ev(12, 0, enter), ev(21, 1, enter), ev(27, 0, exit),
+                                      ev(40, 1, enter)};
+  Metrics m;
+  score_room_events(m, est, truth, 5.0);
+  EXPECT_EQ(m.room_events, 3);
+  EXPECT_DOUBLE_EQ(m.room_event_recall, 2.0 / 3.0);     // the exit came 7 s late
+  EXPECT_DOUBLE_EQ(m.room_event_precision, 2.0 / 4.0);  // the late exit and the enter at 40 s are false
+  EXPECT_DOUBLE_EQ(m.room_event_latency_median_s, 1.5);
+
+  Metrics none;
+  score_room_events(none, {}, {}, 0.0);
+  EXPECT_EQ(none.room_events, 0);
+  EXPECT_DOUBLE_EQ(none.room_event_recall, 1.0);
+  EXPECT_DOUBLE_EQ(none.room_event_precision, 1.0);
+  EXPECT_DOUBLE_EQ(none.room_event_latency_median_s, -1.0);
+}
+
+TEST(Eval, RoomAccuracyCountsMatchingRoomSets) {
+  std::vector<EstimateRecord> recs(10);
+  for (int i = 0; i < 10; ++i) recs[i].t = i;
+  EXPECT_DOUBLE_EQ(compute_metrics(recs, 0.0).room_accuracy, -1.0);  // no rooms in the venue
+  for (int i = 0; i < 10; ++i) recs[i].rooms_match = i < 2 || i >= 7 ? 0 : 1;
+  EXPECT_DOUBLE_EQ(compute_metrics(recs, 0.0).room_accuracy, 0.5);
+  EXPECT_DOUBLE_EQ(compute_metrics(recs, 2.0).room_accuracy, 5.0 / 8.0);
+}
+
+TEST(Eval, ReplayReportsRoomEvents) {
+  const auto sc = sim::load_scenario_file(test::data_path("scenarios/office_nominal.json"));
+  const auto venue = load_venue_file(sc.venue_path);
+  ASSERT_FALSE(venue.rooms().empty());
+  const auto trace = sim::simulate(sc, venue);
+  const auto r = replay(venue, trace, preset_config("pf"));
+  EXPECT_FALSE(r.truth_room_events.empty());
+  EXPECT_FALSE(r.room_events.empty());
+  for (std::size_t k = 1; k < r.room_events.size(); ++k) EXPECT_LE(r.room_events[k - 1].t, r.room_events[k].t);
+  EXPECT_GT(r.metrics.room_events, 0);
+  // Sanity bounds, not tuning targets.
+  EXPECT_GT(r.metrics.room_event_recall, 0.5);
+  EXPECT_GT(r.metrics.room_event_precision, 0.5);
+  EXPECT_GT(r.metrics.room_accuracy, 0.5);
+
+  const fs::path csv = fs::path(testing::TempDir()) / "ipe_room_events.csv";
+  write_room_events_csv(csv.string(), venue, r);
+  std::ifstream in(csv);
+  std::string header;
+  std::getline(in, header);
+  EXPECT_EQ(header, "t,source,room_id,room_name,type,probability");
+  std::size_t lines = 0;
+  for (std::string line; std::getline(in, line);) ++lines;
+  EXPECT_EQ(lines, r.room_events.size() + r.truth_room_events.size());
+}
+
 TEST(Eval, CalibrationFromReportedCovariance) {
   // Unit covariance, so NEES is the squared error: 0, 1, 4, 9.
   std::vector<EstimateRecord> recs;
