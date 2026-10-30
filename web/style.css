@@ -97,6 +97,33 @@ td:first-child { text-transform: uppercase; letter-spacing: 0.08em; }
 .toggle button.active { background: var(--ink); color: var(--paper); border-color: var(--ink); }
 
 .view { display: flex; flex-direction: column; gap: 4px; }
+
+.timeline { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; width: 1000px; max-width: 100%; }
+.timeline button { padding: 4px 8px; line-height: 0; }
+.timeline svg { width: 12px; height: 12px; fill: currentColor; }
+#time-label {
+  min-width: 8.5em; text-align: right; font-variant-numeric: tabular-nums; font-size: 0.8rem;
+  letter-spacing: 0.06em; color: var(--ink);
+}
+/* --done is the share of the walk the engine has already computed. */
+#timeline {
+  --done: 0%;
+  flex: 1; min-width: 160px; height: 20px; margin: 0; background: transparent; cursor: pointer;
+  -webkit-appearance: none; appearance: none;
+}
+#timeline::-webkit-slider-runnable-track {
+  height: 6px; border: 1px solid var(--rule);
+  background: linear-gradient(to right, rgba(29, 78, 137, 0.25) var(--done), transparent var(--done));
+}
+#timeline::-moz-range-track {
+  height: 6px; border: 1px solid var(--rule);
+  background: linear-gradient(to right, rgba(29, 78, 137, 0.25) var(--done), transparent var(--done));
+}
+#timeline::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none; width: 4px; height: 16px; margin-top: -6px;
+  background: var(--ink); border: none; border-radius: 0;
+}
+#timeline::-moz-range-thumb { width: 4px; height: 16px; background: var(--ink); border: none; border-radius: 0; }
 #map3d {
   width: 1000px; height: 620px; max-width: 100%;
   border: 1px solid var(--rule); background: var(--sheet); overflow: hidden;
