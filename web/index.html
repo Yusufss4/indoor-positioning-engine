@@ -55,12 +55,18 @@
     <button id="play">Pause</button>
     <button id="restart">Restart</button>
     <label><input id="show-particles" type="checkbox" checked> particles</label>
+    <label><input id="show-pf" type="checkbox" checked> PF</label>
     <label><input id="show-ekf" type="checkbox" checked> EKF</label>
     <label><input id="show-wcl" type="checkbox" checked> WCL</label>
     <label id="floor-control" hidden>Floor <select id="floor"></select></label>
     <span class="toggle">
       <button id="view2d" class="active">2D</button><button id="view3d">3D</button>
     </span>
+    <span id="zoom2d" class="toggle">
+      <button id="zoom-out" title="Zoom out">&minus;</button><button id="zoom-in" title="Zoom in">+</button><button
+        id="zoom-fit" title="Fit the whole floor">Fit</button>
+    </span>
+    <span id="hint2d" class="hint">Scroll to zoom, drag to pan, double-click to fit.</span>
   </section>
   <section id="controls3d" class="controls" hidden>
     <label>Exploded <input id="exploded" type="range" min="0" max="2" step="0.1" value="0.6"></label>

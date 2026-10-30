@@ -6,9 +6,6 @@
   --text: #1b2a3d;
   --muted: #4d6380;
   --sheet: #fbfcfe;
-  --grid:
-    linear-gradient(rgba(29, 78, 137, 0.06) 1px, transparent 1px) 0 0 / 40px 40px,
-    linear-gradient(90deg, rgba(29, 78, 137, 0.06) 1px, transparent 1px) 0 0 / 40px 40px;
   font-family: "Barlow Condensed", "Barlow", "Roboto Condensed", "Arial Narrow", sans-serif;
   color: var(--text);
   background: var(--paper);
@@ -50,7 +47,11 @@ button {
 button:hover { border-color: var(--ink); }
 
 main { display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; }
-canvas { background: var(--grid), var(--sheet); border: 1px solid var(--rule); max-width: 100%; }
+canvas {
+  background: var(--sheet); border: 1px solid var(--rule); max-width: 100%;
+  cursor: grab; touch-action: none;
+}
+canvas.dragging { cursor: grabbing; }
 aside { min-width: 280px; flex: 1; }
 #clock {
   font-variant-numeric: tabular-nums; font-size: 0.9rem; letter-spacing: 0.06em; text-transform: uppercase;
@@ -76,7 +77,8 @@ td:first-child { text-transform: uppercase; letter-spacing: 0.08em; }
 
 .toggle { display: inline-flex; }
 .toggle button { margin: 0; }
-.toggle button:last-child { border-left: none; }
+.toggle button + button { border-left: none; }
+#zoom2d button { min-width: 2.4em; padding: 3px 8px; }
 .toggle button.active { background: var(--ink); color: var(--paper); border-color: var(--ink); }
 
 .view { display: flex; flex-direction: column; gap: 4px; }

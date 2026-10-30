@@ -26,6 +26,7 @@ let realDemos = new Map(); // id -> entry of data/real/demos.json
 let real = null; // entry being replayed, null for simulated scenarios
 let background = null; // floor plan image of a recording
 let waypoints = []; // [t, x, y] surveyor waypoints of a recording
+let zoom = { k: 1, x: 0, y: 0 }; // 2D view: canvas px = k * fitted px + (x, y)
 
 const REAL_BASE = new URL("data/real/", window.location.href);
 
@@ -151,7 +152,24 @@ function transform() {
   const s = Math.min((canvas.width - 2 * pad) / (x1 - x0), (canvas.height - 2 * pad) / (y1 - y0));
   const ox = pad + ((canvas.width - 2 * pad) - s * (x1 - x0)) / 2;
   const oy = pad + ((canvas.height - 2 * pad) - s * (y1 - y0)) / 2;
-  return { s, toX: (x) => ox + (x - x0) * s, toY: (y) => canvas.height - (oy + (y - y0) * s) };
+  const { k, x: zx, y: zy } = zoom;
+  return {
+    s: s * k,
+    toX: (x) => k * (ox + (x - x0) * s) + zx,
+    toY: (y) => k * (canvas.height - (oy + (y - y0) * s)) + zy,
+  };
+}
+
+/// Zooms the 2D view by `factor` about canvas point (px, py).
+function zoomAt(factor, px, py) {
+  const k = Math.min(60, Math.max(0.5, zoom.k * factor));
+  const f = k / zoom.k;
+  zoom = { k, x: px - (px - zoom.x) * f, y: py - (py - zoom.y) * f };
+}
+
+function canvasPoint(ev) {
+  const r = canvas.getBoundingClientRect();
+  return [((ev.clientX - r.left) * canvas.width) / r.width, ((ev.clientY - r.top) * canvas.height) / r.height];
 }
 
 /// Draws the parts of a [x, y, level] trail that lie on `level`.
@@ -192,9 +210,33 @@ function dot(x, y, T, color, r, ring = false, hollow = false) {
   }
 }
 
+/// Metric grid that pans and zooms with the map; spacing picks the first step at least 32 px wide.
+function drawGrid(T) {
+  const metres = [1, 2, 5, 10, 20, 50, 100].find((m) => m * T.s >= 32) || 100;
+  const step = metres * T.s;
+  const x0 = T.toX(0) - Math.ceil(T.toX(0) / step) * step;
+  const y0 = T.toY(0) - Math.ceil(T.toY(0) / step) * step;
+  ctx.strokeStyle = "rgba(29, 78, 137, 0.07)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let x = x0; x <= canvas.width; x += step) {
+    ctx.moveTo(Math.round(x) + 0.5, 0);
+    ctx.lineTo(Math.round(x) + 0.5, canvas.height);
+  }
+  for (let y = y0; y <= canvas.height; y += step) {
+    ctx.moveTo(0, Math.round(y) + 0.5);
+    ctx.lineTo(canvas.width, Math.round(y) + 0.5);
+  }
+  ctx.stroke();
+  ctx.fillStyle = COLORS.ink;
+  ctx.font = LABEL_FONT;
+  ctx.fillText(`GRID ${metres} M`, 8, canvas.height - 8);
+}
+
 function draw(level) {
   const T = transform();
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+  drawGrid(T);
 
   if (background) {
     const [bx0, by0, bx1, by1] = venue.bounds;
@@ -290,7 +332,7 @@ function draw(level) {
 }
 
 function visibleFilters() {
-  return FILTERS.filter((f) => !((f === "ekf" && !el("show-ekf").checked) || (f === "wcl" && !el("show-wcl").checked)));
+  return FILTERS.filter((f) => el(`show-${f}`).checked);
 }
 
 function updateStats() {
@@ -369,6 +411,8 @@ function setView(v) {
   el("map").hidden = v !== "2d";
   el("map3d").hidden = v !== "3d";
   el("controls3d").hidden = v !== "3d";
+  el("zoom2d").hidden = v !== "2d";
+  el("hint2d").hidden = v !== "2d";
   el("view2d").classList.toggle("active", v === "2d");
   el("view3d").classList.toggle("active", v === "3d");
 }
@@ -378,7 +422,38 @@ el("play").addEventListener("click", () => {
   el("play").textContent = playing ? "Pause" : "Play";
 });
 el("restart").addEventListener("click", start);
-el("scenario").addEventListener("change", start);
+el("scenario").addEventListener("change", () => {
+  zoom = { k: 1, x: 0, y: 0 };
+  start();
+});
+
+const zoomCenter = (factor) => zoomAt(factor, canvas.width / 2, canvas.height / 2);
+el("zoom-in").addEventListener("click", () => zoomCenter(1.5));
+el("zoom-out").addEventListener("click", () => zoomCenter(1 / 1.5));
+el("zoom-fit").addEventListener("click", () => (zoom = { k: 1, x: 0, y: 0 }));
+canvas.addEventListener("wheel", (ev) => {
+  ev.preventDefault();
+  zoomAt(Math.exp(-ev.deltaY * (ev.deltaMode === 1 ? 0.05 : 0.0015)), ...canvasPoint(ev));
+}, { passive: false });
+canvas.addEventListener("dblclick", () => (zoom = { k: 1, x: 0, y: 0 }));
+let drag = null;
+canvas.addEventListener("pointerdown", (ev) => {
+  drag = canvasPoint(ev);
+  canvas.setPointerCapture(ev.pointerId);
+  canvas.classList.add("dragging");
+});
+canvas.addEventListener("pointermove", (ev) => {
+  if (!drag) return;
+  const [px, py] = canvasPoint(ev);
+  zoom = { ...zoom, x: zoom.x + px - drag[0], y: zoom.y + py - drag[1] };
+  drag = [px, py];
+});
+const endDrag = () => {
+  drag = null;
+  canvas.classList.remove("dragging");
+};
+canvas.addEventListener("pointerup", endDrag);
+canvas.addEventListener("pointercancel", endDrag);
 el("view2d").addEventListener("click", () => setView("2d"));
 el("view3d").addEventListener("click", async () => {
   setView("3d");
