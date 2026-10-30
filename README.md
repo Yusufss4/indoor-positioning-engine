@@ -206,7 +206,14 @@ by floor. The estimated floor is drawn opaque, floors above it nearly vanish, an
 floors apart. MapLibre loads from a CDN on first use with a blank style (no tile keys); an OpenStreetMap
 underlay is optional.
 
-<img src="docs/img/demo_3d.png" alt="3D view during a lift ride" width="427">
+![kit_tour in 3D: up the west stairwell, then down the north lift](docs/img/demo_3d.gif)
+
+`kit_tour` in 3D: the walker (black) climbs the west stairwell from L1 to L2, then rides the north lift
+down to L0. The floor the walker is on turns opaque, and the particles follow it up and down.
+
+A timeline under the map works in both views: drag it to any moment, play forwards or in reverse, or step
+frame by frame (Space, the arrow keys and J/K/L do the same). The page keeps every frame the engine has
+computed, so going back replays them, and dragging past the computed part runs the engine to catch up.
 
 ## Maps from other platforms (GeoJSON, IMDF)
 
