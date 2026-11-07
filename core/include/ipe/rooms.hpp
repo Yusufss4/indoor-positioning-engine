@@ -37,8 +37,8 @@ struct RoomEvent {
 /// a dwell time, so overlapping rooms are tracked independently and a fix
 /// jittering across a doorway does not produce a burst of events.
 ///
-/// With a particle filter the room probability is the particle weight inside
-/// the room; other filters give 1 or 0 from the mean position. While the
+/// The room probability is the particle weight inside the room; a known
+/// position (the ground truth) gives 1 or 0. While the
 /// estimate is invalid every room has probability 0, so rooms are exited after
 /// exit_dwell_s without a fix.
 class RoomTracker {
@@ -49,7 +49,8 @@ class RoomTracker {
   [[nodiscard]] bool due(double t) const {
     return !state_.empty() && (!updated_ || t >= last_update_ + cfg_.update_period_s);
   }
-  /// Throttled to update_period_s. `pf` (may be null) is the particle cloud behind `estimate`.
+  /// Throttled to update_period_s. `pf` is the particle cloud behind `estimate`; null for a known
+  /// position such as the ground truth, which then counts fully for the rooms containing it.
   void update(double t, const Estimate& estimate, const ParticleFilter* pf);
   /// Runs the state machines on given per-room probabilities (one per venue room).
   void update(double t, std::span<const double> probabilities);

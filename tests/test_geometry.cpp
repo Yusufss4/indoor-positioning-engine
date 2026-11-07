@@ -23,21 +23,6 @@ TEST(Geometry, CollinearOverlapAndDisjoint) {
 
 TEST(Geometry, ParallelNonCollinear) { EXPECT_FALSE(segments_intersect({0, 0}, {2, 0}, {0, 1}, {2, 1})); }
 
-TEST(Geometry, IntersectionParameter) {
-  EXPECT_NEAR(segment_intersection_param({0, 0}, {4, 0}, {1, -1}, {1, 1}), 0.25, 1e-12);
-  EXPECT_NEAR(segment_intersection_param({0, 0}, {4, 0}, {4, -1}, {4, 1}), 1.0, 1e-12);
-  EXPECT_LT(segment_intersection_param({0, 0}, {4, 0}, {5, -1}, {5, 1}), 0.0);
-  EXPECT_LT(segment_intersection_param({0, 0}, {2, 0}, {0, 1}, {2, 1}), 0.0);
-  // Collinear overlap: the first shared point.
-  EXPECT_NEAR(segment_intersection_param({0, 0}, {4, 0}, {3, 0}, {1, 0}), 0.25, 1e-12);
-  // Agrees with segments_intersect on random pairs.
-  for (int i = 0; i < 2000; ++i) {
-    auto c = [&](int k) { return static_cast<double>((i * 7919 + k * 104729) % 97) / 9.7; };
-    const Vec2 p1{c(1), c(2)}, p2{c(3), c(4)}, q1{c(5), c(6)}, q2{c(7), c(8)};
-    ASSERT_EQ(segment_intersection_param(p1, p2, q1, q2) >= 0.0, segments_intersect(p1, p2, q1, q2)) << i;
-  }
-}
-
 TEST(Geometry, WrapAngle) {
   EXPECT_NEAR(wrap_angle(0.0), 0.0, 1e-12);
   EXPECT_NEAR(wrap_angle(3 * std::numbers::pi), std::numbers::pi, 1e-9);

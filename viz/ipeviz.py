@@ -21,9 +21,6 @@ from matplotlib.animation import FuncAnimation, PillowWriter  # noqa: E402
 COLORS = {
     "truth": "#222222",
     "pf": "#d62728",
-    "pf-nomap": "#ff7f0e",
-    "ekf": "#1f77b4",
-    "wcl": "#2ca02c",
 }
 
 
@@ -159,7 +156,7 @@ def plot_error_cdf(runs: dict[str, Estimates], out: str | Path, title: str = "",
 def plot_benchmark(results: dict, out: str | Path, metric: str = "cep95_m") -> None:
     """Grouped bar chart from `ipe-regress --json` output."""
     scenarios = sorted(results["results"].keys())
-    presets = [p for p in ["pf", "pf-nomap", "ekf", "wcl"] if any(p in results["results"][s] for s in scenarios)]
+    presets = sorted({p for s in scenarios for p in results["results"][s]})
     x = np.arange(len(scenarios))
     width = 0.8 / len(presets)
     fig, ax = plt.subplots(figsize=(11, 4.2))

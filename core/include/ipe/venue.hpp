@@ -1,6 +1,5 @@
 #pragma once
 
-#include <cstdint>
 #include <optional>
 #include <span>
 #include <string>
@@ -123,14 +122,6 @@ class Venue {
   /// True if moving in a straight line from a to b on `level` crosses any wall.
   [[nodiscard]] bool crosses_wall(Vec2 a, Vec2 b, int level = 0) const;
 
-  /// Where a straight move from `from` towards `to` on `level` ends if walls
-  /// and the walkable area stop it: `to` when nothing is in the way, else a
-  /// point just short of the first wall (or the footprint edge). With `slide`
-  /// the rest of the move continues along the wall that stopped it, as long as
-  /// that slide is itself clear. A `from` outside the walkable area is not
-  /// held to the footprint.
-  [[nodiscard]] Vec2 clip_move(Vec2 from, Vec2 to, int level, bool slide) const;
-
   /// Number of walls on `level` intersected by the straight line a-b (radio path).
   [[nodiscard]] int count_wall_crossings(Vec2 a, Vec2 b, int level = 0) const;
 
@@ -169,36 +160,6 @@ class Venue {
   std::optional<GeoRef> georef_;
   std::vector<Grid> grids_;
   std::vector<RoomGrid> room_grids_;
-};
-
-/// Keeps a reported position on the map while it follows a map-free one (a
-/// Kalman mean, a weighted centroid): each target is approached along a
-/// straight line that stops at walls and slides along them, and once the
-/// target has stayed out of reach for `escape_s` the position jumps to it. A
-/// straight line cannot go round to a door, so without the jump a target in
-/// the next room would never be reached.
-class MapFollower {
- public:
-  MapFollower(const Venue& venue, double escape_s) : venue_(&venue), escape_s_(escape_s) {}
-
-  /// Moves towards `target` on `level` at time `t` and returns the new position.
-  /// The first call, a level change and a call after reset() jump straight to it.
-  Vec2 follow(double t, Vec2 target, int level);
-  void reset() { valid_ = false; }
-
-  [[nodiscard]] Vec2 pos() const { return pos_; }
-  [[nodiscard]] std::uint64_t held_updates() const { return held_; }
-  [[nodiscard]] std::uint64_t escapes() const { return escapes_; }
-
- private:
-  const Venue* venue_;
-  double escape_s_;
-  Vec2 pos_;
-  int level_ = 0;
-  bool valid_ = false;
-  double blocked_since_ = -1.0;  ///< When the target went out of reach; -1 while it is reached.
-  std::uint64_t held_ = 0;
-  std::uint64_t escapes_ = 0;
 };
 
 /// Parses the venue JSON format documented in docs/formats.md.

@@ -1,7 +1,6 @@
 #include "ipe/geometry.hpp"
 
 #include <algorithm>
-#include <cmath>
 
 namespace ipe {
 namespace {
@@ -33,29 +32,6 @@ bool segments_intersect(Vec2 p1, Vec2 p2, Vec2 q1, Vec2 q2) {
   if (o3 == 0 && on_segment(q1, q2, p1)) return true;
   if (o4 == 0 && on_segment(q1, q2, p2)) return true;
   return false;
-}
-
-double segment_intersection_param(Vec2 p1, Vec2 p2, Vec2 q1, Vec2 q2) {
-  constexpr double eps = 1e-12;
-  const Vec2 r = p2 - p1;
-  const Vec2 s = q2 - q1;
-  const Vec2 qp = q1 - p1;
-  const double denom = cross(r, s);
-  if (std::abs(denom) > eps) {
-    const double t = cross(qp, s) / denom;
-    const double u = cross(qp, r) / denom;
-    constexpr double tol = 1e-9;
-    if (t < -tol || t > 1.0 + tol || u < -tol || u > 1.0 + tol) return -1.0;
-    return std::clamp(t, 0.0, 1.0);
-  }
-  if (std::abs(cross(qp, r)) > eps) return -1.0;  // parallel, not collinear
-  const double r2 = r.norm2();
-  if (r2 <= 0.0) return on_segment(q1, q2, p1) ? 0.0 : -1.0;
-  const double t0 = dot(qp, r) / r2;
-  const double t1 = dot(q2 - p1, r) / r2;
-  const double lo = std::max(0.0, std::min(t0, t1));
-  const double hi = std::min(1.0, std::max(t0, t1));
-  return lo <= hi ? lo : -1.0;
 }
 
 bool point_in_polygon(Vec2 p, const Polygon& poly) {

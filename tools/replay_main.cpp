@@ -17,14 +17,14 @@ Runs a trace through the positioning engine and prints accuracy metrics as
 JSON. With --scenario the trace is simulated in memory first.
 
 options:
-  --filter NAME          pf (default), pf-nomap, ekf, ekf-map, wcl, wcl-map
+  --filter NAME          pf, the only filter (kept for existing scripts)
   --config FILE          JSON merge patch applied to the preset config
   --set JSON             inline JSON merge patch, e.g. '{"pf":{"num_particles":500}}'
   --warmup SECONDS       exclude the first seconds from error stats (default 5)
   --out FILE             per-truth-sample estimates CSV
   --events FILE          room enter/exit events CSV, estimated and true (venues with rooms)
   --metrics FILE         write metrics JSON to a file as well
-  --particles FILE       particle snapshots CSV (particle filter only)
+  --particles FILE       particle snapshots CSV
   --particles-every N    snapshot every N truth samples (default 5)
   --print-config         print the effective engine config and exit
 )";

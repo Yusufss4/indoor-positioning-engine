@@ -56,12 +56,10 @@ def main() -> int:
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp)
 
-        runs = {}
-        for preset in ["pf", "pf-nomap", "ekf", "wcl"]:
-            est, _ = replay(build, "office_nominal", preset, work, particles_every=3 if preset == "pf" else 0)
-            runs[preset] = ipeviz.Estimates.load(est)
-        ipeviz.plot_trajectories(office, {k: runs[k] for k in ["pf", "ekf", "wcl"]},
-                                 out / "office_nominal_trajectories.png", "office_nominal: estimated tracks")
+        est, _ = replay(build, "office_nominal", "pf", work, particles_every=3)
+        runs = {"pf": ipeviz.Estimates.load(est)}
+        ipeviz.plot_trajectories(office, runs, out / "office_nominal_trajectories.png",
+                                 "office_nominal: estimated track")
         ipeviz.plot_error_over_time(runs, out / "office_nominal_error.png", "office_nominal: error over time")
         ipeviz.plot_error_cdf(runs, out / "office_nominal_cdf.png", "office_nominal: error CDF")
 
@@ -69,10 +67,8 @@ def main() -> int:
         ipeviz.animate_particles(office, runs["pf"], particles, out / "pf_convergence.gif", t_max=45.0, fps=8,
                                  title="Particle filter: global convergence then tracking")
 
-        field = {}
-        for preset in ["pf", "pf-nomap", "ekf"]:
-            est, _ = replay(build, "office_field_issue", preset, work)
-            field[preset] = ipeviz.Estimates.load(est)
+        est, _ = replay(build, "office_field_issue", "pf", work)
+        field = {"pf": ipeviz.Estimates.load(est)}
         old, _ = replay(build, "office_field_issue", "pf", work, tag="pf-before",
                         patch='{"pf":{"beacon_integrity":false,"recovery_alpha_fast":0.3,'
                               '"rssi_offset_sigma":5,"step_scale_sigma":0.1}}')

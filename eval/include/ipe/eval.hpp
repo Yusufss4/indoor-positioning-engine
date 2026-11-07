@@ -12,11 +12,9 @@
 
 namespace ipe::eval {
 
-/// Named engine configurations compared throughout the project:
-///   pf        particle filter with wall constraint, wall-aware RSSI and offset state
-///   pf-nomap  same particle filter without any floor-plan knowledge
-///   ekf       map-free extended Kalman filter
-///   wcl       RSSI-only weighted centroid
+/// Named engine configurations. The only one is `pf`: the particle filter with
+/// wall constraint, wall-aware RSSI and the device offset state. Variants are
+/// config patches (`--config`, `--set`) on top of it.
 EngineConfig preset_config(std::string_view preset);
 const std::vector<std::string>& preset_names();
 
@@ -51,7 +49,7 @@ struct Metrics {
   /// Uncertainty calibration over the scored fixes, from NEES = e^T P^-1 e
   /// (horizontal error against the reported covariance). An honest filter has
   /// coverage95 ~ 0.95 and nees_median ~ 1.39 (chi-square, 2 dof). Both are -1
-  /// for filters that report no covariance.
+  /// when no scored fix has a covariance.
   double coverage95 = -1.0;  ///< Share of fixes with NEES <= 5.991.
   double nees_median = -1.0;
 
@@ -92,7 +90,6 @@ struct ReplayOptions {
 };
 
 struct ReplayResult {
-  std::string filter;
   std::vector<EstimateRecord> records;
   std::vector<ParticleSnapshot> snapshots;
   std::vector<RoomEvent> room_events;        ///< From the engine.

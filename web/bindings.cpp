@@ -34,8 +34,8 @@ struct Track {
 
 class Demo {
  public:
-  /// Simulates the scenario and runs every filter with its preset config. `pf_config_patch` (may be
-  /// empty) applies to the particle filter only.
+  /// Simulates the scenario and runs the particle filter on it, with `pf_config_patch` (may be
+  /// empty) on top of the default config.
   Demo(const std::string& venue_json, const std::string& scenario_json, unsigned seed,
        const std::string& pf_config_patch)
       : venue_(ipe::parse_venue(venue_json)) {
@@ -43,7 +43,7 @@ class Demo {
     init(pf_config_patch);
   }
 
-  /// Replays a recorded trace. `pf_config_patch` (may be empty) applies to the particle filter only.
+  /// Replays a recorded trace. `pf_config_patch` (may be empty) is applied on top of the default config.
   static Demo* replay(const std::string& venue_json, const std::string& trace_csv, const std::string& pf_config_patch) {
     std::istringstream in(trace_csv);
     return new Demo(ipe::parse_venue(venue_json), ipe::read_trace(in), pf_config_patch);
@@ -166,13 +166,11 @@ class Demo {
   /// aliases WASM memory and is only valid until the next call.
   val particles() {
     particle_buf_.clear();
-    if (const auto* pf = tracks_.front().engine->particle_filter()) {
-      for (const auto& p : pf->particles()) {
-        particle_buf_.push_back(static_cast<float>(p.pos.x));
-        particle_buf_.push_back(static_cast<float>(p.pos.y));
-        particle_buf_.push_back(static_cast<float>(p.weight));
-        particle_buf_.push_back(static_cast<float>(p.level));
-      }
+    for (const auto& p : tracks_.front().engine->particle_filter().particles()) {
+      particle_buf_.push_back(static_cast<float>(p.pos.x));
+      particle_buf_.push_back(static_cast<float>(p.pos.y));
+      particle_buf_.push_back(static_cast<float>(p.weight));
+      particle_buf_.push_back(static_cast<float>(p.level));
     }
     return val(emscripten::typed_memory_view(particle_buf_.size(), particle_buf_.data()));
   }
@@ -190,7 +188,7 @@ class Demo {
   }
 
   /// Room enter/exit events during the last advance(), oldest first:
-  /// [{t, filter ("pf", "ekf", "wcl" or "truth"), room (index into the venue's rooms), roomId, name, type}].
+  /// [{t, filter ("pf" or "truth"), room (index into the venue's rooms), roomId, name, type}].
   val roomEvents() const {
     val arr = val::array();
     for (const auto& [source, e] : recent_rooms_) {
@@ -207,7 +205,7 @@ class Demo {
     return arr;
   }
 
-  /// Indices into the venue's rooms that `name` ("pf", "ekf", "wcl" or "truth") is currently in.
+  /// Indices into the venue's rooms that `name` ("pf" or "truth") is currently in.
   val currentRooms(const std::string& name) const {
     std::vector<std::size_t> rooms;
     if (name == "truth") {
@@ -231,14 +229,12 @@ class Demo {
   }
 
   void init(const std::string& pf_config_patch) {
-    for (const char* preset : {"pf", "ekf", "wcl"}) {
-      Track tr;
-      tr.name = preset;
-      auto cfg = ipe::eval::preset_config(preset);
-      if (tr.name == "pf" && !pf_config_patch.empty()) ipe::eval::apply_config_overrides(cfg, pf_config_patch);
-      tr.engine = std::make_unique<ipe::PositioningEngine>(venue_, cfg);
-      tracks_.push_back(std::move(tr));
-    }
+    Track tr;
+    tr.name = "pf";
+    auto cfg = ipe::eval::preset_config("pf");
+    if (!pf_config_patch.empty()) ipe::eval::apply_config_overrides(cfg, pf_config_patch);
+    tr.engine = std::make_unique<ipe::PositioningEngine>(venue_, cfg);
+    tracks_.push_back(std::move(tr));
     ble_index_.reserve(trace_.ble.size());
     for (const auto& b : trace_.ble) ble_index_.push_back(venue_.beacon_index(b.beacon_id).value_or(SIZE_MAX));
     if (!venue_.rooms().empty()) truth_rooms_.emplace(venue_, ipe::truth_room_config());

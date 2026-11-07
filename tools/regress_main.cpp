@@ -10,14 +10,14 @@ namespace {
 constexpr const char* kUsage = R"(usage: ipe-regress --scenarios DIR (--baseline FILE | --no-baseline) [options]
        ipe-regress --traces MANIFEST.json (--baseline FILE | --no-baseline) [options]
 
-Simulates every scenario, replays it through each filter preset and compares
+Simulates every scenario, replays it through the particle filter and compares
 CEP50/CEP95 against the stored baseline. Exits 1 if any metric regressed.
 With --traces, recorded traces listed in the manifest are replayed instead
 (one run each) and results are grouped by the manifest's "group" field.
 
 options:
   --seeds N           runs per scenario (default 3; ignored with --traces)
-  --presets LIST      comma separated presets (default pf,pf-nomap,ekf,wcl)
+  --presets LIST      comma separated presets; pf is the only one (default pf)
   --update            overwrite the baseline with the current results
   --markdown FILE     write a markdown results table
   --json FILE         write the current results as JSON

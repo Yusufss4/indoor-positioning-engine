@@ -1,11 +1,11 @@
 "use strict";
 
 const COLORS = {
-  truth: "#222", pf: "#d62728", ekf: "#1f77b4", wcl: "#2ca02c", beacon: "#7f3fbf",
+  truth: "#222", pf: "#d62728", beacon: "#7f3fbf",
   wall: "rgba(29, 78, 137, 0.45)", ink: "#1d4e89", paper: "#fbfcfe",
 };
 const LABEL_FONT = '500 11px "Barlow Condensed", "Arial Narrow", sans-serif';
-const FILTERS = ["pf", "ekf", "wcl"];
+const FILTERS = ["pf"];
 const FRAME_DT = 0.05; // simulated seconds per recorded frame
 const PARTICLE_EVERY = 4; // frames per particle snapshot (5 Hz)
 const MAX_RECORDED_PARTICLES = 1000;

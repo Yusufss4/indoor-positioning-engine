@@ -13,7 +13,7 @@
   <header>
     <h1>Indoor Positioning Engine</h1>
     <p>The C++ engine compiled to WebAssembly: a simulated walker, BLE beacons, phone IMU and barometer, fused by a
-      particle filter (red), an EKF (blue) and a weighted-centroid baseline (green). Everything runs in your browser.
+      particle filter (red dot, its particles as a faint cloud). Everything runs in your browser.
       It opens in 3D on a simulated walk through a real seven-floor university building imported from
       OpenStreetMap; the "Real recordings" scenarios replay phone walks from two shopping malls over their floor
       plans.
@@ -55,8 +55,6 @@
     <button id="restart">Restart</button>
     <label><input id="show-particles" type="checkbox" checked> particles</label>
     <label><input id="show-pf" type="checkbox" checked> PF</label>
-    <label><input id="show-ekf" type="checkbox" checked> EKF</label>
-    <label><input id="show-wcl" type="checkbox" checked> WCL</label>
     <label id="floor-control" hidden>Floor <select id="floor"></select></label>
     <span class="toggle">
       <button id="view2d">2D</button><button id="view3d" class="active">3D</button>
@@ -106,8 +104,8 @@
         <h2>Rooms</h2>
         <p id="rooms-now"></p>
         <ol id="room-log"></ol>
-        <p class="hint">Enter/exit events, newest first. A filter enters a room once its probability (particle
-          weight inside, or the mean position for EKF and WCL) stays above 60% for 1.5 s, and exits once it stays
+        <p class="hint">Enter/exit events, newest first. The filter enters a room once its probability (the
+          particle weight inside it) stays above 60% for 1.5 s, and exits once it stays
           below 30% for 1.5 s. Truth events come from the true position without delay. In 2D the particle filter's
           room is tinted red and the true room is dashed.</p>
       </section>

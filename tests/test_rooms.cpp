@@ -158,8 +158,7 @@ TEST(Rooms, ParticleMassIsTheRoomProbability) {
 
 TEST(Rooms, EngineReportsEventsForVenuesWithRooms) {
   const Venue v = test::two_room_venue_with_rooms();
-  EngineConfig cfg;
-  cfg.filter = FilterKind::WeightedCentroid;
+  const EngineConfig cfg;
   PositioningEngine engine(v, cfg);
   ASSERT_NE(engine.room_tracker(), nullptr);
   const RssiModel model(v);

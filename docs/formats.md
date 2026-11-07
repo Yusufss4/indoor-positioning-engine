@@ -83,7 +83,7 @@ Instead of top-level `walls`, a multi-floor venue has `levels`, and may add `con
 |---|---|---|
 | top | `venue` | Venue file, relative to the scenario file |
 | top | `seed` | Default simulation seed |
-| top | `demo_config` | Optional particle-filter config patch the web demo applies, relative to the scenario file. `ipe-regress` ignores it and uses the presets |
+| top | `demo_config` | Optional particle-filter config patch the web demo applies, relative to the scenario file. `ipe-regress` ignores it and uses the default config |
 | `walk` | `waypoints` | Polyline followed by a pure-pursuit walker: `[x, y]` or `[x, y, level_ordinal]` |
 | `walk` | `step_frequency_hz`, `step_length_m`, `step_length_sigma`, `turn_rate_deg_s` | Gait |
 | `walk` | `stairs_speed_factor` | Horizontal speed on stairs relative to walking (0.6) |
@@ -137,7 +137,7 @@ gt,t,x,y,heading,level,z
 
 ## Config patches (`data/configs/*.json`)
 
-JSON merge patches over a preset's engine config, the same shape as `--print-config` output.
+JSON merge patches over the engine's default config, the same shape as `--print-config` output.
 `ipe-replay` and `ipe-regress` take `--config FILE`. It is applied before any `--set`, and unknown keys
 are rejected.
 
@@ -187,7 +187,7 @@ level (-1 if the walk never changes level).
 NEES = e^T P^-1 e is the squared horizontal error measured against the reported covariance P.
 `coverage95` is the share of fixes with NEES <= 5.991, i.e. inside the 95% ellipse; an honest filter
 scores about 0.95, and lower means overconfident. `nees_median` is about 1.39 for an honest filter. Both
-are -1 for filters that report no covariance (the weighted centroid). They are reported, not gated:
+are -1 when there is no scored fix with a covariance. They are reported, not gated:
 `ipe-regress` adds `coverage95` (and `median_coverage95` for recorded traces) to its JSON and tables.
 
 The room metrics compare the engine's events with those of the ground-truth path (a detector with no

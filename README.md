@@ -16,14 +16,12 @@ WebAssembly build that runs the same engine in the browser with a 2D and a 3D (M
 | Component | Description |
 |---|---|
 | **Pedestrian dead reckoning** | Step detection on accelerometer magnitude, Weinberg step length, gyro yaw integration, magnetometer heading |
-| **Particle filter** | Fuses steps, heading, RSSI and pressure; walls kill particles that cross them and attenuate radio in the likelihood; per-particle step-length scale, device RSSI offset, floor and barometer offset states; floor changes only inside stairwells and lifts; robust likelihoods; systematic resampling; augmented-MCL recovery; beacon integrity monitor; optional beacon-driven init/recovery proposal with exact importance weights |
-| **EKF** | `[x, y, heading]` with Jacobian-based prediction, scalar RSSI/heading updates, chi-square gating and Joseph-form covariance update; floor from an anchored barometer |
-| **Weighted centroid** | RSSI-only baseline with a beacon floor vote |
+| **Particle filter** | Fuses steps, heading, RSSI and pressure; walls kill particles that cross them and attenuate radio in the likelihood; per-particle step-length scale, device RSSI offset, floor and barometer offset states; floor changes only inside stairwells and lifts; robust likelihoods; systematic resampling; augmented-MCL recovery; beacon integrity monitor; optional beacon-driven init/recovery proposal with exact importance weights; the reported position stays on the map (the dominant group of particles when the cloud mean would sit on a wall) |
 | **Floors** | Venues with levels, stairwells, lifts and escalators; 3D radio distance with slab loss; barometric altitude with low-pass filtering; floor accuracy and floor-switch latency metrics |
 | **Room events** | Named rooms on every shipped map (hand-drawn, from OpenStreetMap, from the mall unit polygons); debounced Enter/Exit events from particle mass in each room, with hysteresis and dwell; scored against ground truth (precision, recall, latency, room accuracy); event log and room highlight in the web demo |
 | **Simulator** | Pure-pursuit walker through a floor plan, up stairs and in lifts; synthesises 50 Hz IMU, BLE with fading, shadowing, wall and slab loss, path-loss mismatch, device offsets, packet loss, magnetic anomalies, dead and moved beacons, and a phone barometer with weather drift, device bias and door spikes |
 | **Replay + metrics** | Mean, RMSE, CEP50, CEP95, availability, time to first fix, convergence time, floor accuracy, floor-switch latency, room-event precision/recall/latency, compute per update |
-| **Regression suite** | 11 scenarios x 4 filter presets x N seeds compared against a stored baseline in CI |
+| **Regression suite** | 12 scenarios x N seeds compared against a stored baseline in CI, plus 109 real phone walks when the dataset is present |
 | **Map interop** | `ipe-import`: GeoJSON (any platform, through a property mapping table) and an IMDF subset in and out, with WGS84 georeferencing |
 | **WebAssembly** | Emscripten/embind build of the unchanged core with a 2D canvas and a 3D MapLibre view, deployed to GitHub Pages |
 | **Agent tooling** | [`AGENTS.md`](AGENTS.md) with evaluation rules for coding agents; MCP server in [positioning-agent-tools](https://github.com/Yusufss4/positioning-agent-tools) |
@@ -33,15 +31,15 @@ WebAssembly build that runs the same engine in the browser with a 2D and a 3D (M
 Mean over 10 seeds per scenario; errors after a 5 s warm-up; compute time is single-threaded wall clock per
 sensor update (IMU and BLE averaged) on a desktop CPU. Full table: [docs/results.md](docs/results.md).
 
-| Scenario | What it stresses | PF CEP50 / CEP95 | PF without map | EKF | Weighted centroid |
-|---|---|---|---|---|---|
-| office_nominal | reference walk | **0.66 / 1.59** | 0.82 / 2.23 | 0.95 / 4.13 | 2.32 / 4.88 |
-| office_nlos_heavy | walls lose 7 dB, map says 3.5 | **0.65 / 1.87** | 0.86 / 2.22 | 0.98 / 2.72 | 2.31 / 5.14 |
-| office_device_offset | phone reads 9 dB low | **0.75 / 2.05** | 0.96 / 2.77 | 7.00 / 9.45 | 2.48 / 5.31 |
-| office_mag_disturbance | magnetic anomalies, gyro bias | **1.09 / 2.63** | 1.45 / 3.29 | 1.60 / 3.85 | 2.28 / 4.93 |
-| office_field_issue | 2 dead beacons, 1 installed 16 m off | **0.72 / 2.00** | 1.01 / 3.67 | 2.85 / 5.75 | 2.99 / 12.95 |
-| office_step_scale | walker's step 17% shorter than modelled | **0.73 / 1.87** | 0.81 / 2.28 | 0.97 / 2.55 | 2.23 / 4.80 |
-| airport_hall_sparse | 80 x 40 m hall, beacons 20 m apart, 35% loss | **1.30 / 7.25** | 1.41 / 7.58 | 1.61 / 10.47 | 4.73 / 12.85 |
+| Scenario | What it stresses | CEP50 / CEP95 [m] |
+|---|---|---|
+| office_nominal | reference walk | 0.66 / 1.59 |
+| office_nlos_heavy | walls lose 7 dB, map says 3.5 | 0.65 / 1.87 |
+| office_device_offset | phone reads 9 dB low | 0.75 / 2.05 |
+| office_mag_disturbance | magnetic anomalies, gyro bias | 1.09 / 2.60 |
+| office_field_issue | 2 dead beacons, 1 installed 16 m off | 0.72 / 1.98 |
+| office_step_scale | walker's step 17% shorter than modelled | 0.73 / 1.87 |
+| airport_hall_sparse | 80 x 40 m hall, beacons 20 m apart, 35% loss | 1.30 / 7.25 |
 
 ![CEP95 per scenario](docs/img/benchmark_cep95.png)
 
@@ -51,32 +49,30 @@ sensor update (IMU and BLE averaged) on a desktop CPU. Full table: [docs/results
 "Floor ok" is the share of fixes on the right floor; CEP only counts those. "Switch" is the mean delay
 between the walker reaching the new floor and the estimate following (10 seeds each).
 
-| Scenario | What it stresses | PF CEP50 / CEP95 | PF floor ok / switch | EKF floor ok / switch | WCL floor ok / switch |
-|---|---|---|---|---|---|
-| office_stairs_up_down | stairs up, tour, stairs down | **0.78** / 3.22 | **99.5%** / 0.4 s | 98.7% / 1.0 s | 98.1% / 1.4 s |
-| office_elevator | lift rides: no steps, only pressure changes | **0.60 / 1.76** | **99.5%** / 0.4 s | 98.9% / 0.9 s | 98.3% / 1.2 s |
-| office_floor_bleed | slab loses 4 dB (map says 15): beacons below look close | **0.89** / 4.02 | **96.3%** / 1.0 s | 95.7% / 2.9 s | 95.2% / 2.1 s |
-| baro_drift_long | weather trend -6 hPa/h, phone barometer 2.5 hPa off | **0.63 / 1.99** | **99.5%** / 0.4 s | 67.4% / 25.2 s | 98.4% / 1.4 s |
+| Scenario | What it stresses | CEP50 / CEP95 [m] | Floor ok / switch |
+|---|---|---|---|
+| office_stairs_up_down | stairs up, tour, stairs down | 0.78 / 3.21 | 99.5% / 0.4 s |
+| office_elevator | lift rides: no steps, only pressure changes | 0.60 / 1.76 | 99.5% / 0.4 s |
+| office_floor_bleed | slab loses 4 dB (map says 15): beacons below look close | 0.89 / 4.01 | 96.3% / 1.0 s |
+| baro_drift_long | weather trend -6 hPa/h, phone barometer 2.5 hPa off | 0.63 / 1.99 | 99.5% / 0.4 s |
 
-The barometer offset each particle carries is what keeps it right under weather drift. The EKF anchors the
-barometer once and snaps to the nearest floor, so a 6 hPa/h trend (50 m of apparent altitude per hour) puts
-it on the wrong floor a third of the time. The particle filter's CEP95 on the stair scenario (3.2 m) is
-worse than the EKF's (2.3 m). The large errors cluster after floor changes: the 15 s after a change are a
+The barometer offset each particle carries is what keeps it right under weather drift: a 6 hPa/h trend is
+50 m of apparent altitude per hour, and the filter still reports the right floor 99.5% of the time. On the
+stair scenario CEP95 (3.2 m) is the weakest of the two-floor walks. The large errors cluster after floor changes: the 15 s after a change are a
 fifth of the walk but hold half of the errors above the 95th percentile (5 seeds), while the cloud is still
 spread around the stairwell exit and the new floor's beacons pin it down. Single-floor results are
 bit-identical to the engine before floors were added.
 
-The simulator and the filters share a model family, so absolute numbers are optimistic compared to
-real venues. The comparisons between filters and the before/after deltas are the point. See
+The simulator and the filter share a model family, so absolute numbers are optimistic compared to
+real venues. The before/after deltas are the point. See
 [docs/design.md](docs/design.md#known-model-limitations), and the real phone traces below for how large
 the gap is.
 
 ### Field issue to engine fix
 
 `office_field_issue` reproduces a deployment fault. One beacon is mounted in a different room than the
-map says, and two have dead batteries. The map-aware particle filter was initially *worse* than the
-map-free one there (CEP95 5.4 m vs 2.4 m), because recovery particles locked onto the beacon's mapped
-position (17 m error for 10 s). Widening the per-user priors and slowing the recovery trigger fixed it
+map says, and two have dead batteries. The particle filter's CEP95 there was initially 5.4 m, because
+recovery particles locked onto the beacon's mapped position (17 m error for 10 s). Widening the per-user priors and slowing the recovery trigger fixed it
 (20 seeds: CEP95 3.7 -> 2.0 m; device offset 3.8 -> 2.9 m). It is a trade-off, not a free win: slower
 recovery costs the sparse airport hall (5.6 -> 7.3 m) and the short-stride walker (1.5 -> 1.8 m); the
 other three scenarios are unchanged within noise. The investigation, including the variants that did
@@ -101,18 +97,15 @@ sample (two malls, 14 floors, Android IMU + Wi-Fi, surveyor waypoints) converts 
 traces with [`datasets/msil/`](datasets/msil/). The radio map is fitted on 80% of the walks, settings are
 chosen on half of the rest, and results are reported on the other half (109 walks):
 
-| Filter | Median CEP50 / CEP95 over walks [m] |
+| Particle filter | Median CEP50 / CEP95 over walks [m] |
 |---|---|
-| PF, default | 11.7 / 20.5 |
-| PF, [Wi-Fi config](data/configs/msil_wifi.json) (sigma 8 dB, 5k particles, beacon-driven proposal) | 7.0 / 11.1 |
-| PF, Wi-Fi config, one update per Wi-Fi scan | 7.1 / **9.5** |
-| EKF | 7.8 / 10.4 |
-| Weighted centroid | 8.4 / 14.9 |
+| Default config | 11.7 / 20.5 |
+| [Wi-Fi config](data/configs/msil_wifi.json) (sigma 8 dB, 5k particles, beacon-driven proposal) | 7.0 / 11.1 |
+| Wi-Fi config, one update per Wi-Fi scan | 7.1 / **9.2** |
 
-Real errors are about ten times the simulated office's. The particle filter only matches the EKF once
-virtual access points (one radio, up to six BSSIDs) are merged and the start is seeded from the
-closest-looking access point, and it pulls ahead on CEP95 once each Wi-Fi scan is applied as one update
-instead of 40 separate ones. Its uncertainty is still far too small: a new calibration metric
+Real errors are about ten times the simulated office's. Merging virtual access points (one radio, up to six
+BSSIDs), seeding the start from the closest-looking access point and applying each Wi-Fi scan as one
+update instead of 40 separate ones are what brought them down. The uncertainty is still far too small: a new calibration metric
 (`coverage95`) shows the 95% ellipse holding the truth for under a fifth of the fixes. Method, per-floor
 numbers and failure modes: [docs/real_data.md](docs/real_data.md).
 Ten held-out walks, one on each floor whose longest held-out walk lasts at least a minute, play in the
@@ -128,13 +121,10 @@ the KIT Informatikbau in Karlsruhe, 7 levels, 1,273 walls from room outlines wit
 5 stairwells and 3 lifts. The walk in `kit_tour` is planned through the mapped doors and stairs (A* on the
 plan, checked by `ipe-sim` for wall crossings), and the phone is simulated. Mean over 10 seeds:
 
-| Filter | CEP50 / CEP95 [m] | Converged |
+| Particle filter | CEP50 / CEP95 [m] | Converged |
 |---|---|---|
-| PF, default | 2.27 / 11.10 | 9/10 |
-| PF, [open-venue config](data/configs/open_venue.json) (beacon-driven start) | **0.71** / **3.45** | 10/10 |
-| PF without map, open-venue config | 2.07 / 5.01 | 10/10 |
-| EKF | 1.41 / 5.33 | 10/10 |
-| Weighted centroid | 2.74 / 7.26 | 9/10 |
+| Default config | 2.28 / 11.02 | 9/10 |
+| [Open-venue config](data/configs/open_venue.json) (beacon-driven start) | **0.71** / **3.44** | 10/10 |
 
 The L-shaped building covers 38% of its bounding box. The building outline is the venue's
 [`footprint`](docs/formats.md#venue-datavenuesjson), so the particle filter starts, recovers and keeps
@@ -158,22 +148,22 @@ no footprint, so their results are bit-identical. The web demo plays this walk w
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
-ctest --test-dir build --output-on-failure          # 122 unit tests + accuracy regression
+ctest --test-dir build --output-on-failure          # 121 unit tests + accuracy regression
                                                      # (+ real-data regression once datasets/msil/out_scans exists)
 
-# simulate a scenario and replay it through a filter
+# simulate a scenario and replay it through the particle filter
 ./build/tools/ipe-sim --scenario data/scenarios/office_nominal.json --out /tmp/trace.csv
-./build/tools/ipe-replay --venue data/venues/office_floor.json --trace /tmp/trace.csv --filter pf --out /tmp/est.csv
+./build/tools/ipe-replay --venue data/venues/office_floor.json --trace /tmp/trace.csv --out /tmp/est.csv
 
 # two floors: the trace also carries barometer samples; metrics add floor_accuracy and floor_switch_latency_s
 ./build/tools/ipe-sim --scenario data/scenarios/office_stairs_up_down.json --out /tmp/stairs.csv
-./build/tools/ipe-replay --venue data/venues/office_two_floor.json --trace /tmp/stairs.csv --filter pf
+./build/tools/ipe-replay --venue data/venues/office_two_floor.json --trace /tmp/stairs.csv
 
 # room Enter/Exit events (estimated and true) as CSV; metrics add room_event_precision/recall
-./build/tools/ipe-replay --venue data/venues/office_floor.json --trace /tmp/trace.csv --filter pf --events /tmp/events.csv
+./build/tools/ipe-replay --venue data/venues/office_floor.json --trace /tmp/trace.csv --events /tmp/events.csv
 
 # A/B experiment: does the beacon integrity monitor help, across every scenario and 10 seeds?
-./build/tools/ipe-regress --scenarios data/scenarios --no-baseline --seeds 10 --presets pf \
+./build/tools/ipe-regress --scenarios data/scenarios --no-baseline --seeds 10 \
     --set '{"pf":{"beacon_integrity":false}}'
 
 # regenerate all figures in docs/
@@ -197,11 +187,11 @@ two shopping malls instead of simulating one, over the mall's floor plan, with i
 surveyor's waypoints as squares. `kit_tour` simulates a walk through a real seven-floor university
 building imported from OpenStreetMap; the demo opens on it, in the 3D view. Rooms are drawn on the plan
 with the particle filter's current rooms tinted red and the true room outlined; the Rooms panel lists
-each filter's current rooms and a log of Enter/Exit events, the walker's true events included. The 3D
+the filter's current rooms and a log of Enter/Exit events, the walker's true events included. The 3D
 view highlights the particle filter's current rooms.
 
 The **3D** button switches to a MapLibre GL view of the venue: walls extruded per floor, translucent slabs,
-stair and lift shafts, the walker, each filter's estimate with its uncertainty, and the particles coloured
+stair and lift shafts, the walker, the estimate with its uncertainty, and the particles coloured
 by floor. The estimated floor is drawn opaque, floors above it nearly vanish, and "Exploded" pulls the
 floors apart. MapLibre loads from a CDN on first use with a blank style (no tile keys); an OpenStreetMap
 underlay is optional.
@@ -255,9 +245,9 @@ Formats in detail: [docs/formats.md](docs/formats.md#geojson-and-imdf-ipe-import
 ## Repository layout
 
 ```
-core/     engine: PDR, RSSI model, barometer, particle filter, EKF, WCL, room events, venue + georef + trace I/O
+core/     engine: PDR, RSSI model, barometer, particle filter, room events, venue + georef + trace I/O
 sim/      scenario -> synthetic trace
-eval/     presets, config overrides, replay, metrics, benchmark/baseline comparison
+eval/     config overrides, replay, metrics, benchmark/baseline comparison
 geo/      GeoJSON / IMDF import and export
 tools/    ipe-sim, ipe-replay, ipe-regress, ipe-import
 tests/    GoogleTest unit tests, regression baseline

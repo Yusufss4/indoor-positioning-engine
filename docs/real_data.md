@@ -1,17 +1,16 @@
 # Real phone traces: Microsoft Indoor Location dataset
 
-The simulator and the filters share one family of propagation models (see
+The simulator and the filter share one family of propagation models (see
 [design.md](design.md#known-model-limitations)), so the simulated results are optimistic. This page
 replays real phone recordings through the unchanged engine.
 
 **Summary.** On 109 held-out walks in two Chinese shopping malls (14 floors, with plan extents of
 42,000-119,000 m^2), the
-particle filter reaches a median CEP50 of 7.1 m and a median CEP95 of 9.5 m when each Wi-Fi scan is
-applied as one update. That is about ten times the simulated office (0.63 / 1.36 m), and ahead of the
-EKF (7.6 / 11.4 m) and the weighted centroid (8.2 / 14.5 m) on the same traces. Applying the readings one
-by one, as the first version of this page did, gives 7.0 / 11.1 m. The particle filter needs a Wi-Fi
-configuration chosen on separate walks: with default settings it is the worst of the four
-(11.7 / 20.5 m). Most of the gap came from data handling, not filter tuning: virtual Wi-Fi access
+particle filter reaches a median CEP50 of 7.1 m and a median CEP95 of 9.2 m when each Wi-Fi scan is
+applied as one update. That is about ten times the simulated office (0.63 / 1.36 m). Applying the
+readings one by one, as the first version of this page did, gives 7.0 / 11.1 m. The filter needs a Wi-Fi
+configuration chosen on separate walks: with default settings it reaches 11.7 / 20.5 m. Most of the gap
+came from data handling, not filter tuning: virtual Wi-Fi access
 points counted up to six times, a uniform start over very large floors, and one weight update per
 reading instead of per scan. Its uncertainty is still far too small: the 95% ellipse holds the truth
 for under a fifth of the fixes in a typical walk.
@@ -71,42 +70,37 @@ Median CEP50 / median CEP95 [m] over walks. "Wi-Fi config" is
 [`data/configs/msil_wifi.json`](../data/configs/msil_wifi.json): RSSI sigma 8 dB, 5,000 particles, and
 the beacon-driven init and recovery proposals from experiment 4 in [experiments.md](experiments.md).
 
-| Filter | Median CEP50 | Median CEP95 | Mean CEP50 | Mean CEP95 |
+| Config | Median CEP50 | Median CEP95 | Mean CEP50 | Mean CEP95 |
 |---|---:|---:|---:|---:|
-| pf, default | 11.7 | 20.5 | 20.5 | 30.3 |
-| pf-nomap, default | 12.2 | 24.0 | 19.6 | 32.6 |
-| pf, Wi-Fi config without the proposals | 9.7 | 14.1 | 14.7 | 22.2 |
-| pf-nomap, Wi-Fi config without the proposals | 9.8 | 12.9 | 14.3 | 19.2 |
-| **pf, Wi-Fi config** | **7.0** | 11.1 | 12.5 | 18.7 |
-| pf-nomap, Wi-Fi config | 8.0 | 11.8 | 11.9 | 17.0 |
-| ekf, default | 7.8 | **10.4** | 12.7 | **15.4** |
-| wcl, default | 8.4 | 14.9 | **10.5** | 16.7 |
+| default | 11.7 | 20.5 | 20.8 | 30.4 |
+| Wi-Fi config without the proposals | 9.7 | 14.1 | 14.6 | 22.3 |
+| **Wi-Fi config** | **7.0** | **11.1** | **12.4** | **18.2** |
 
 These rows apply each Wi-Fi reading on its own. The real-data CTest now gates the scan traces below.
 
 Per floor (median CEP50 / CEP95; few walks per floor, so single floors are noisy):
 
-| Floor | Walks | pf (default) | pf (Wi-Fi config, no proposal) | pf (Wi-Fi config) | ekf | wcl |
-|---|---:|---:|---:|---:|---:|---:|
-| site1_B1 | 18 | 20.0 / 24.6 | 17.5 / 18.3 | 10.4 / 12.7 | 10.2 / 11.6 | 9.8 / 14.8 |
-| site1_F1 | 7 | 10.6 / 11.6 | 9.0 / 10.4 | 5.6 / 7.4 | 7.4 / 8.8 | 6.4 / 15.0 |
-| site1_F2 | 13 | 19.2 / 30.4 | 8.3 / 16.3 | 6.6 / 12.0 | 5.9 / 8.4 | 8.0 / 14.7 |
-| site1_F3 | 17 | 9.3 / 11.0 | 7.4 / 10.8 | 4.9 / 8.0 | 7.3 / 8.6 | 6.7 / 8.1 |
-| site1_F4 | 13 | 9.1 / 17.2 | 6.0 / 9.3 | 7.1 / 10.5 | 7.3 / 8.7 | 7.3 / 14.2 |
-| site2_B1 | 5 | 11.7 / 25.5 | 20.1 / 21.0 | 6.8 / 8.0 | 5.2 / 6.7 | 9.9 / 14.1 |
-| site2_F1 | 9 | 9.1 / 21.7 | 11.6 / 13.7 | 6.3 / 11.9 | 7.8 / 13.0 | 8.7 / 21.7 |
-| site2_F2 | 2 | 11.8 / 16.5 | 11.4 / 13.7 | 8.8 / 16.1 | 18.0 / 19.9 | 9.1 / 11.8 |
-| site2_F3 | 9 | 13.4 / 14.3 | 12.4 / 34.0 | 12.4 / 15.9 | 11.4 / 14.3 | 16.5 / 19.6 |
-| site2_F4 | 1 | 18.9 / 27.5 | 16.0 / 20.4 | 12.2 / 19.7 | 6.3 / 10.3 | 20.6 / 29.7 |
-| site2_F5 | 2 | 51.3 / 76.7 | 43.1 / 76.1 | 88.4 / 134.9 | 21.0 / 27.3 | 24.8 / 32.5 |
-| site2_F6 | 6 | 9.7 / 14.8 | 6.4 / 10.4 | 5.4 / 10.8 | 5.3 / 9.1 | 8.4 / 13.8 |
-| site2_F7 | 4 | 15.3 / 37.8 | 16.6 / 20.7 | 9.6 / 22.0 | 10.0 / 12.2 | 15.5 / 19.9 |
-| site2_F8 | 3 | 23.4 / 25.1 | 17.2 / 24.7 | 11.9 / 15.7 | 18.2 / 18.7 | 8.7 / 15.0 |
+| Floor | Walks | Default | Wi-Fi config, no proposal | Wi-Fi config |
+|---|---:|---:|---:|---:|
+| site1_B1 | 18 | 20.0 / 24.6 | 17.5 / 18.3 | 10.4 / 12.7 |
+| site1_F1 | 7 | 10.6 / 11.6 | 9.0 / 10.4 | 5.6 / 7.4 |
+| site1_F2 | 13 | 19.2 / 30.4 | 8.3 / 16.3 | 6.0 / 12.0 |
+| site1_F3 | 17 | 9.3 / 11.0 | 7.4 / 10.8 | 4.5 / 8.0 |
+| site1_F4 | 13 | 9.1 / 17.2 | 6.0 / 9.3 | 7.1 / 10.5 |
+| site2_B1 | 5 | 11.7 / 25.5 | 20.1 / 21.0 | 6.8 / 8.0 |
+| site2_F1 | 9 | 9.1 / 21.7 | 11.6 / 13.7 | 6.3 / 11.9 |
+| site2_F2 | 2 | 11.8 / 16.5 | 11.4 / 13.7 | 8.8 / 16.1 |
+| site2_F3 | 9 | 13.4 / 14.3 | 12.4 / 34.0 | 12.4 / 15.9 |
+| site2_F4 | 1 | 18.9 / 27.5 | 16.0 / 20.4 | 12.2 / 19.7 |
+| site2_F5 | 2 | 63.0 / 79.7 | 43.1 / 76.1 | 88.4 / 134.9 |
+| site2_F6 | 6 | 9.7 / 14.8 | 6.4 / 10.4 | 5.4 / 10.8 |
+| site2_F7 | 4 | 15.3 / 37.8 | 16.6 / 20.7 | 9.6 / 22.0 |
+| site2_F8 | 3 | 23.4 / 25.1 | 17.2 / 24.7 | 11.9 / 15.7 |
 
 ![held-out walk on site2 F1](img/msil_trajectory.png)
 
 The walk above (217 s, 38 waypoints) is the longest held-out walk on site2 F1 and one of the walks in the
-web demo. Lines join each waypoint to each filter's estimate at that time.
+web demo. Lines join each waypoint to the estimate at that time.
 
 ### What changed the numbers (tune half, `pf`, median CEP50 / CEP95)
 
@@ -121,7 +115,6 @@ web demo. Lines join each waypoint to each filter's estimate at that time.
 | sigma 8 + init + 5,000 particles | 9.2 / 12.8 | |
 | sigma 8 + init + recovery proposal | 9.0 / 14.9 | |
 | **sigma 8 + init + recovery + 5,000 particles** | **8.1 / 12.7** | frozen as `msil_wifi.json` |
-| ekf / wcl, defaults | 9.3 / 12.8, 9.5 / 14.8 | reference |
 
 Each line is one replay of the same 109 tune walks; differences under about 1 m are within the
 walk-to-walk noise. The first line was measured before two converter fixes (site 2 floor outlines and
@@ -161,25 +154,17 @@ wider cloud gives the many wrong hypotheses on a 100,000 m^2 floor more time to 
 
 Held-out half, replayed once with the frozen choice:
 
-| Filter | Traces | Median CEP50 | Median CEP95 | Mean CEP50 | Mean CEP95 | Median coverage95 |
-|---|---|---:|---:|---:|---:|---:|
-| pf, Wi-Fi config | readings one by one | **6.96** | 11.06 | 12.47 | 18.67 | 20% |
-| **pf, Wi-Fi config** | **scans** | 7.07 | **9.50** | 12.50 | 17.12 | 17% |
-| pf-nomap, Wi-Fi config | scans | 6.98 | 9.62 | 12.13 | 16.76 | 17% |
-| ekf, default | readings one by one | 7.76 | 10.40 | 12.74 | **15.42** | 0% |
-| ekf, default | scans | 7.56 | 11.37 | 12.80 | 15.97 | 0% |
-| wcl, default | scans | 8.15 | 14.53 | **10.70** | 16.27 | - |
+| Traces | Median CEP50 | Median CEP95 | Mean CEP50 | Mean CEP95 | Median coverage95 |
+|---|---:|---:|---:|---:|---:|
+| readings one by one | **6.95** | 11.14 | 12.43 | 18.20 | 20% |
+| **scans** | 7.07 | **9.23** | **11.79** | **15.43** | 17% |
 
-The CEP95 gain holds (11.1 -> 9.5 m, now the best median CEP95 of the four filters); the CEP50 gain on the
-tune half (1.7 m) does not, and held-out CEP50 is unchanged within noise. Per floor (mean over 1-18 walks)
+Both rows use the Wi-Fi config. The CEP95 gain holds (11.1 -> 9.2 m); the CEP50 gain on the tune half
+(1.7 m) does not, and held-out CEP50 is unchanged within noise. Per floor (mean over 1-18 walks)
 it is a trade-off: site1_B1, site1_F4, site2_B1, site2_F4, site2_F5, site2_F6 and site2_F7 (CEP95) get
 better, while site1_F2 (CEP50 7.5 -> 12.5 m), site2_F1 (CEP95 12.5 -> 18.5 m), site1_F1 and site2_F8 (CEP50)
 get worse. Because a live phone delivers whole scans, the real-data CTest now gates the scan traces;
 `tests/regression/msil_baseline.json` was regenerated for that.
-
-The EKF's covariance is the most overconfident of all (coverage 0%), likely because dozens of scalar
-updates per scan each shrink it as if independent. Inflating its measurement noise per scan is the
-matching change there and is not done yet.
 
 ## Shop walls with doorways
 
@@ -197,14 +182,14 @@ Each floor gets 391-2,214 wall segments and 2-76 doorways. No training walk cros
 test walks still do, 97 times in total over 222 test walks (0-26 per floor), through doors the
 training walks never used.
 
-Tune half, scan traces, `pf` and `pf-nomap` with the Wi-Fi config, median CEP50 / CEP95 [m] over walks:
+Tune half, scan traces, Wi-Fi config, median CEP50 / CEP95 [m] over walks:
 
-| Walls | pf | pf-nomap |
-|---|---:|---:|
-| **floor outline (current)** | **6.37 / 10.19** | 6.61 / 9.96 |
-| doorways 3 m, 3 dB per wall | 8.18 / 12.55 | 6.90 / 10.14 |
-| doorways 3 m, 0 dB per wall (motion constraint only) | 7.82 / 12.87 | 6.90 / 10.14 |
-| doorways 6 m, 3 dB per wall | 8.37 / 13.03 | 6.90 / 10.14 |
+| Walls | CEP50 / CEP95 |
+|---|---:|
+| **floor outline (current)** | **6.37 / 10.19** |
+| doorways 3 m, 3 dB per wall | 8.18 / 12.55 |
+| doorways 3 m, 0 dB per wall (motion constraint only) | 7.82 / 12.87 |
+| doorways 6 m, 3 dB per wall | 8.37 / 13.03 |
 
 The loss is not mainly the missing doors. Split by walk, the 89 tune walks whose waypoint line crosses no
 doors-mode wall go from 6.37 / 9.99 to 7.53 / 12.87 m (3 dB) as well; the 22 that do cross one go from 6.18 /
@@ -212,14 +197,13 @@ doors-mode wall go from 6.37 / 9.99 to 7.53 / 12.87 m (3 dB) as well; the 22 tha
 The likely mechanism is that the corridors trap the particle cloud. Wi-Fi alone leaves the estimate 6-8 m off
 on these floors, often in a parallel corridor. Without shop walls, steps and jitter let the cloud slide
 across to the right one; with them, the wrong hypothesis is boxed in until it walks out through a doorway.
-`pf-nomap` moves only because its resampling jitter still respects walls.
 
 Held-out half, replayed once to report (no setting was chosen on it):
 
-| Walls | pf | pf-nomap |
-|---|---:|---:|
-| floor outline (current) | 7.07 / 9.50 | 6.98 / 9.62 |
-| doorways 3 m, 3 dB per wall | 9.59 / 13.81 | 7.39 / 9.78 |
+| Walls | CEP50 / CEP95 |
+|---|---:|
+| floor outline (current) | 7.07 / 9.23 |
+| doorways 3 m, 3 dB per wall | 9.59 / 13.70 |
 
 So the converter's default stays `auto` (floor outline only), and `msil_baseline.json` is unchanged.
 The web demo does use the shop walls (see [below](#in-the-web-demo)). Shop walls would need either real doors (IMDF `opening` features) or a filter that gets out
@@ -228,25 +212,20 @@ not prevent the loss.
 
 ## Simulation vs. real data
 
-| | pf CEP50 / CEP95 [m] | EKF CEP50 / CEP95 [m] |
-|---|---:|---:|
-| office_nominal (simulated, CI baseline) | 0.63 / 1.36 | 0.84 / 4.07 |
-| airport_hall_sparse (simulated, CI baseline) | 1.48 / 8.88 | 1.72 / 10.13 |
-| Microsoft malls (real, held-out median over walks) | 7.0 / 11.1 | 7.8 / 10.4 |
-| Microsoft malls, one update per scan | 7.1 / 9.5 | 7.6 / 11.4 |
+| | CEP50 / CEP95 [m] |
+|---|---:|
+| office_nominal (simulated, CI baseline) | 0.63 / 1.36 |
+| airport_hall_sparse (simulated, CI baseline) | 1.48 / 8.88 |
+| Microsoft malls (real, held-out median over walks) | 7.0 / 11.1 |
+| Microsoft malls, one update per scan | 7.1 / 9.2 |
 
 The simulated rows pool all scored epochs over 3 seeds, as in `tests/regression/baseline.json`.
 The real row is the median of per-walk CEPs, so the rows are comparable in scale but not to the decimal.
 
-In the simulated office the particle filter's CEP95 is a third of the EKF's; on real data the two are level
-with readings applied one by one, and the particle filter leads by 1.9 m with one update per scan. On
-raw Wi-Fi the particle filter's per-packet independence assumption is its weak point. The EKF
-ignores packets below -85 dBm and the weighted centroid uses only the strongest few, so both are
-naturally robust to the weak, correlated readings that mislead the particle filter. The map helps much
-less than in simulation (`pf` vs `pf-nomap`: 7.0 vs 8.0 m CEP50, 11.1 vs 11.8 m CEP95, close to the noise).
-Only the floor outline is used, and the radio model's walls are not the mall's: a mall's radio
-environment is dominated by open atria and glass shop fronts. `pf-nomap` is also not entirely map-free:
-resampling jitter still refuses to cross walls whatever `wall_constraint` says.
+On raw Wi-Fi the filter's per-reading independence assumption is its weak point: dozens of weak,
+correlated readings per scan pull the cloud together around the wrong place. The map also helps less
+than in simulation. Only the floor outline is used, and the radio model's walls are not the mall's: a
+mall's radio environment is dominated by open atria and glass shop fronts.
 
 ## Failure modes and open questions
 
@@ -257,8 +236,8 @@ resampling jitter still refuses to cross walls whatever `wall_constraint` says.
   scan (above) helps accuracy. A tempered likelihood per scan makes the spread honest but costs
   accuracy at every setting tried. A likelihood that models the correlation, for example through a
   fingerprint map's residuals, is the open problem.
-- **Short walks on large floors.** Most walks end before any filter meets the "error under 3 m for
-  10 s" convergence rule (89-101 of 109 never do), so convergence time is not reported here. Multi-walk
+- **Short walks on large floors.** Most walks end before the filter meets the "error under 3 m for
+  10 s" convergence rule (92 of 109 never do), so convergence time is not reported here. Multi-walk
   sessions from the full dataset would show steady-state accuracy.
 - **Radio map quality.** Positions come from interpolating between waypoints that are 5-10 s apart, and
   surveyors do not walk straight lines. The radio map inherits that error, and so does the scoring.
@@ -269,7 +248,7 @@ resampling jitter still refuses to cross walls whatever `wall_constraint` says.
 - **Doors.** The shop outlines would be useful walls if the doors were known. IMDF `opening` features
   carry exactly that; this GeoJSON does not. Doorways inferred from training walks make the particle
   filter worse, not better ([above](#shop-walls-with-doorways)).
-- **site2 F5** (2 walks) is lost by every filter. Its transmitter density is average (9 per 1,000 m^2),
+- **site2 F5** (2 walks) is lost in every configuration. Its transmitter density is average (9 per 1,000 m^2),
   so the cause is not established; two walks are too few to tell.
 
 ## In the web demo
@@ -278,17 +257,16 @@ The scenario menu of the [live demo](https://yusufss4.github.io/indoor-positioni
 "Real recordings" group (the demo itself opens on `kit_tour`; `default` in `demos.json` is not used).
 It holds the longest held-out walk on every floor where that walk lasts at least 60 s (10 of the 14 floors; the other
 four have no held-out walk longer than 47 s), copied to `data/real/` by `datasets/msil/export_demo.py`.
-The demo replays the recorded IMU and Wi-Fi through all three filters, using the Wi-Fi config for the
-particle filter. Its venues come from `convert.py --walls doors`, so the shop walls of the floor plan are
+The demo replays the recorded IMU and Wi-Fi through the particle filter with the Wi-Fi config. Its venues come from `convert.py --walls doors`, so the shop walls of the floor plan are
 real walls in the demo, with the doorways [inferred from training walks](#shop-walls-with-doorways).
 That is a choice for the demo, not the best-scoring map: on these ten walks the shop walls help on two,
-are mixed on one and hurt on seven, badly on site1 F4 and site2 F3, F6, F7 and F8 (`ipe-replay`, pf with
+are mixed on one and hurt on seven, badly on site1 F4 and site2 F3, F6, F7 and F8 (`ipe-replay` with
 the Wi-Fi config, CEP50 / CEP95 [m]):
 
 | Walk | Floor outline only (`out_scans`) | Shop walls with doorways (demo) |
 |---|---:|---:|
 | site1 B1, 231 s | 9.2 / 15.2 | 10.3 / 21.4 |
-| site1 F1, 98 s | 7.8 / 11.2 | 8.2 / 15.8 |
+| site1 F1, 98 s | 7.8 / 11.2 | 8.2 / 15.7 |
 | site1 F2, 160 s | 6.1 / 15.7 | 2.6 / 4.5 |
 | site1 F3, 133 s | 2.7 / 4.1 | 1.3 / 3.3 |
 | site1 F4, 106 s | 8.0 / 10.1 | 23.6 / 70.9 |
@@ -308,7 +286,7 @@ ten floors): shops keep their name, or "Unit" and the last six characters of the
 get an English name (toilets, lifts, rest areas); atrium voids, non-public and auxiliary areas are dropped. The Rooms panel
 shows the engine's Enter/Exit events for them. The surveyors walk the corridors, so the true walks
 enter no room, and every event there is a false enter into a shop next to the corridor (2 on the site1
-F2 walk, 8 on site2 F1, pf with the Wi-Fi config): with 7-11 m errors, shop-level events are out of reach.
+F2 walk, 8 on site2 F1, with the Wi-Fi config): with 7-11 m errors, shop-level events are out of reach.
 
 ## Reproduce
 
@@ -318,10 +296,10 @@ python3 -m venv .venv && .venv/bin/pip install -r datasets/msil/requirements.txt
 .venv/bin/python datasets/msil/convert.py --wifi                 # writes datasets/msil/out/
 ./build/tools/ipe-regress --traces datasets/msil/out/manifest_holdout.json --no-baseline
 ./build/tools/ipe-regress --traces datasets/msil/out/manifest_holdout.json --no-baseline \
-    --presets pf,pf-nomap --config data/configs/msil_wifi.json
+    --config data/configs/msil_wifi.json
 .venv/bin/python datasets/msil/convert.py --wifi --scans --out datasets/msil/out_scans   # one batch per scan
 ./build/tools/ipe-regress --traces datasets/msil/out_scans/manifest_holdout.json --no-baseline \
-    --presets pf,pf-nomap --config data/configs/msil_wifi.json
+    --config data/configs/msil_wifi.json
 ctest --test-dir build -L realdata                               # out_scans vs tests/regression/msil_baseline.json
 .venv/bin/python datasets/msil/plot.py --trace site2/F1/5dd35c9844333f00067aa0e0.csv --out docs/img/msil_trajectory.png
 .venv/bin/python datasets/msil/convert.py --wifi --scans --walls doors --out datasets/msil/out_doors   # shop walls

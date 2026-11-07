@@ -1,37 +1,25 @@
 #pragma once
 
-#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "ipe/baro.hpp"
-#include "ipe/ekf.hpp"
 #include "ipe/filter.hpp"
 #include "ipe/particle_filter.hpp"
 #include "ipe/pdr.hpp"
 #include "ipe/rooms.hpp"
 #include "ipe/rssi_model.hpp"
 #include "ipe/venue.hpp"
-#include "ipe/wcl.hpp"
 
 namespace ipe {
 
-enum class FilterKind { ParticleFilter, Ekf, WeightedCentroid };
-
-std::string_view to_string(FilterKind kind);
-/// Accepts "pf", "ekf" and "wcl". Throws std::invalid_argument otherwise.
-FilterKind parse_filter_kind(std::string_view name);
-
 struct EngineConfig {
-  FilterKind filter = FilterKind::ParticleFilter;
   PdrConfig pdr;
   RssiModelConfig rssi;
   BaroConfig baro;
   ParticleFilterConfig pf;
-  EkfConfig ekf;
-  WclConfig wcl;
   RoomEventConfig rooms;
   double mag_heading_sigma_deg = 12.0;
 };
@@ -50,14 +38,12 @@ class PositioningEngine {
   void on_scan(double t, std::span<const RssiReading> readings);
   void on_pressure(double t, double hpa);
 
-  [[nodiscard]] Estimate estimate() const { return filter_->estimate(); }
-  [[nodiscard]] const Filter& filter() const { return *filter_; }
+  [[nodiscard]] Estimate estimate() const { return pf_.estimate(); }
   [[nodiscard]] const Venue& venue() const { return *venue_; }
   [[nodiscard]] const EngineConfig& config() const { return cfg_; }
   [[nodiscard]] std::uint64_t step_count() const { return steps_; }
 
-  /// Null unless the active filter is the particle filter.
-  [[nodiscard]] const ParticleFilter* particle_filter() const { return pf_; }
+  [[nodiscard]] const ParticleFilter& particle_filter() const { return pf_; }
 
   /// Room Enter/Exit events since the last call, oldest first. Always empty
   /// for venues without rooms.
@@ -69,18 +55,15 @@ class PositioningEngine {
 
  private:
   void update_rooms(double t) {
-    if (rooms_ && rooms_->due(t)) rooms_->update(t, filter_->estimate(), pf_);
+    if (rooms_ && rooms_->due(t)) rooms_->update(t, pf_.estimate(), &pf_);
   }
 
   const Venue* venue_;
   EngineConfig cfg_;
   PdrProcessor pdr_;
-  std::unique_ptr<Filter> filter_;
-  const ParticleFilter* pf_ = nullptr;
+  ParticleFilter pf_;
   std::optional<RoomTracker> rooms_;
   std::uint64_t steps_ = 0;
 };
-
-std::unique_ptr<Filter> make_filter(const Venue& venue, const EngineConfig& cfg);
 
 }  // namespace ipe

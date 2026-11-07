@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstdint>
+#include <span>
 #include <vector>
 
 #include "ipe/baro.hpp"
@@ -96,22 +97,21 @@ struct Particle {
 /// every particle carries a level; it can only change level inside a
 /// stairs/lift footprint, and the barometer and the slab attenuation in the
 /// radio model decide which level hypotheses survive.
-class ParticleFilter final : public Filter {
+class ParticleFilter {
  public:
   static constexpr int kMaxProposalHistory = 32;
 
   ParticleFilter(const Venue& venue, ParticleFilterConfig cfg, RssiModelConfig rssi_cfg, BaroConfig baro_cfg = {});
 
-  void on_step(const StepEvent& step) override;
-  void on_heading(double t, double heading, double sigma) override;
-  void on_rssi(double t, std::size_t beacon_index, double rssi) override;
+  void on_step(const StepEvent& step);
+  void on_heading(double t, double heading, double sigma);
+  void on_rssi(double t, std::size_t beacon_index, double rssi);
   /// One weight update, resample and estimate for the whole scan, with the
   /// readings' summed log-likelihood tempered by `scan_tempering`.
-  void on_rssi_scan(double t, std::span<const RssiReading> readings) override;
-  void on_pressure(double t, double hpa) override;
+  void on_rssi_scan(double t, std::span<const RssiReading> readings);
+  void on_pressure(double t, double hpa);
 
-  [[nodiscard]] Estimate estimate() const override { return estimate_; }
-  [[nodiscard]] std::string_view name() const override { return "pf"; }
+  [[nodiscard]] Estimate estimate() const { return estimate_; }
 
   [[nodiscard]] const std::vector<Particle>& particles() const { return particles_; }
   [[nodiscard]] double effective_sample_size() const;

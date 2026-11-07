@@ -15,7 +15,7 @@ double altitude_to_pressure(double altitude_m, double sea_level_hpa = 1013.25);
 /// Turns a phone barometer stream into low-pass filtered altitude relative to
 /// the first sample. Absolute altitude from a phone is meaningless (weather
 /// moves it by metres per hour and devices disagree by several hPa), so the
-/// filters only ever use changes of this value plus their own offset states.
+/// filter only ever uses changes of this value plus its own offset states.
 class BaroAltimeter {
  public:
   explicit BaroAltimeter(BaroConfig cfg = {}) : cfg_(cfg) {}

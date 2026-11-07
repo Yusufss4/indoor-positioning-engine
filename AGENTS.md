@@ -4,15 +4,15 @@ Instructions for AI coding agents (Claude Code, Codex, Cursor) working in this r
 
 ## What this is
 
-A C++20 indoor positioning engine: pedestrian dead reckoning plus BLE RSSI, fused by a particle filter
-(map-aware), an EKF and a weighted-centroid baseline. A deterministic simulator produces traces with ground
+A C++20 indoor positioning engine: pedestrian dead reckoning plus BLE RSSI, fused by a map-aware particle
+filter (the engine's only filter). A deterministic simulator produces traces with ground
 truth; a replay tool and a regression suite measure accuracy.
 
 ## Layout
 
 - `core/` - the engine. No I/O beyond venue/trace parsing; this is what a mobile SDK or WASM build links.
 - `sim/` - scenario JSON to synthetic trace (IMU, BLE, barometer, ground truth).
-- `eval/` - presets, config overrides, replay runner, metrics, regression comparison.
+- `eval/` - the `pf` preset, config overrides, replay runner, metrics, regression comparison.
 - `geo/` - GeoJSON / IMDF import and export (`ipe_geo`); native tooling only, not linked by the engine.
 - `tools/` - `ipe-sim`, `ipe-replay`, `ipe-regress`, `ipe-import`.
 - `tests/` - GoogleTest unit tests and the `accuracy_regression` CTest.
@@ -54,12 +54,12 @@ Sanitizers: `-DIPE_SANITIZE=address,undefined` with `CMAKE_BUILD_TYPE=Debug`.
    is noise; do not tune on one run.
 2. **Never update `tests/regression/baseline.json` to make CI pass** unless the change is an intentional
    accuracy trade-off and the PR description explains which scenarios got worse and why.
-3. **Do not edit scenarios to flatter a filter.** Scenarios encode real-world failure modes; if one looks
+3. **Do not edit scenarios to flatter the filter.** Scenarios encode real-world failure modes; if one looks
    wrong, say so instead of changing it. Every scenario must keep `wall_violations == 0`
    (`ipe-sim` exits 3 otherwise).
 4. **Determinism matters.** All randomness goes through `ipe::Rng`; never use `std::*_distribution`
    (implementation-defined across standard libraries, would break the WASM build and the baseline).
-5. **Separate model limitations from data problems.** Before changing a filter, check whether the error
+5. **Separate model limitations from data problems.** Before changing the filter, check whether the error
    comes from the sensor model (e.g. walls not modelled, step length scale) or from the data
    (dead/moved beacons, magnetic anomalies). The scenario descriptions say which effect each one injects.
 6. Keep `core/` free of platform code, allocation in hot loops, and global state. Particle updates are
@@ -72,14 +72,14 @@ Sanitizers: `-DIPE_SANITIZE=address,undefined` with `CMAKE_BUILD_TYPE=Debug`.
 
 ```bash
 # One run with per-sample output for plotting
-./build/tools/ipe-replay --scenario data/scenarios/office_field_issue.json --filter pf --out /tmp/est.csv
+./build/tools/ipe-replay --scenario data/scenarios/office_field_issue.json --out /tmp/est.csv
 
 # A/B experiment across all scenarios
-./build/tools/ipe-regress --scenarios data/scenarios --no-baseline --seeds 10 --presets pf \
+./build/tools/ipe-regress --scenarios data/scenarios --no-baseline --seeds 10 \
     --set '{"pf":{"beacon_integrity":false}}'
 
 # Effective config of a preset
-./build/tools/ipe-replay --filter pf --print-config
+./build/tools/ipe-replay --print-config
 ```
 
 The companion repo `positioning-agent-tools` exposes these tools as an MCP server.

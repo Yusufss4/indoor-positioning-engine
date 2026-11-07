@@ -26,35 +26,19 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
     proposal_max_age_s, proposal_level_jump, proposal_ring_scale, scan_tempering, level_change_prob_step,
     level_change_prob_baro, use_barometer, baro_update_interval_s, baro_sigma_m, baro_outlier_prob, baro_offset_sigma_m,
     baro_offset_walk_m)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(EkfConfig, step_length_sigma_rel, step_length_sigma_abs,
-                                                heading_sigma_deg, init_pos_sigma, init_heading_sigma_deg, rssi_min_dbm,
-                                                rssi_gate_chi2, heading_gate_chi2, init_min_beacons, init_window_s,
-                                                reinit_after_rejections, wall_constraint, wall_escape_s)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(WclConfig, window_s, top_k, weight_exponent, wall_constraint,
-                                                wall_escape_s)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(RoomEventConfig, enter_prob, exit_prob, enter_dwell_s, exit_dwell_s,
                                                 update_period_s)
 
 void to_json(nlohmann::json& j, const EngineConfig& c) {
-  j = nlohmann::json{{"filter", std::string(to_string(c.filter))},
-                     {"pdr", c.pdr},
-                     {"rssi", c.rssi},
-                     {"baro", c.baro},
-                     {"pf", c.pf},
-                     {"ekf", c.ekf},
-                     {"wcl", c.wcl},
-                     {"rooms", c.rooms},
-                     {"mag_heading_sigma_deg", c.mag_heading_sigma_deg}};
+  j = nlohmann::json{{"pdr", c.pdr}, {"rssi", c.rssi},   {"baro", c.baro},
+                     {"pf", c.pf},   {"rooms", c.rooms}, {"mag_heading_sigma_deg", c.mag_heading_sigma_deg}};
 }
 
 void from_json(const nlohmann::json& j, EngineConfig& c) {
-  c.filter = parse_filter_kind(j.at("filter").get<std::string>());
   j.at("pdr").get_to(c.pdr);
   j.at("rssi").get_to(c.rssi);
   if (j.contains("baro")) j.at("baro").get_to(c.baro);
   j.at("pf").get_to(c.pf);
-  j.at("ekf").get_to(c.ekf);
-  j.at("wcl").get_to(c.wcl);
   if (j.contains("rooms")) j.at("rooms").get_to(c.rooms);
   j.at("mag_heading_sigma_deg").get_to(c.mag_heading_sigma_deg);
 }
@@ -74,34 +58,12 @@ void check_known_keys(const nlohmann::json& base, const nlohmann::json& patch, c
 }  // namespace
 
 EngineConfig preset_config(std::string_view preset) {
-  EngineConfig cfg;
-  if (preset == "pf") {
-    cfg.filter = FilterKind::ParticleFilter;
-  } else if (preset == "pf-nomap") {
-    cfg.filter = FilterKind::ParticleFilter;
-    cfg.pf.wall_constraint = false;
-    cfg.rssi.wall_aware = false;
-    // Without wall loss in the model every beacon behind a wall looks biased.
-    cfg.pf.beacon_integrity = false;
-  } else if (preset == "ekf") {
-    cfg.filter = FilterKind::Ekf;
-  } else if (preset == "ekf-map") {
-    cfg.filter = FilterKind::Ekf;
-    cfg.ekf.wall_constraint = true;
-  } else if (preset == "wcl") {
-    cfg.filter = FilterKind::WeightedCentroid;
-  } else if (preset == "wcl-map") {
-    cfg.filter = FilterKind::WeightedCentroid;
-    cfg.wcl.wall_constraint = true;
-  } else {
-    throw std::invalid_argument("unknown preset '" + std::string(preset) +
-                                "' (expected pf, pf-nomap, ekf, ekf-map, wcl or wcl-map)");
-  }
-  return cfg;
+  if (preset != "pf") throw std::invalid_argument("unknown preset '" + std::string(preset) + "' (expected pf)");
+  return {};
 }
 
 const std::vector<std::string>& preset_names() {
-  static const std::vector<std::string> names = {"pf", "pf-nomap", "ekf", "ekf-map", "wcl", "wcl-map"};
+  static const std::vector<std::string> names = {"pf"};
   return names;
 }
 
@@ -258,7 +220,6 @@ ReplayResult replay(const Venue& venue, const Trace& trace, const EngineConfig& 
   using clock = std::chrono::steady_clock;
   PositioningEngine engine(venue, cfg);
   ReplayResult result;
-  result.filter = std::string(to_string(cfg.filter));
   result.records.reserve(trace.truth.size());
 
   // Beacon ids are resolved once so the hot loop works with indices only.
@@ -339,12 +300,12 @@ ReplayResult replay(const Venue& venue, const Trace& trace, const EngineConfig& 
       }
       result.records.push_back(rec);
 
-      const auto* pf = engine.particle_filter();
-      if (pf && opts.particle_snapshot_every > 0 &&
+      const auto& pf = engine.particle_filter();
+      if (opts.particle_snapshot_every > 0 &&
           truth_seen % static_cast<std::size_t>(opts.particle_snapshot_every) == 0) {
         ParticleSnapshot snap;
         snap.t = truth.t;
-        const auto& ps = pf->particles();
+        const auto& ps = pf.particles();
         const std::size_t stride =
             std::max<std::size_t>(1, ps.size() / std::max<std::size_t>(1, opts.particle_snapshot_max));
         for (std::size_t k = 0; k < ps.size(); k += stride) {

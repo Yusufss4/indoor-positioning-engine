@@ -66,68 +66,6 @@ TEST(Venue, RejectsMalformedInput) {
                std::runtime_error);
 }
 
-TEST(Venue, ClipMoveLeavesFreeMovesAlone) {
-  const Venue v = test::two_room_venue();
-  const Vec2 end = v.clip_move({2, 2}, {8, 8}, 0, true);
-  EXPECT_DOUBLE_EQ(end.x, 8.0);
-  EXPECT_DOUBLE_EQ(end.y, 8.0);
-  // Through the door at y in [4.5, 5.5].
-  const Vec2 door = v.clip_move({9, 5}, {11, 5}, 0, false);
-  EXPECT_DOUBLE_EQ(door.x, 11.0);
-}
-
-TEST(Venue, ClipMoveStopsShortOfTheWall) {
-  const Venue v = test::two_room_venue();
-  const Vec2 end = v.clip_move({8, 2}, {12, 2}, 0, false);
-  EXPECT_NEAR(end.x, 9.95, 1e-9);
-  EXPECT_NEAR(end.y, 2.0, 1e-9);
-  EXPECT_FALSE(v.crosses_wall({8, 2}, end));
-  // Already within the margin: no move at all rather than a step through.
-  const Vec2 stuck = v.clip_move({9.99, 2}, {12, 2}, 0, false);
-  EXPECT_LE(stuck.x, 10.0);
-  EXPECT_FALSE(v.crosses_wall({9.99, 2}, stuck));
-}
-
-TEST(Venue, ClipMoveSlidesAlongTheWall) {
-  const Venue v = test::two_room_venue();
-  // A step at 45 degrees into the dividing wall keeps its y component.
-  const Vec2 end = v.clip_move({9, 1}, {11, 3}, 0, true);
-  EXPECT_LT(end.x, 10.0);
-  EXPECT_NEAR(end.y, 3.0, 1e-9);
-  EXPECT_FALSE(v.crosses_wall({9, 1}, end));
-  // Into the corner made by the outer wall and the dividing wall: the slide is blocked too.
-  const Vec2 corner = v.clip_move({9.5, 0.5}, {10.5, -0.5}, 0, true);
-  EXPECT_FALSE(v.crosses_wall({9.5, 0.5}, corner));
-  EXPECT_TRUE(v.inside(corner));
-}
-
-TEST(Venue, ClipMoveStaysInTheFootprint) {
-  const Venue v = parse_venue(R"({"bounds": [0, 0, 20, 10], "beacons": [],
-                                  "footprint": [[0, 0], [20, 0], [20, 5], [10, 5], [10, 10], [0, 10]]})");
-  const Vec2 end = v.clip_move({15, 2}, {15, 8}, 0, true);
-  EXPECT_TRUE(v.inside(end));
-  EXPECT_NEAR(end.y, 5.0, 0.01);
-  // A start outside the walkable area is not held to it.
-  const Vec2 outside = v.clip_move({15, 8}, {15, 9}, 0, false);
-  EXPECT_DOUBLE_EQ(outside.y, 9.0);
-}
-
-TEST(Venue, MapFollowerHoldsThenEscapes) {
-  const Venue v = test::two_room_venue();
-  MapFollower f(v, 2.0);
-  EXPECT_DOUBLE_EQ(f.follow(0.0, {8, 2}, 0).x, 8.0);  // first call jumps
-  // Target behind the dividing wall: held on this side...
-  EXPECT_LT(f.follow(1.0, {12, 2}, 0).x, 10.0);
-  // ...also when the target moves along the wall, since it is still out of reach...
-  EXPECT_LT(f.follow(2.0, {12, 3}, 0).x, 10.0);
-  // ...until it has been out of reach for the escape time.
-  EXPECT_DOUBLE_EQ(f.follow(3.0, {12, 3}, 0).x, 12.0);
-  EXPECT_EQ(f.escapes(), 1u);
-  // Reachable targets are followed exactly; a level change jumps.
-  EXPECT_DOUBLE_EQ(f.follow(4.0, {14, 4}, 0).x, 14.0);
-  EXPECT_DOUBLE_EQ(f.follow(5.0, {2, 2}, 1).x, 2.0);
-}
-
 TEST(Venue, FootprintLimitsTheWalkableArea) {
   const Venue v = parse_venue(R"({"bounds": [0, 0, 20, 10], "beacons": [],
                                   "footprint": [[0, 0], [20, 0], [20, 5], [10, 5], [10, 10], [0, 10]]})");

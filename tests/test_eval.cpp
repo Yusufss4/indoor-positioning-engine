@@ -150,39 +150,31 @@ TEST(Eval, CalibrationFromReportedCovariance) {
 }
 
 TEST(Eval, ReplayGroupsScans) {
-  // Filters without a scan model see a scan as consecutive packets, so marking
-  // every reading as part of a scan changes nothing for the EKF.
+  // A one-reading scan is bit-identical to a lone packet, so giving every
+  // reading its own scan id must change nothing.
   const auto sc = sim::load_scenario_file(test::data_path("scenarios/office_nominal.json"));
   const auto venue = load_venue_file(sc.venue_path);
   const auto trace = sim::simulate(sc, venue);
   Trace scanned = trace;
-  std::uint32_t id = 0;
-  for (std::size_t b = 0; b < scanned.ble.size(); ++b) {
-    if (b == 0 || scanned.ble[b].t != scanned.ble[b - 1].t) ++id;
-    scanned.ble[b].scan = id;
-  }
-  const auto a = replay(venue, trace, preset_config("ekf"));
-  const auto b = replay(venue, scanned, preset_config("ekf"));
+  for (std::size_t b = 0; b < scanned.ble.size(); ++b) scanned.ble[b].scan = static_cast<std::uint32_t>(b + 1);
+  const auto a = replay(venue, trace, preset_config("pf"));
+  const auto b = replay(venue, scanned, preset_config("pf"));
   ASSERT_EQ(a.records.size(), b.records.size());
   for (std::size_t i = 0; i < a.records.size(); ++i) {
     EXPECT_EQ(a.records[i].estimate.x, b.records[i].estimate.x);
     EXPECT_EQ(a.records[i].estimate.y, b.records[i].estimate.y);
   }
   EXPECT_GT(a.metrics.coverage95, 0.0);
-  EXPECT_DOUBLE_EQ(replay(venue, trace, preset_config("wcl")).metrics.coverage95, -1.0);
 }
 
-TEST(Eval, PresetsDiffer) {
+TEST(Eval, OnlyTheParticleFilterPreset) {
+  EXPECT_EQ(preset_names(), std::vector<std::string>{"pf"});
   EXPECT_TRUE(preset_config("pf").pf.wall_constraint);
-  EXPECT_FALSE(preset_config("pf-nomap").pf.wall_constraint);
-  EXPECT_FALSE(preset_config("pf-nomap").rssi.wall_aware);
-  EXPECT_EQ(preset_config("ekf").filter, FilterKind::Ekf);
-  EXPECT_FALSE(preset_config("ekf").ekf.wall_constraint);
-  EXPECT_TRUE(preset_config("ekf-map").ekf.wall_constraint);
-  EXPECT_FALSE(preset_config("wcl").wcl.wall_constraint);
-  EXPECT_TRUE(preset_config("wcl-map").wcl.wall_constraint);
+  EXPECT_TRUE(preset_config("pf").rssi.wall_aware);
   EXPECT_TRUE(preset_config("pf").pf.map_consistent_estimate);
-  EXPECT_THROW(preset_config("kalman"), std::invalid_argument);
+  for (const char* gone : {"pf-nomap", "ekf", "wcl", "kalman"}) {
+    EXPECT_THROW(preset_config(gone), std::invalid_argument) << gone;
+  }
 }
 
 TEST(Eval, ConfigOverridesMergeAndRejectTypos) {
@@ -196,12 +188,15 @@ TEST(Eval, ConfigOverridesMergeAndRejectTypos) {
 }
 
 TEST(Eval, ConfigJsonRoundTrip) {
-  auto cfg = preset_config("ekf");
-  cfg.ekf.rssi_min_dbm = -80.0;
+  auto cfg = preset_config("pf");
+  cfg.pf.num_particles = 777;
+  cfg.rssi.wall_aware = false;
   auto copy = preset_config("pf");
   apply_config_overrides(copy, config_to_json(cfg));
-  EXPECT_EQ(copy.filter, FilterKind::Ekf);
-  EXPECT_DOUBLE_EQ(copy.ekf.rssi_min_dbm, -80.0);
+  EXPECT_EQ(copy.pf.num_particles, 777);
+  EXPECT_FALSE(copy.rssi.wall_aware);
+  // Keys of the removed filters are rejected like any typo.
+  EXPECT_THROW(apply_config_overrides(copy, R"({"ekf": {"rssi_min_dbm": -80}})"), std::invalid_argument);
 }
 
 TEST(Eval, ReplayProducesOneRecordPerTruthSample) {
@@ -234,7 +229,7 @@ TEST(Eval, TraceManifestGroupsRecordedTraces) {
                                        << sc.venue_path << R"(", "trace": "t2.csv"}]})";
 
   BenchmarkOptions opts;
-  opts.presets = {"wcl"};
+  opts.config_patches = {R"({"pf": {"num_particles": 300}})"};  // keeps the test fast
   const auto cases = run_trace_benchmark((dir / "manifest.json").string(), opts);
   ASSERT_EQ(cases.size(), 3u);
   EXPECT_EQ(cases[0].scenario, "a");

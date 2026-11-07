@@ -34,8 +34,6 @@ import ipeviz  # noqa: E402
 
 RUNS = [
     ("pf", "pf", ROOT / "data" / "configs" / "msil_wifi.json", "pf (Wi-Fi config)"),
-    ("ekf", "ekf", None, "ekf"),
-    ("wcl", "wcl", None, "wcl"),
 ]
 
 
