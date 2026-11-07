@@ -76,9 +76,30 @@ function ring(frame, cx, cy, r, n) {
   return { type: "Polygon", coordinates: [pts] };
 }
 
-function extruded(geometry, base, top, color) {
-  return { type: "Feature", geometry, properties: { base, top, color } };
+/// `props` carries what a click on the feature reports: {kind, id, level}.
+function extruded(geometry, base, top, color, props = {}) {
+  return { type: "Feature", geometry, properties: { base, top, color, ...props } };
 }
+
+/// Thin quads along a polyline of local points, as one MultiPolygon.
+function ribbon(frame, pts, width) {
+  const polys = [];
+  const h = width / 2;
+  for (let k = 1; k < pts.length; ++k) {
+    const [ax, ay] = pts[k - 1];
+    const [bx, by] = pts[k];
+    const len = Math.hypot(bx - ax, by - ay);
+    if (len < 1e-6) continue;
+    const nx = (-(by - ay) / len) * h;
+    const ny = ((bx - ax) / len) * h;
+    const quad = [[ax + nx, ay + ny], [bx + nx, by + ny], [bx - nx, by - ny], [ax - nx, ay - ny], [ax + nx, ay + ny]];
+    polys.push([quad.map(([x, y]) => frame.toLngLat(x, y))]);
+  }
+  return { type: "MultiPolygon", coordinates: polys };
+}
+
+// Click targets in the order a click prefers them when several overlap.
+const PICK_RANK = { beacon: 0, truth: 1, pf: 1, connector: 2, room: 3, level: 4 };
 
 const EMPTY = { type: "FeatureCollection", features: [] };
 
@@ -92,6 +113,8 @@ class Map3D {
     this.focus = 0;
     this.lastUpdate = 0;
     this.venue = null;
+    this.trailKey = null;
+    this.onPick = null; // (pick {kind, id, level}, point {x, y} in container pixels) => void
   }
 
   async init() {
@@ -124,6 +147,30 @@ class Map3D {
     });
     this.map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
     await new Promise((resolve) => this.map.on("load", resolve));
+    this.map.on("click", (e) => this.onPick && this.onPick(this.pickAt(e.point), e.point));
+    this.map.on("mousemove", (e) => {
+      this.map.getCanvas().style.cursor = this.pickAt(e.point) ? "pointer" : "";
+    });
+  }
+
+  /// The most specific clickable feature within a few pixels of `point`, preferring the focused floor.
+  pickAt(point) {
+    if (!this.levels.length) return null;
+    const r = 6;
+    const layers = ["dots", "rooms", "connectors", ...this.levels.map((_, i) => `level-${i}`)];
+    const hits = this.map.queryRenderedFeatures([[point.x - r, point.y - r], [point.x + r, point.y + r]], { layers });
+    let best = null;
+    let bestScore = Infinity;
+    for (const f of hits) {
+      const { kind, id, level } = f.properties;
+      if (!(kind in PICK_RANK)) continue;
+      const score = PICK_RANK[kind] + (level === undefined || level === this.focus ? 0 : 10);
+      if (score < bestScore) {
+        bestScore = score;
+        best = { kind, id, level };
+      }
+    }
+    return best;
   }
 
   /// `geojson` is an `ipe-import export` FeatureCollection.
@@ -151,7 +198,7 @@ class Map3D {
       connectors: geojson.features
         .filter((f) => ["stairs", "elevator", "escalator"].includes(f.properties.feature_type))
         .map((f) => ({ levels: f.properties.levels.map((o) => indexOf.get(o)), geometry: f.geometry,
-                       kind: f.properties.feature_type })),
+                       kind: f.properties.feature_type, id: f.properties.id })),
       spaces: byType("space").map((f) => ({ level: indexOf.get(f.properties.level), id: f.properties.id,
                                             geometry: f.geometry })),
     };
@@ -173,6 +220,7 @@ class Map3D {
     // Extrusion layers share one depth buffer, so a nearly transparent floor drawn first would still hide
     // everything behind it: the live layers go first and the building is blended over them.
     add("dots", 1.0);
+    add("trails", 1.0);
     add("particles", 0.7);
     add("uncertainty", 0.25);
     add("rooms", 0.3);
@@ -204,9 +252,11 @@ class Map3D {
   rebuildStatic() {
     if (!this.map || !this.levels.length) return;
     this.levels.forEach((l, i) => {
-      const fs = [extruded(l.outline, this.z(i, -0.15), this.z(i), "#dfe6ef")];
+      const fs = [extruded(l.outline, this.z(i, -0.15), this.z(i), "#dfe6ef", { kind: "level", level: i })];
       for (const s of this.static.spaces) {
-        if (s.level === i) fs.push(extruded(s.geometry, this.z(i), this.z(i, 0.02), "#cfdcec"));
+        if (s.level === i) {
+          fs.push(extruded(s.geometry, this.z(i), this.z(i, 0.02), "#cfdcec", { kind: "room", id: s.id, level: i }));
+        }
       }
       for (const w of this.static.walls) {
         if (w.level === i) fs.push(extruded(w.geometry, this.z(i), this.z(i, this.wallHeight(i)), "#88a2c2"));
@@ -215,7 +265,8 @@ class Map3D {
         if (b.level !== i) continue;
         const [x, y] = this.toLocal(b.lngLat);
         const h = this.wallHeight(i);
-        fs.push(extruded(ring(this.frame, x, y, 0.2, 4), this.z(i, h - 0.25), this.z(i, h), "#7f3fbf"));
+        fs.push(extruded(ring(this.frame, x, y, 0.3, 4), this.z(i, h - 0.35), this.z(i, h), "#7f3fbf",
+                         { kind: "beacon", id: b.id, level: i }));
       }
       this.map.getSource(`level-${i}`).setData({ type: "FeatureCollection", features: fs });
     });
@@ -223,10 +274,11 @@ class Map3D {
       const lo = Math.min(...c.levels);
       const hi = Math.max(...c.levels);
       return extruded(c.geometry, this.z(lo, 0.01), this.z(hi, this.wallHeight(hi)),
-                      c.kind === "elevator" ? "#ff9f1c" : "#2ec4b6");
+                      c.kind === "elevator" ? "#ff9f1c" : "#2ec4b6", { kind: "connector", id: c.id });
     });
     this.map.getSource("connectors").setData({ type: "FeatureCollection", features: shafts });
     this.activeRooms = null;
+    this.trailKey = null;
     this.applyFocus();
   }
 
@@ -260,7 +312,8 @@ class Map3D {
   }
 
   /// frame: {truth, estimates: [{name, color, e}], particles: Float32Array (x, y, w, level), rooms: [room id],
-  /// focusLevel}
+  /// focusLevel, trailKey, trails: () => [{color, width, runs: [{level, pts: [[x, y]]}]}]}; trails() is only
+  /// called when trailKey changes.
   update(frame, force = false) {
     if (!this.map || !this.levels.length) return;
     const now = performance.now();
@@ -276,20 +329,35 @@ class Map3D {
     if (roomKey !== this.activeRooms) {
       this.activeRooms = roomKey;
       const fs = (frame.rooms || []).map((id) => this.spaceById.get(id)).filter(Boolean)
-        .map((s) => extruded(s.geometry, this.z(s.level, 0.02), this.z(s.level, 0.08), "#d62728"));
+        .map((s) => extruded(s.geometry, this.z(s.level, 0.02), this.z(s.level, 0.08), "#d62728",
+                             { kind: "room", id: s.id, level: s.level }));
       this.map.getSource("rooms").setData({ type: "FeatureCollection", features: fs });
+    }
+
+    if (frame.trailKey !== this.trailKey) {
+      this.trailKey = frame.trailKey;
+      const fs = [];
+      for (const { color, width, runs } of frame.trails ? frame.trails() : []) {
+        for (const { level, pts } of runs) {
+          if (pts.length < 2) continue;
+          fs.push(extruded(ribbon(this.frame, pts, width), this.z(level, 0.04), this.z(level, 0.15), color));
+        }
+      }
+      this.map.getSource("trails").setData({ type: "FeatureCollection", features: fs });
     }
 
     const dots = [];
     const halos = [];
-    for (const { color, e } of frame.estimates) {
+    for (const { name, color, e } of frame.estimates) {
       if (!e.valid) continue;
       halos.push(extruded(ring(this.frame, e.x, e.y, Math.max(0.3, e.sigma), 32), this.z(e.level, 0.03),
                           this.z(e.level, 0.06), color));
-      dots.push(extruded(ring(this.frame, e.x, e.y, 0.6, 16), this.z(e.level, 0.1), this.z(e.level, 0.6), color));
+      dots.push(extruded(ring(this.frame, e.x, e.y, 0.6, 16), this.z(e.level, 0.1), this.z(e.level, 0.6), color,
+                         { kind: name, level: e.level }));
     }
     const t = frame.truth;
-    dots.push(extruded(ring(this.frame, t.x, t.y, 0.3, 12), this.z(t.level), this.z(t.level, 1.8), "#222222"));
+    dots.push(extruded(ring(this.frame, t.x, t.y, 0.3, 12), this.z(t.level), this.z(t.level, 1.8), "#222222",
+                       { kind: "truth", level: t.level }));
 
     const parts = [];
     const p = frame.particles;
