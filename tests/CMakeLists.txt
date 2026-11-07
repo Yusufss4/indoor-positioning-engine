@@ -8,10 +8,12 @@ FetchContent_MakeAvailable(googletest)
 
 add_executable(ipe_tests
   test_baro.cpp
+  test_beacon_integrity.cpp
   test_eval.cpp
   test_geometry.cpp
   test_georef.cpp
   test_import.cpp
+  test_map_estimate.cpp
   test_particle_filter.cpp
   test_pdr.cpp
   test_rng.cpp
@@ -19,6 +21,7 @@ add_executable(ipe_tests
   test_rssi_model.cpp
   test_simulator.cpp
   test_trace.cpp
+  test_trace_player.cpp
   test_venue.cpp)
 target_link_libraries(ipe_tests PRIVATE ipe_eval ipe_geo GTest::gtest_main)
 target_compile_definitions(ipe_tests PRIVATE IPE_DATA_DIR="${PROJECT_SOURCE_DIR}/data")

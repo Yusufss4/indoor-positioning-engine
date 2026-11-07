@@ -169,11 +169,16 @@ TEST(Eval, ReplayGroupsScans) {
 
 TEST(Eval, OnlyTheParticleFilterPreset) {
   EXPECT_EQ(preset_names(), std::vector<std::string>{"pf"});
-  EXPECT_TRUE(preset_config("pf").pf.wall_constraint);
   EXPECT_TRUE(preset_config("pf").rssi.wall_aware);
   EXPECT_TRUE(preset_config("pf").pf.map_consistent_estimate);
   for (const char* gone : {"pf-nomap", "ekf", "wcl", "kalman"}) {
     EXPECT_THROW(preset_config(gone), std::invalid_argument) << gone;
+  }
+  // Removed switches are rejected like any typo.
+  for (const char* gone : {R"({"pf": {"scan_tempering": 1}})", R"({"pf": {"wall_constraint": false}})",
+                           R"({"pf": {"proposal_ring_scale": 2}})", R"({"pf": {"use_barometer": false}})"}) {
+    auto cfg = preset_config("pf");
+    EXPECT_THROW(apply_config_overrides(cfg, gone), std::invalid_argument) << gone;
   }
 }
 
@@ -182,7 +187,7 @@ TEST(Eval, ConfigOverridesMergeAndRejectTypos) {
   apply_config_overrides(cfg, R"({"pf": {"num_particles": 321}, "rssi": {"sigma_db": 7.5}})");
   EXPECT_EQ(cfg.pf.num_particles, 321);
   EXPECT_DOUBLE_EQ(cfg.rssi.sigma_db, 7.5);
-  EXPECT_TRUE(cfg.pf.wall_constraint);  // untouched keys keep their values
+  EXPECT_TRUE(cfg.pf.map_consistent_estimate);  // untouched keys keep their values
   EXPECT_THROW(apply_config_overrides(cfg, R"({"pf": {"num_particle": 10}})"), std::invalid_argument);
   EXPECT_THROW(apply_config_overrides(cfg, R"({"filter": "nope"})"), std::invalid_argument);
 }

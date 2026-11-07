@@ -36,7 +36,7 @@ TEST(Rooms, EnterFiresOnlyAfterTheDwellTime) {
   const Venue v = test::two_room_venue_with_rooms();
   RoomTracker tr(v, unthrottled());
   hold(tr, {1.0, 0.0}, 0.0, 1.4);
-  EXPECT_TRUE(tr.pending_events().empty());
+  EXPECT_TRUE(tr.take_events().empty());
   EXPECT_FALSE(tr.inside(0));
 
   tr.update(1.5, std::vector<double>{1.0, 0.0});

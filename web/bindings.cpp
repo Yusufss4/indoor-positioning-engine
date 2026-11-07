@@ -17,20 +17,22 @@
 #include "ipe/eval.hpp"
 #include "ipe/simulator.hpp"
 #include "ipe/trace.hpp"
+#include "ipe/trace_player.hpp"
 
 using emscripten::val;
 
 namespace {
 
-struct Track {
-  std::string name;
-  std::unique_ptr<ipe::PositioningEngine> engine;
+/// Live scoring at the truth samples, as replay does it (after a 5 s warm-up).
+struct Score {
   double error_sum = 0.0;
   int error_count = 0;
   std::vector<double> errors;
   int floor_ok = 0;  ///< Fixes on the true level (horizontal error is only scored for these).
   int fixes = 0;
 };
+
+constexpr const char* kFilter = "pf";  ///< Name of the estimate in the JS API.
 
 class Demo {
  public:
@@ -51,7 +53,7 @@ class Demo {
 
   double time() const { return now_; }
   double duration() const { return trace_.truth.empty() ? 0.0 : trace_.truth.back().t; }
-  bool finished() const { return g_ >= trace_.truth.size(); }
+  bool finished() const { return player_->finished(); }
   int levelCount() const { return venue_.level_count(); }
 
   /// Processes every sensor event up to now + dt. Returns false at the end.
@@ -59,60 +61,21 @@ class Demo {
     const double until = now_ + dt;
     recent_ble_.clear();
     recent_rooms_.clear();
-    while (g_ < trace_.truth.size()) {
-      const double ti = i_ < trace_.imu.size() ? trace_.imu[i_].t : 1e300;
-      const double tb = b_ < trace_.ble.size() ? trace_.ble[b_].t : 1e300;
-      const double tp = p_ < trace_.baro.size() ? trace_.baro[p_].t : 1e300;
-      const double tg = trace_.truth[g_].t;
-      const double next = std::min({ti, tb, tp, tg});
-      if (next > until) break;
-      if (ti == next) {
-        for (auto& tr : tracks_) tr.engine->on_imu(trace_.imu[i_]);
-        ++i_;
-      } else if (tb == next) {
-        const std::size_t end = ipe::scan_end(trace_.ble, b_);
-        if (trace_.ble[b_].scan != 0) {
-          scan_.clear();
-          for (std::size_t k = b_; k < end; ++k) {
-            if (ble_index_[k] == SIZE_MAX) continue;
-            scan_.push_back({ble_index_[k], trace_.ble[k].rssi});
-            recent_ble_.push_back(k);
-          }
-          for (auto& tr : tracks_) tr.engine->on_scan(trace_.ble[b_].t, scan_);
-        } else if (ble_index_[b_] != SIZE_MAX) {
-          for (auto& tr : tracks_) tr.engine->on_ble(trace_.ble[b_].t, ble_index_[b_], trace_.ble[b_].rssi);
-          recent_ble_.push_back(b_);
+    while (!player_->finished() && player_->next_time() <= until) {
+      switch (player_->step(*engine_)) {
+        case ipe::TracePlayer::Event::Radio: {
+          const auto fed = player_->fed_ble();
+          recent_ble_.insert(recent_ble_.end(), fed.begin(), fed.end());
+          break;
         }
-        b_ = end;
-      } else if (tp == next) {
-        for (auto& tr : tracks_) tr.engine->on_pressure(trace_.baro[p_].t, trace_.baro[p_].hpa);
-        ++p_;
-      } else {
-        truth_ = trace_.truth[g_++];
-        if (truth_rooms_) {
-          ipe::Estimate at_truth;
-          at_truth.pos = truth_.pos;
-          at_truth.level = truth_.level;
-          at_truth.valid = true;
-          truth_rooms_->update(truth_.t, at_truth, nullptr);
-          for (const auto& e : truth_rooms_->take_events()) recent_rooms_.push_back({"truth", e});
-        }
-        for (auto& tr : tracks_) {
-          const auto e = tr.engine->estimate();
-          if (!e.valid || truth_.t < 5.0) continue;
-          ++tr.fixes;
-          if (e.level != truth_.level) continue;
-          ++tr.floor_ok;
-          const double err = ipe::distance(e.pos, truth_.pos);
-          tr.error_sum += err;
-          ++tr.error_count;
-          tr.errors.push_back(err);
-        }
+        case ipe::TracePlayer::Event::Truth:
+          on_truth(player_->truth());
+          break;
+        default:
+          break;
       }
     }
-    for (auto& tr : tracks_) {
-      for (const auto& e : tr.engine->take_room_events()) recent_rooms_.push_back({tr.name, e});
-    }
+    for (const auto& e : engine_->take_room_events()) recent_rooms_.push_back({kFilter, e});
     std::stable_sort(recent_rooms_.begin(), recent_rooms_.end(),
                      [](const auto& a, const auto& b) { return a.second.t < b.second.t; });
     now_ = until;
@@ -133,40 +96,34 @@ class Demo {
     return o;
   }
 
+  /// The estimate named `name` ("pf"; anything else gives an empty object) with its live scores.
   val estimate(const std::string& name) const {
     val o = val::object();
-    for (const auto& tr : tracks_) {
-      if (tr.name != name) continue;
-      const auto e = tr.engine->estimate();
-      o.set("valid", e.valid);
-      o.set("x", e.pos.x);
-      o.set("y", e.pos.y);
-      o.set("level", e.level);
-      o.set("z", e.z);
-      set_wgs84(o, e.pos);
-      o.set("sigma", e.sigma_radius());
-      const auto t = truth_now();
-      o.set("error", e.valid && e.level == t.level ? ipe::distance(e.pos, t.pos) : -1.0);
-      o.set("mean", tr.error_count ? tr.error_sum / tr.error_count : -1.0);
-      o.set("cep95", ipe::eval::percentile(tr.errors, 0.95));
-      o.set("floorAcc", floor_accuracy(tr));
-    }
+    if (name != kFilter) return o;
+    const auto e = engine_->estimate();
+    o.set("valid", e.valid);
+    o.set("x", e.pos.x);
+    o.set("y", e.pos.y);
+    o.set("level", e.level);
+    o.set("z", e.z);
+    set_wgs84(o, e.pos);
+    o.set("sigma", e.sigma_radius());
+    const auto t = truth_now();
+    o.set("error", e.valid && e.level == t.level ? ipe::distance(e.pos, t.pos) : -1.0);
+    o.set("mean", score_.error_count ? score_.error_sum / score_.error_count : -1.0);
+    o.set("cep95", ipe::eval::percentile(score_.errors, 0.95));
+    o.set("floorAcc", floor_accuracy());
     return o;
   }
 
   /// Fraction of fixes (after the 5 s warm-up) on the true level; -1 before the first.
-  double floorAccuracy(const std::string& name) const {
-    for (const auto& tr : tracks_) {
-      if (tr.name == name) return floor_accuracy(tr);
-    }
-    return -1.0;
-  }
+  double floorAccuracy(const std::string& name) const { return name == kFilter ? floor_accuracy() : -1.0; }
 
   /// Flat [x0, y0, w0, level0, x1, ...] view of the particle cloud. The view
   /// aliases WASM memory and is only valid until the next call.
   val particles() {
     particle_buf_.clear();
-    for (const auto& p : tracks_.front().engine->particle_filter().particles()) {
+    for (const auto& p : engine_->particle_filter().particles()) {
       particle_buf_.push_back(static_cast<float>(p.pos.x));
       particle_buf_.push_back(static_cast<float>(p.pos.y));
       particle_buf_.push_back(static_cast<float>(p.weight));
@@ -210,17 +167,15 @@ class Demo {
     std::vector<std::size_t> rooms;
     if (name == "truth") {
       if (truth_rooms_) truth_rooms_->current_rooms(rooms);
-    } else {
-      for (const auto& tr : tracks_) {
-        if (tr.name == name) rooms = tr.engine->current_rooms();
-      }
+    } else if (name == kFilter) {
+      rooms = engine_->current_rooms();
     }
     val arr = val::array();
     for (std::size_t r : rooms) arr.call<void>("push", static_cast<int>(r));
     return arr;
   }
 
-  int steps() const { return static_cast<int>(tracks_.front().engine->step_count()); }
+  int steps() const { return static_cast<int>(engine_->step_count()); }
 
  private:
   Demo(ipe::Venue venue, ipe::Trace trace, const std::string& pf_config_patch)
@@ -229,20 +184,39 @@ class Demo {
   }
 
   void init(const std::string& pf_config_patch) {
-    Track tr;
-    tr.name = "pf";
     auto cfg = ipe::eval::preset_config("pf");
     if (!pf_config_patch.empty()) ipe::eval::apply_config_overrides(cfg, pf_config_patch);
-    tr.engine = std::make_unique<ipe::PositioningEngine>(venue_, cfg);
-    tracks_.push_back(std::move(tr));
-    ble_index_.reserve(trace_.ble.size());
-    for (const auto& b : trace_.ble) ble_index_.push_back(venue_.beacon_index(b.beacon_id).value_or(SIZE_MAX));
+    engine_ = std::make_unique<ipe::PositioningEngine>(venue_, cfg);
+    // venue_ and trace_ are members and the Demo is never moved, so the player's references stay valid.
+    player_.emplace(venue_, trace_);
     if (!venue_.rooms().empty()) truth_rooms_.emplace(venue_, ipe::truth_room_config());
   }
 
+  void on_truth(const ipe::TruthSample& truth) {
+    truth_ = truth;
+    ++truth_seen_;
+    if (truth_rooms_) {
+      ipe::Estimate at_truth;
+      at_truth.pos = truth_.pos;
+      at_truth.level = truth_.level;
+      at_truth.valid = true;
+      truth_rooms_->update(truth_.t, at_truth, nullptr);
+      for (const auto& e : truth_rooms_->take_events()) recent_rooms_.push_back({"truth", e});
+    }
+    const auto e = engine_->estimate();
+    if (!e.valid || truth_.t < 5.0) return;
+    ++score_.fixes;
+    if (e.level != truth_.level) return;
+    ++score_.floor_ok;
+    const double err = ipe::distance(e.pos, truth_.pos);
+    score_.error_sum += err;
+    ++score_.error_count;
+    score_.errors.push_back(err);
+  }
+
   ipe::TruthSample truth_now() const {
-    if (g_ == 0 || g_ >= trace_.truth.size()) return truth_;
-    const auto& next = trace_.truth[g_];
+    if (truth_seen_ == 0 || truth_seen_ >= trace_.truth.size()) return truth_;
+    const auto& next = trace_.truth[truth_seen_];
     if (next.level != truth_.level || next.t <= truth_.t) return truth_;
     const double a = std::clamp((now_ - truth_.t) / (next.t - truth_.t), 0.0, 1.0);
     auto t = truth_;
@@ -250,9 +224,7 @@ class Demo {
     return t;
   }
 
-  static double floor_accuracy(const Track& tr) {
-    return tr.fixes ? static_cast<double>(tr.floor_ok) / tr.fixes : -1.0;
-  }
+  double floor_accuracy() const { return score_.fixes ? static_cast<double>(score_.floor_ok) / score_.fixes : -1.0; }
 
   void set_wgs84(val& o, ipe::Vec2 p) const {
     if (!venue_.georef()) return;
@@ -263,16 +235,16 @@ class Demo {
 
   ipe::Venue venue_;
   ipe::Trace trace_;
-  std::vector<Track> tracks_;
-  std::vector<std::size_t> ble_index_;
+  std::unique_ptr<ipe::PositioningEngine> engine_;
+  std::optional<ipe::TracePlayer> player_;
+  Score score_;
   std::vector<std::size_t> recent_ble_;
   std::vector<std::pair<std::string, ipe::RoomEvent>> recent_rooms_;
   std::optional<ipe::RoomTracker> truth_rooms_;
-  std::vector<ipe::RssiReading> scan_;
   std::vector<float> particle_buf_;
   ipe::TruthSample truth_{};
   double now_ = 0.0;
-  std::size_t i_ = 0, b_ = 0, p_ = 0, g_ = 0;
+  std::size_t truth_seen_ = 0;  ///< Truth samples consumed so far.
 };
 
 }  // namespace

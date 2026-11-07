@@ -23,7 +23,6 @@ class RssiModel {
   /// Expected RSSI from beacon `b` for a receiver at `p` on level index `level`.
   [[nodiscard]] double expected_rssi(const Beacon& b, Vec2 p, int level = 0) const;
   [[nodiscard]] double expected_rssi_free_space(const Beacon& b, double d) const;
-  [[nodiscard]] double distance_from_rssi(const Beacon& b, double rssi) const;
   [[nodiscard]] double log_likelihood(double residual_db) const;
 
   [[nodiscard]] const RssiModelConfig& config() const { return cfg_; }

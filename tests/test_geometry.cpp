@@ -23,6 +23,15 @@ TEST(Geometry, CollinearOverlapAndDisjoint) {
 
 TEST(Geometry, ParallelNonCollinear) { EXPECT_FALSE(segments_intersect({0, 0}, {2, 0}, {0, 1}, {2, 1})); }
 
+TEST(Geometry, PointInPolygon) {
+  const Polygon square = {{0, 0}, {2, 0}, {2, 2}, {0, 2}};
+  EXPECT_TRUE(point_in_polygon({1, 1}, square));
+  EXPECT_FALSE(point_in_polygon({3, 1}, square));
+  const Polygon l_shape = {{0, 0}, {4, 0}, {4, 1}, {1, 1}, {1, 4}, {0, 4}};
+  EXPECT_TRUE(point_in_polygon({0.5, 3}, l_shape));
+  EXPECT_FALSE(point_in_polygon({3, 3}, l_shape));
+}
+
 TEST(Geometry, WrapAngle) {
   EXPECT_NEAR(wrap_angle(0.0), 0.0, 1e-12);
   EXPECT_NEAR(wrap_angle(3 * std::numbers::pi), std::numbers::pi, 1e-9);

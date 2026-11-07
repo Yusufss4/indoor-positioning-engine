@@ -57,7 +57,6 @@ class RoomTracker {
 
   /// Events since the last call, oldest first; exits precede enters at the same time.
   [[nodiscard]] std::vector<RoomEvent> take_events();
-  [[nodiscard]] const std::vector<RoomEvent>& pending_events() const { return events_; }
 
   [[nodiscard]] bool inside(std::size_t room) const { return state_[room].inside; }
   /// Indices of the rooms currently entered, ascending, into `out` (cleared first).
