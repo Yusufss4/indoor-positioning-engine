@@ -23,10 +23,6 @@ double RssiModel::expected_rssi(const Beacon& b, Vec2 p, int level) const {
   return rssi;
 }
 
-double RssiModel::distance_from_rssi(const Beacon& b, double rssi) const {
-  return std::pow(10.0, (b.tx_power_dbm - rssi) / (10.0 * b.path_loss_exp));
-}
-
 double RssiModel::log_likelihood(double residual_db) const {
   const double s = cfg_.sigma_db;
   const double z = residual_db / s;

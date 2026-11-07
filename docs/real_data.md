@@ -127,8 +127,8 @@ A scan reports about 40 located access points at once, and their model errors ar
 by one, each reading gets its own weight update and possibly its own resample, and the cloud collapses
 long before the scan is over. `convert.py --wifi --scans --out datasets/msil/out_scans` writes each scan as
 one batch (same radio map, venues and split as `out/`). The particle filter applies a batch as one
-update, with the summed log-likelihood optionally tempered by `k^-gamma` (`pf.scan_tempering`, see
-[design.md](design.md#particle-filter)). `coverage95` is the share of fixes inside the reported 95%
+update. The experiment below also tempered the scan's summed log-likelihood by `k^-gamma`, an option
+the engine had then and no longer has. `coverage95` is the share of fixes inside the reported 95%
 ellipse; an honest filter scores 95%.
 
 Tune half, `pf` with the Wi-Fi config, median over walks:
@@ -149,8 +149,8 @@ The gain comes from batching, not from tempering. Moving the readings to the bat
 about 0.7 / 1.6 m (the `last_seen` stamps within a scan are not a better clock than the scan itself), and
 one update per scan for another 1.0 / 1.0 m. Tempering does what it should for the uncertainty (coverage
 goes from 19% to 75% at gamma 0.5) but every step of it costs accuracy. Spreading the weight over a
-wider cloud gives the many wrong hypotheses on a 100,000 m^2 floor more time to survive. So
-`scan_tempering` stays 0, and `msil_wifi.json` is unchanged.
+wider cloud gives the many wrong hypotheses on a 100,000 m^2 floor more time to survive. So readings
+stay independent, `msil_wifi.json` is unchanged, and the tempering option was later removed.
 
 Held-out half, replayed once with the frozen choice:
 

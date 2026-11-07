@@ -1,3 +1,15 @@
+// The particle filter's core: sampling, motion, measurement updates,
+// resampling, recovery and the estimate. The beacon-driven proposals are in
+// particle_filter_proposal.cpp; the integrity monitor and the map-consistent
+// estimate are components of their own.
+//
+// Adding a measurement type:
+//   1. add `on_x(t, ...)`; fill `loglik_` with one log-likelihood per particle
+//      (and apply any prediction step first, drawing from `rng_` only);
+//   2. call `commit_log_likelihoods(t)`, which weights, normalises (re-seeding
+//      if every particle died), resamples and updates the estimate;
+//   3. forward it from PositioningEngine and feed it from TracePlayer.
+
 #include "ipe/particle_filter.hpp"
 
 #include <algorithm>
@@ -13,48 +25,25 @@ ParticleFilter::ParticleFilter(const Venue& venue, ParticleFilterConfig cfg, Rss
       cfg_(cfg),
       rssi_model_(venue, rssi_cfg),
       rng_(cfg.seed),
+      integrity_(venue.beacons().size(), {cfg.integrity_threshold_db, cfg.integrity_alpha, cfg.integrity_min_samples,
+                                          cfg.integrity_max_sigma_m}),
       multi_level_(venue.multi_level()),
       altimeter_(baro_cfg) {
   cfg_.num_particles = std::max(cfg_.num_particles, 1);
-  health_.resize(venue.beacons().size());
   level_weight_.resize(static_cast<std::size_t>(std::max(venue.level_count(), 1)));
-  const auto& b = venue.bounds();
-  // Coarser cells for huge venues keep the histogram under a million cells.
-  mode_cell_m_ = std::max(kModeCellM, std::sqrt(b.width() * b.height() / 1e6));
-  mode_nx_ = std::max(1, static_cast<int>(std::ceil(b.width() / mode_cell_m_)));
-  mode_ny_ = std::max(1, static_cast<int>(std::ceil(b.height() / mode_cell_m_)));
-  if (cfg_.map_consistent_estimate) {
-    mode_weight_.assign(static_cast<std::size_t>(mode_nx_) * static_cast<std::size_t>(mode_ny_), 0.0);
-    mode_touched_.reserve(static_cast<std::size_t>(cfg_.num_particles));
-  }
+  if (cfg_.map_consistent_estimate) map_estimate_.emplace(venue, static_cast<std::size_t>(cfg_.num_particles));
   initialize_uniform();
 }
 
-bool ParticleFilter::beacon_excluded(std::size_t beacon_index) const {
-  return beacon_index < health_.size() && health_[beacon_index].excluded;
-}
+bool ParticleFilter::beacon_excluded(std::size_t beacon_index) const { return integrity_.excluded(beacon_index); }
 
 bool ParticleFilter::check_beacon(std::size_t beacon_index, double rssi) {
-  auto& h = health_[beacon_index];
   if (!cfg_.beacon_integrity) return true;
   // Residuals are only meaningful once the estimate itself can be trusted.
-  if (cloud_.sigma_radius() > cfg_.integrity_max_sigma_m) return !h.excluded;
-
+  if (!integrity_.can_judge(cloud_.sigma_radius())) return !integrity_.excluded(beacon_index);
   const Beacon& beacon = venue_->beacons()[beacon_index];
   const double residual = rssi - (rssi_model_.expected_rssi(beacon, cloud_.pos, cloud_.level) + mean_rssi_offset_);
-  h.mean_residual = h.samples == 0 ? residual : h.mean_residual + cfg_.integrity_alpha * (residual - h.mean_residual);
-  ++h.samples;
-
-  if (!h.excluded && h.samples >= cfg_.integrity_min_samples &&
-      std::abs(h.mean_residual) > cfg_.integrity_threshold_db) {
-    // Never drop more than a third of the infrastructure on our own say-so.
-    const auto excluded =
-        std::count_if(health_.begin(), health_.end(), [](const BeaconHealth& b) { return b.excluded; });
-    if (static_cast<std::size_t>(excluded + 1) * 3 <= health_.size()) h.excluded = true;
-  } else if (h.excluded && std::abs(h.mean_residual) < 0.5 * cfg_.integrity_threshold_db) {
-    h.excluded = false;
-  }
-  return !h.excluded;
+  return integrity_.admit(beacon_index, residual);
 }
 
 Vec2 ParticleFilter::sample_position() {
@@ -81,142 +70,6 @@ Particle ParticleFilter::sample_uniform_particle() {
     }
   }
   return p;
-}
-
-double ParticleFilter::ring_density(double d, double log10_mean, double log10_sigma) {
-  d = std::max(d, 1e-9);
-  const double z = (std::log10(d) - log10_mean) / log10_sigma;
-  const double per_decade = std::exp(-0.5 * z * z) / (log10_sigma * std::sqrt(2.0 * std::numbers::pi));
-  // d(log10 r) = dr / (r ln 10); the bearing spreads it over a circle of length 2 pi r.
-  return per_decade / (d * std::numbers::ln10 * 2.0 * std::numbers::pi * d);
-}
-
-ParticleFilter::Ring ParticleFilter::ring_for(const Beacon& beacon, double rssi, double rssi_offset) const {
-  // Inverts the free-space model for a device reading `rssi_offset` dB high.
-  // Walls and path-loss mismatch make the true range differ by more than the
-  // RSSI noise, so the ring is widened; the importance weights stay exact.
-  const double slope = 10.0 * beacon.path_loss_exp;
-  const double spread_db = rssi_model_.config().sigma_db * cfg_.proposal_ring_scale;
-  return {(beacon.tx_power_dbm + rssi_offset - rssi) / slope, std::max(spread_db / slope, 1e-3)};
-}
-
-double ParticleFilter::ring_level_prob(int beacon_level, int level) const {
-  if (!multi_level_) return 1.0;
-  const bool has_up = beacon_level + 1 < venue_->level_count();
-  const bool has_down = beacon_level > 0;
-  const int neighbours = (has_up ? 1 : 0) + (has_down ? 1 : 0);
-  if (neighbours == 0) return level == beacon_level ? 1.0 : 0.0;
-  if (level == beacon_level) return 1.0 - cfg_.proposal_level_jump;
-  if ((level == beacon_level + 1 && has_up) || (level == beacon_level - 1 && has_down)) {
-    return cfg_.proposal_level_jump / neighbours;
-  }
-  return 0.0;
-}
-
-Particle ParticleFilter::sample_ring_particle(const Beacon& beacon, double rssi, RingDraw& draw) {
-  Particle p;
-  p.heading = rng_.uniform(-std::numbers::pi, std::numbers::pi);
-  p.step_scale = std::max(0.5, rng_.normal(1.0, cfg_.step_scale_sigma));
-  // Offset and position are drawn jointly and rejected together, so the
-  // accepted pairs follow the ring truncated to the venue with a single
-  // normaliser (the acceptance rate) instead of one per offset.
-  draw = {};
-  bool inside = false;
-  while (!inside && draw.attempts < kRingTries) {
-    ++draw.attempts;
-    p.rssi_offset = cfg_.estimate_rssi_offset ? rng_.normal(0.0, cfg_.rssi_offset_sigma) : 0.0;
-    const Ring ring = ring_for(beacon, rssi, p.rssi_offset);
-    const double range = std::pow(10.0, ring.log10_mean + ring.log10_sigma * rng_.normal());
-    const double bearing = rng_.uniform(-std::numbers::pi, std::numbers::pi);
-    p.pos = beacon.pos + Vec2{std::cos(bearing), std::sin(bearing)} * range;
-    inside = venue_->inside(p.pos);
-  }
-  if (!inside) {
-    // The last offset tried is biased towards rings that miss the venue.
-    draw.fell_back = true;
-    p.pos = sample_position();
-    p.rssi_offset = cfg_.estimate_rssi_offset ? rng_.normal(0.0, cfg_.rssi_offset_sigma) : 0.0;
-  }
-  if (multi_level_) {
-    p.level = beacon.level;
-    if (rng_.bernoulli(cfg_.proposal_level_jump)) {
-      const bool has_up = beacon.level + 1 < venue_->level_count();
-      const bool has_down = beacon.level > 0;
-      if (has_up && has_down) {
-        p.level += rng_.bernoulli(0.5) ? 1 : -1;
-      } else if (has_up) {
-        p.level += 1;
-      } else if (has_down) {
-        p.level -= 1;
-      }
-    }
-    if (baro_ready_) {
-      p.baro_offset = altimeter_.altitude() - elevation(p.level) + rng_.normal(0.0, cfg_.baro_offset_sigma_m);
-    }
-  }
-  return p;
-}
-
-void ParticleFilter::seed_from_beacon(std::size_t beacon_index, double rssi) {
-  if (beacon_index >= venue_->beacons().size()) return;
-  const Beacon& beacon = venue_->beacons()[beacon_index];
-  const double f = std::clamp(cfg_.init_proposal_fraction, 0.0, 1.0);
-
-  std::size_t attempts = 0, accepted = 0;
-  for (auto& p : particles_) {
-    if (rng_.bernoulli(f)) {
-      RingDraw draw;
-      p = sample_ring_particle(beacon, rssi, draw);
-      attempts += static_cast<std::size_t>(draw.attempts);
-      if (!draw.fell_back) ++accepted;
-    } else {
-      p = sample_uniform_particle();
-    }
-  }
-
-  // Importance weight = prior / proposal. Heading and step scale have the
-  // prior distribution in both. With acceptance rate Z per try and K tries, a
-  // ring draw has density ring(x | offset) * prior(offset) * (1 - (1-Z)^K) / Z
-  // inside the venue, plus (1-Z)^K spread uniformly for the fallbacks; the
-  // offset prior cancels against the prior's.
-  const double area = venue_->walkable_area();
-  const double levels = multi_level_ ? static_cast<double>(venue_->level_count()) : 1.0;
-  const double z = attempts > 0 ? static_cast<double>(accepted) / static_cast<double>(attempts) : 1.0;
-  const double miss_all = std::pow(1.0 - z, kRingTries);
-  const double ring_scale = z > 0.0 ? (1.0 - miss_all) / z : static_cast<double>(kRingTries);
-  double sum = 0.0;
-  for (auto& p : particles_) {
-    const Ring ring = ring_for(beacon, rssi, p.rssi_offset);
-    const double ring_pos =
-        area * ring_scale * ring_density(distance(p.pos, beacon.pos), ring.log10_mean, ring.log10_sigma) + miss_all;
-    p.weight = 1.0 / ((1.0 - f) + f * levels * ring_level_prob(beacon.level, p.level) * ring_pos);
-    sum += p.weight;
-  }
-  for (auto& p : particles_) p.weight /= sum;
-  radio_seeded_ = true;
-  localized_ = true;
-  update_estimate(now_);
-}
-
-void ParticleFilter::remember_packet(double t, std::size_t beacon_index, double rssi) {
-  const auto capacity = static_cast<std::size_t>(std::clamp(cfg_.proposal_history, 1, kMaxProposalHistory));
-  history_[history_head_] = {t, beacon_index, rssi};
-  history_head_ = (history_head_ + 1) % capacity;
-  history_count_ = std::min(history_count_ + 1, capacity);
-}
-
-Particle ParticleFilter::sample_recovery_particle() {
-  if (!cfg_.recovery_proposal) return sample_uniform_particle();
-  std::array<std::size_t, kMaxProposalHistory> fresh{};
-  std::size_t n = 0;
-  for (std::size_t i = 0; i < history_count_; ++i) {
-    if (now_ - history_[i].t <= cfg_.proposal_max_age_s) fresh[n++] = i;
-  }
-  if (n == 0) return sample_uniform_particle();
-  const auto pick = std::min(static_cast<std::size_t>(rng_.uniform() * static_cast<double>(n)), n - 1);
-  const Packet& packet = history_[fresh[pick]];
-  RingDraw draw;
-  return sample_ring_particle(venue_->beacons()[packet.beacon], packet.rssi, draw);
 }
 
 void ParticleFilter::maybe_change_level(Particle& p, double prob) {
@@ -250,16 +103,14 @@ void ParticleFilter::on_step(const StepEvent& step) {
     const double len = std::max(0.0, step.length * p.step_scale + rng_.normal(0.0, cfg_.step_length_sigma));
     const Vec2 next = p.pos + Vec2{std::cos(p.heading), std::sin(p.heading)} * len;
 
-    if (!venue_->inside(next) || (cfg_.wall_constraint && venue_->crosses_wall(p.pos, next, p.level))) {
+    if (!venue_->inside(next) || venue_->crosses_wall(p.pos, next, p.level)) {
       p.weight = 0.0;
       continue;
     }
     p.pos = next;
     if (multi_level_) maybe_change_level(p, cfg_.level_change_prob_step);
   }
-  normalize_or_recover();
-  resample_if_needed();
-  update_estimate(step.t);
+  finish_update(step.t);
 }
 
 void ParticleFilter::on_heading(double t, double heading, double sigma) {
@@ -271,10 +122,7 @@ void ParticleFilter::on_heading(double t, double heading, double sigma) {
     const double z = wrap_angle(heading - particles_[i].heading) / sigma;
     loglik_[i] = std::log((1.0 - eps) * norm * std::exp(-0.5 * z * z) + eps / (2.0 * std::numbers::pi));
   }
-  apply_log_likelihoods(loglik_);
-  normalize_or_recover();
-  resample_if_needed();
-  update_estimate(t);
+  commit_log_likelihoods(t);
 }
 
 void ParticleFilter::on_rssi(double t, std::size_t beacon_index, double rssi) {
@@ -330,27 +178,12 @@ void ParticleFilter::on_rssi_scan(double t, std::span<const RssiReading> reading
   update_rssi(t, scan_);
 }
 
-double ParticleFilter::apparent_range(std::size_t beacon_index, double rssi) const {
-  const Beacon& b = venue_->beacons()[beacon_index];
-  return (b.tx_power_dbm - rssi) / b.path_loss_exp;
-}
-
-void ParticleFilter::flush_pending() {
-  for (std::size_t i = 0; i < pending_count_; ++i) update_rssi(pending_[i].t, pending_[i].beacon, pending_[i].rssi);
-  pending_count_ = 0;
-}
-
 void ParticleFilter::update_rssi(double t, std::size_t beacon_index, double rssi) {
   const RssiReading reading{beacon_index, rssi};
   update_rssi(t, std::span<const RssiReading>(&reading, 1));
 }
 
 void ParticleFilter::update_rssi(double t, std::span<const RssiReading> readings) {
-  // Readings of one scan share most of their model error, so their summed
-  // log-likelihood is tempered by k^-gamma (gamma = 1: the scan counts once).
-  const double temper =
-      cfg_.scan_tempering > 0.0 ? std::pow(static_cast<double>(readings.size()), -cfg_.scan_tempering) : 1.0;
-
   loglik_.resize(particles_.size());
   double max_ll = -std::numeric_limits<double>::infinity();
   for (std::size_t i = 0; i < particles_.size(); ++i) {
@@ -366,7 +199,7 @@ void ParticleFilter::update_rssi(double t, std::span<const RssiReading> readings
       const double expected = rssi_model_.expected_rssi(beacon, p.pos, p.level) + p.rssi_offset;
       ll += rssi_model_.log_likelihood(r.rssi - expected);
     }
-    loglik_[i] = temper * ll;
+    loglik_[i] = ll;
     max_ll = std::max(max_ll, loglik_[i]);
   }
 
@@ -381,17 +214,14 @@ void ParticleFilter::update_rssi(double t, std::span<const RssiReading> readings
     w_fast_ += cfg_.recovery_alpha_fast * (w_avg - w_fast_);
   }
 
-  apply_log_likelihoods(loglik_);
-  normalize_or_recover();
-  resample_if_needed();
   localized_ = true;
-  update_estimate(t);
+  commit_log_likelihoods(t);
 }
 
 void ParticleFilter::on_pressure(double t, double hpa) {
   now_ = t;
   const double alt = altimeter_.process(t, hpa);
-  if (!multi_level_ || !cfg_.use_barometer) return;
+  if (!multi_level_) return;
   if (!baro_ready_) {
     for (auto& p : particles_) p.baro_offset = alt - elevation(p.level) + rng_.normal(0.0, cfg_.baro_offset_sigma_m);
     baro_ready_ = true;
@@ -418,7 +248,15 @@ void ParticleFilter::on_pressure(double t, double hpa) {
     const double z = (alt - p.baro_offset - elevation(p.level)) / s;
     loglik_[i] = std::log((1.0 - cfg_.baro_outlier_prob) * norm * std::exp(-0.5 * z * z) + outlier);
   }
+  commit_log_likelihoods(t);
+}
+
+void ParticleFilter::commit_log_likelihoods(double t) {
   apply_log_likelihoods(loglik_);
+  finish_update(t);
+}
+
+void ParticleFilter::finish_update(double t) {
   normalize_or_recover();
   resample_if_needed();
   update_estimate(t);
@@ -534,7 +372,7 @@ void ParticleFilter::update_estimate(double t) {
   }
   mean_rssi_offset_ = so;
   const Vec2 mean{sx, sy};
-  const Vec2 pos = cfg_.map_consistent_estimate && localized_ ? map_consistent_position(mean, level) : mean;
+  const Vec2 pos = map_estimate_ && localized_ ? map_estimate_->position(particles_, mean, level, multi_level_) : mean;
   double cxx = 0.0, cxy = 0.0, cyy = 0.0;
   for (const auto& p : particles_) {
     if (!counts(p)) continue;
@@ -563,92 +401,6 @@ void ParticleFilter::update_estimate(double t) {
   estimate_.cov_xx += off.x * off.x;
   estimate_.cov_xy += off.x * off.y;
   estimate_.cov_yy += off.y * off.y;
-}
-
-std::size_t ParticleFilter::mode_cell(Vec2 p) const {
-  const auto& b = venue_->bounds();
-  const int x = std::clamp(static_cast<int>(std::floor((p.x - b.min_x) / mode_cell_m_)), 0, mode_nx_ - 1);
-  const int y = std::clamp(static_cast<int>(std::floor((p.y - b.min_y) / mode_cell_m_)), 0, mode_ny_ - 1);
-  return static_cast<std::size_t>(y) * static_cast<std::size_t>(mode_nx_) + static_cast<std::size_t>(x);
-}
-
-Vec2 ParticleFilter::map_consistent_position(Vec2 mean, int level) {
-  const auto counts = [&](const Particle& p) { return p.weight > 0.0 && (!multi_level_ || p.level == level); };
-
-  // The mean is fine if it is walkable and in sight of the particle closest to it.
-  const Particle* nearest = nullptr;
-  double best_d2 = std::numeric_limits<double>::infinity();
-  for (const auto& p : particles_) {
-    if (!counts(p)) continue;
-    const double d2 = (p.pos - mean).norm2();
-    if (d2 < best_d2) {
-      best_d2 = d2;
-      nearest = &p;
-    }
-  }
-  if (!nearest) return mean;
-  if (venue_->inside(mean) && !venue_->crosses_wall(nearest->pos, mean, level)) return mean;
-
-  // Dominant mode: the heaviest 3x3 block of a coarse weight histogram.
-  for (const auto& p : particles_) {
-    if (!counts(p)) continue;
-    const std::size_t c = mode_cell(p.pos);
-    if (mode_weight_[c] == 0.0) mode_touched_.push_back(c);
-    mode_weight_[c] += p.weight;
-  }
-  const auto nx = static_cast<std::size_t>(mode_nx_);
-  const auto ny = static_cast<std::size_t>(mode_ny_);
-  std::size_t best_cell = mode_touched_.front();
-  double best_w = -1.0;
-  for (std::size_t c : mode_touched_) {
-    const std::size_t cx = c % nx, cy = c / nx;
-    double w = 0.0;
-    for (std::size_t y = cy > 0 ? cy - 1 : 0; y <= std::min(cy + 1, ny - 1); ++y) {
-      for (std::size_t x = cx > 0 ? cx - 1 : 0; x <= std::min(cx + 1, nx - 1); ++x) w += mode_weight_[y * nx + x];
-    }
-    if (w > best_w) {
-      best_w = w;
-      best_cell = c;
-    }
-  }
-  for (std::size_t c : mode_touched_) mode_weight_[c] = 0.0;
-  mode_touched_.clear();
-
-  const auto bx = static_cast<long>(best_cell % nx), by = static_cast<long>(best_cell / nx);
-  const auto in_block = [&](const Particle& p) {
-    const std::size_t c = mode_cell(p.pos);
-    return std::abs(static_cast<long>(c % nx) - bx) <= 1 && std::abs(static_cast<long>(c / nx) - by) <= 1;
-  };
-  Vec2 centre{};
-  double w_block = 0.0;
-  for (const auto& p : particles_) {
-    if (!counts(p) || !in_block(p)) continue;
-    centre += p.pos * p.weight;
-    w_block += p.weight;
-  }
-  centre = centre * (1.0 / w_block);
-  const Particle* anchor = nullptr;
-  best_d2 = std::numeric_limits<double>::infinity();
-  for (const auto& p : particles_) {
-    if (!counts(p) || !in_block(p)) continue;
-    const double d2 = (p.pos - centre).norm2();
-    if (d2 < best_d2) {
-      best_d2 = d2;
-      anchor = &p;
-    }
-  }
-  // The block can still straddle a wall: keep the particles on the anchor's side.
-  Vec2 mode{};
-  double w_mode = 0.0;
-  for (const auto& p : particles_) {
-    if (!counts(p) || !in_block(p) || venue_->crosses_wall(anchor->pos, p.pos, level)) continue;
-    mode += p.pos * p.weight;
-    w_mode += p.weight;
-  }
-  if (w_mode <= 0.0) return anchor->pos;
-  mode = mode * (1.0 / w_mode);
-  if (venue_->inside(mode) && !venue_->crosses_wall(anchor->pos, mode, level)) return mode;
-  return anchor->pos;
 }
 
 }  // namespace ipe

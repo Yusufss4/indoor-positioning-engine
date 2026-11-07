@@ -11,6 +11,8 @@ truth; a replay tool and a regression suite measure accuracy.
 ## Layout
 
 - `core/` - the engine. No I/O beyond venue/trace parsing; this is what a mobile SDK or WASM build links.
+  [docs/design.md](docs/design.md#where-things-live) maps each concern to its file and lists the steps
+  for adding a sensor.
 - `sim/` - scenario JSON to synthetic trace (IMU, BLE, barometer, ground truth).
 - `eval/` - the `pf` preset, config overrides, replay runner, metrics, regression comparison.
 - `geo/` - GeoJSON / IMDF import and export (`ipe_geo`); native tooling only, not linked by the engine.

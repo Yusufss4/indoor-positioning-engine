@@ -1,5 +1,7 @@
 #include "ipe/eval.hpp"
 
+#include "ipe/trace_player.hpp"
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -19,13 +21,12 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(RssiModelConfig, sigma_db, outli
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(BaroConfig, lowpass_tau_s, sea_level_hpa)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
     ParticleFilterConfig, num_particles, seed, step_length_sigma, step_scale_sigma, step_scale_walk, heading_sigma_deg,
-    heading_outlier_prob, wall_constraint, map_consistent_estimate, estimate_rssi_offset, rssi_offset_sigma,
-    rssi_offset_walk, beacon_integrity, integrity_threshold_db, integrity_alpha, integrity_min_samples,
-    integrity_max_sigma_m, resample_ess_ratio, roughening_m, recovery, recovery_alpha_slow, recovery_alpha_fast,
-    recovery_max_fraction, init_proposal, init_proposal_fraction, init_window_s, recovery_proposal, proposal_history,
-    proposal_max_age_s, proposal_level_jump, proposal_ring_scale, scan_tempering, level_change_prob_step,
-    level_change_prob_baro, use_barometer, baro_update_interval_s, baro_sigma_m, baro_outlier_prob, baro_offset_sigma_m,
-    baro_offset_walk_m)
+    heading_outlier_prob, map_consistent_estimate, estimate_rssi_offset, rssi_offset_sigma, rssi_offset_walk,
+    beacon_integrity, integrity_threshold_db, integrity_alpha, integrity_min_samples, integrity_max_sigma_m,
+    resample_ess_ratio, roughening_m, recovery, recovery_alpha_slow, recovery_alpha_fast, recovery_max_fraction,
+    init_proposal, init_proposal_fraction, init_window_s, recovery_proposal, proposal_history, proposal_max_age_s,
+    proposal_level_jump, level_change_prob_step, level_change_prob_baro, baro_update_interval_s, baro_sigma_m,
+    baro_outlier_prob, baro_offset_sigma_m, baro_offset_walk_m)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(RoomEventConfig, enter_prob, exit_prob, enter_dwell_s, exit_dwell_s,
                                                 update_period_s)
 
@@ -222,54 +223,21 @@ ReplayResult replay(const Venue& venue, const Trace& trace, const EngineConfig& 
   ReplayResult result;
   result.records.reserve(trace.truth.size());
 
-  // Beacon ids are resolved once so the hot loop works with indices only.
-  std::vector<std::size_t> ble_index(trace.ble.size());
-  for (std::size_t k = 0; k < trace.ble.size(); ++k) {
-    ble_index[k] = venue.beacon_index(trace.ble[k].beacon_id).value_or(venue.beacons().size());
-  }
-
+  TracePlayer player(venue, trace);
   clock::duration busy{};
   std::uint64_t updates = 0;
   Estimate last_fix;
-  std::vector<RssiReading> scan;
   std::optional<RoomTracker> truth_rooms;
   if (!venue.rooms().empty()) truth_rooms.emplace(venue, truth_room_config());
   std::vector<std::size_t> truth_in, est_in;
-  std::size_t i = 0, b = 0, p = 0, g = 0, truth_seen = 0;
-  while (g < trace.truth.size()) {
-    const double ti = i < trace.imu.size() ? trace.imu[i].t : 1e300;
-    const double tb = b < trace.ble.size() ? trace.ble[b].t : 1e300;
-    const double tp = p < trace.baro.size() ? trace.baro[p].t : 1e300;
-    const double tg = trace.truth[g].t;
-
-    if (ti <= tb && ti <= tp && ti <= tg) {
-      const auto start = clock::now();
-      engine.on_imu(trace.imu[i++]);
+  std::size_t truth_seen = 0;
+  while (!player.finished()) {
+    const auto start = clock::now();
+    if (player.step(engine) != TracePlayer::Event::Truth) {
       busy += clock::now() - start;
-      ++updates;
-    } else if (tb <= tp && tb <= tg) {
-      const std::size_t end = scan_end(trace.ble, b);
-      if (trace.ble[b].scan != 0) {
-        scan.clear();
-        for (std::size_t k = b; k < end; ++k) scan.push_back({ble_index[k], trace.ble[k].rssi});
-      }
-      const auto start = clock::now();
-      if (trace.ble[b].scan != 0) {
-        engine.on_scan(trace.ble[b].t, scan);
-      } else {
-        engine.on_ble(trace.ble[b].t, ble_index[b], trace.ble[b].rssi);
-      }
-      busy += clock::now() - start;
-      b = end;
-      ++updates;
-    } else if (tp <= tg) {
-      const auto start = clock::now();
-      engine.on_pressure(trace.baro[p].t, trace.baro[p].hpa);
-      busy += clock::now() - start;
-      ++p;
       ++updates;
     } else {
-      const auto& truth = trace.truth[g++];
+      const auto& truth = player.truth();
       const Estimate est = engine.estimate();
       if (est.valid) last_fix = est;
 

@@ -108,12 +108,9 @@ class Venue {
   [[nodiscard]] const Connector* connector_at(Vec2 p, int level) const;
 
   [[nodiscard]] const std::vector<Room>& rooms() const { return rooms_; }
-  [[nodiscard]] std::optional<std::size_t> room_index(std::string_view id) const;
   /// Indices of the rooms on `level` that may contain `p` (bounding-box grid
   /// cell); callers still test Room::contains. Valid until the venue changes.
   [[nodiscard]] std::span<const std::size_t> room_candidates(Vec2 p, int level) const;
-  /// Indices of the rooms on `level` containing `p`, ascending, into `out` (cleared first).
-  void rooms_at(Vec2 p, int level, std::vector<std::size_t>& out) const;
 
   [[nodiscard]] const std::optional<GeoRef>& georef() const { return georef_; }
 

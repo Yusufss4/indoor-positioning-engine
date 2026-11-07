@@ -48,7 +48,6 @@ class PdrProcessor {
   /// Feeds one sample; returns a step event when a step is confirmed.
   std::optional<StepEvent> process(const ImuSample& s);
 
-  [[nodiscard]] double integrated_yaw() const { return yaw_; }
   [[nodiscard]] const PdrConfig& config() const { return cfg_; }
 
   /// Heading of the walking direction from a flat-held magnetometer reading,

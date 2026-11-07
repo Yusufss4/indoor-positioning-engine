@@ -150,6 +150,19 @@ TEST(Venue, ConnectorHitTest) {
   EXPECT_EQ(v.connector_at({4.5, 1.5}, 0), nullptr);
 }
 
+namespace {
+
+/// Rooms on `level` containing `p`, ascending, through the venue's room grid.
+std::vector<std::size_t> rooms_at(const Venue& v, Vec2 p, int level) {
+  std::vector<std::size_t> out;
+  for (std::size_t r : v.room_candidates(p, level)) {
+    if (v.rooms()[r].contains(p)) out.push_back(r);
+  }
+  return out;
+}
+
+}  // namespace
+
 TEST(Venue, RoomsParseAndHitTest) {
   const Venue v = parse_venue(R"({"bounds": [0, 0, 20, 10], "beacons": [],
     "levels": [{"ordinal": 0}, {"ordinal": 1}],
@@ -164,18 +177,10 @@ TEST(Venue, RoomsParseAndHitTest) {
   EXPECT_EQ(v.rooms()[1].name, "e");        // name defaults to the id
   EXPECT_EQ(v.rooms()[1].level, 0);         // level defaults to the lowest
   EXPECT_EQ(v.rooms()[3].level, 1);
-  EXPECT_EQ(v.room_index("nook"), 2u);
-  EXPECT_FALSE(v.room_index("attic").has_value());
-
-  std::vector<std::size_t> in;
-  v.rooms_at({2, 2}, 0, in);
-  EXPECT_EQ(in, (std::vector<std::size_t>{0, 2}));  // rooms may overlap
-  v.rooms_at({15, 5}, 0, in);
-  EXPECT_EQ(in, std::vector<std::size_t>{1});
-  v.rooms_at({15, 5}, 1, in);
-  EXPECT_EQ(in, std::vector<std::size_t>{3});
-  v.rooms_at({25, 5}, 0, in);
-  EXPECT_TRUE(in.empty());
+  EXPECT_EQ(rooms_at(v, {2, 2}, 0), (std::vector<std::size_t>{0, 2}));  // rooms may overlap
+  EXPECT_EQ(rooms_at(v, {15, 5}, 0), std::vector<std::size_t>{1});
+  EXPECT_EQ(rooms_at(v, {15, 5}, 1), std::vector<std::size_t>{3});
+  EXPECT_TRUE(rooms_at(v, {25, 5}, 0).empty());
   EXPECT_TRUE(v.room_candidates({25, 5}, 0).empty());
   EXPECT_TRUE(v.room_candidates({5, 5}, 7).empty());
 }
@@ -184,12 +189,11 @@ TEST(Venue, RoomGridMatchesBruteForce) {
   const Venue v = load_venue_file(test::data_path("venues/kit_informatikbau.json"));
   ASSERT_GT(v.rooms().size(), 100u);
   Rng rng(5);
-  std::vector<std::size_t> fast;
   for (int i = 0; i < 2000; ++i) {
     const Vec2 p{rng.uniform(v.bounds().min_x - 5, v.bounds().max_x + 5),
                  rng.uniform(v.bounds().min_y - 5, v.bounds().max_y + 5)};
     const int level = std::min(v.level_count() - 1, static_cast<int>(rng.uniform(0.0, v.level_count())));
-    v.rooms_at(p, level, fast);
+    const auto fast = rooms_at(v, p, level);
     std::vector<std::size_t> slow;
     for (std::size_t r = 0; r < v.rooms().size(); ++r) {
       if (v.rooms()[r].level == level && point_in_polygon(p, v.rooms()[r].area)) slow.push_back(r);
@@ -251,13 +255,4 @@ TEST(Venue, RejectsInvalidLevelReferences) {
   EXPECT_THROW(parse_venue(R"({"bounds": [0, 0, 10, 10], "levels": [{"ordinal": 0}, {"ordinal": 1}], "beacons": [],
     "connectors": [{"id": "s", "kind": "stairs", "levels": [0], "area": [[0,0],[1,0],[1,1]]}]})"),
                std::runtime_error);
-}
-
-TEST(Geometry, PointInPolygon) {
-  const Polygon square = {{0, 0}, {2, 0}, {2, 2}, {0, 2}};
-  EXPECT_TRUE(point_in_polygon({1, 1}, square));
-  EXPECT_FALSE(point_in_polygon({3, 1}, square));
-  const Polygon l_shape = {{0, 0}, {4, 0}, {4, 1}, {1, 1}, {1, 4}, {0, 4}};
-  EXPECT_TRUE(point_in_polygon({0.5, 3}, l_shape));
-  EXPECT_FALSE(point_in_polygon({3, 3}, l_shape));
 }

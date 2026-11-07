@@ -23,7 +23,6 @@ class BaroAltimeter {
   /// Feeds one sample; returns the filtered relative altitude [m].
   double process(double t, double hpa);
 
-  [[nodiscard]] bool initialized() const { return initialized_; }
   [[nodiscard]] double altitude() const { return filtered_; }
   [[nodiscard]] const BaroConfig& config() const { return cfg_; }
 

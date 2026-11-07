@@ -7,15 +7,12 @@
 
 using namespace ipe;
 
-TEST(RssiModel, PathLossAndInverseAgree) {
+TEST(RssiModel, FreeSpacePathLoss) {
   const Venue v = test::two_room_venue();
   const RssiModel m(v);
   const Beacon& b = v.beacons()[0];
   EXPECT_NEAR(m.expected_rssi_free_space(b, 1.0), b.tx_power_dbm, 1e-9);
   EXPECT_NEAR(m.expected_rssi_free_space(b, 10.0), b.tx_power_dbm - 20.0, 1e-9);
-  for (double d : {0.7, 2.0, 5.0, 17.0}) {
-    EXPECT_NEAR(m.distance_from_rssi(b, m.expected_rssi_free_space(b, d)), d, 1e-9);
-  }
 }
 
 TEST(RssiModel, WallAttenuationOnlyWhenWallAware) {

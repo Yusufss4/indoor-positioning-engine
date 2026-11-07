@@ -140,13 +140,6 @@ const Connector* Venue::connector_at(Vec2 p, int level) const {
   return nullptr;
 }
 
-std::optional<std::size_t> Venue::room_index(std::string_view id) const {
-  for (std::size_t i = 0; i < rooms_.size(); ++i) {
-    if (rooms_[i].id == id) return i;
-  }
-  return std::nullopt;
-}
-
 std::span<const std::size_t> Venue::room_candidates(Vec2 p, int level) const {
   if (level < 0 || level >= static_cast<int>(room_grids_.size())) return {};
   const RoomGrid& grid = room_grids_[static_cast<std::size_t>(level)];
@@ -154,13 +147,6 @@ std::span<const std::size_t> Venue::room_candidates(Vec2 p, int level) const {
   const int x = std::min(static_cast<int>((p.x - bounds_.min_x) / grid.cell), grid.nx - 1);
   const int y = std::min(static_cast<int>((p.y - bounds_.min_y) / grid.cell), grid.ny - 1);
   return grid.cells[static_cast<std::size_t>(y * grid.nx + x)];
-}
-
-void Venue::rooms_at(Vec2 p, int level, std::vector<std::size_t>& out) const {
-  out.clear();
-  for (std::size_t r : room_candidates(p, level)) {
-    if (rooms_[r].contains(p)) out.push_back(r);
-  }
 }
 
 void Venue::build_room_grids() {

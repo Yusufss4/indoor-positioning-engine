@@ -13,8 +13,27 @@ flowchart LR
 ```
 
 `PositioningEngine` is the only entry point a platform layer needs: push IMU samples, BLE packets and
-barometer readings in time order, read the estimate. The replay tool, the regression suite and the
-WebAssembly demo all drive the engine through it, so they see identical inputs.
+barometer readings in time order, read the estimate. `TracePlayer` feeds a recorded or simulated
+trace into it in timestamp order; the replay tool, the regression suite and the WebAssembly demo all
+use it, so they see identical inputs.
+
+### Where things live
+
+| Concern | Code |
+|---|---|
+| Engine entry point, room events | `core/src/engine.cpp`, `core/src/rooms.cpp` |
+| Trace streams in time order | `core/src/trace_player.cpp` |
+| Particle filter: sampling, motion, measurement updates, resampling, recovery, estimate | `core/src/particle_filter.cpp` |
+| Beacon-driven init/recovery proposals | `core/src/particle_filter_proposal.cpp` |
+| Beacon integrity monitor | `core/src/beacon_integrity.cpp` |
+| Estimate kept on the map (dominant group of a split cloud) | `core/src/map_estimate.cpp` |
+| Config JSON, presets, replay, metrics | `eval/src/eval.cpp` |
+
+**Adding a sensor.** Add a stream to `Trace` (and its CSV reader/writer in `core/src/trace.cpp`), a
+case to `TracePlayer::step`, an `on_x` to `PositioningEngine`, and an `on_x` to `ParticleFilter` that
+fills `loglik_` with one log-likelihood per particle and calls `commit_log_likelihoods(t)`. The
+simulator (`sim/`) generates the stream for scenarios; new config fields go into the JSON registration
+in `eval/src/eval.cpp`.
 
 ## Pedestrian dead reckoning
 
@@ -58,12 +77,10 @@ State per particle: position, heading, step-length scale, device RSSI offset.
   more than a third of the beacons).
 - **Scans** (`on_rssi_scan`): a Wi-Fi scan reports dozens of access points at once. The filter applies
   the whole scan as one update: one device-offset random-walk step, one recovery-statistics update, one
-  resample decision and one estimate. The integrity monitor still checks each reading. The scan's
-  summed log-likelihood is multiplied by `k^-scan_tempering` for `k` readings: 0 (the default) treats
-  readings as independent, and 1 counts the whole scan as one measurement, so an access point reported
-  under several ids no longer counts several times. Tempering makes the cloud's spread honest but
-  costs accuracy on the real traces, so it is off (see [real_data.md](real_data.md#scans-as-one-update)).
-  A one-reading scan is bit-identical to `on_rssi`.
+  resample decision and one estimate. The integrity monitor still checks each reading. Readings count
+  as independent; tempering the scan's likelihood made the spread honest but cost accuracy at every
+  setting tried, and was removed (see [real_data.md](real_data.md#scans-as-one-update)). A one-reading
+  scan is bit-identical to `on_rssi`.
 - **Wall queries** use a uniform grid over wall segments, with a linear scan for long radio paths where
   the grid would visit most cells anyway. A property test checks the grid against brute force.
 

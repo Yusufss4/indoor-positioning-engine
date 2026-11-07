@@ -2,11 +2,15 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <vector>
 
 #include "ipe/baro.hpp"
+#include "ipe/beacon_integrity.hpp"
 #include "ipe/filter.hpp"
+#include "ipe/map_estimate.hpp"
+#include "ipe/particle.hpp"
 #include "ipe/rng.hpp"
 #include "ipe/rssi_model.hpp"
 #include "ipe/venue.hpp"
@@ -23,7 +27,6 @@ struct ParticleFilterConfig {
   double heading_sigma_deg = 3.0;      ///< Heading noise added per step.
   double heading_outlier_prob = 0.15;  ///< Magnetic disturbances are frequent indoors.
 
-  bool wall_constraint = true;  ///< Kill particles whose step crosses a wall.
   /// The cloud mean can fall where no particle can be (on a wall, in an empty
   /// shop between two groups). Report the dominant group's mean instead then;
   /// the covariance still covers the whole cloud.
@@ -64,31 +67,15 @@ struct ParticleFilterConfig {
   int proposal_history = 8;          ///< Recent packets remembered (at most kMaxProposalHistory).
   double proposal_max_age_s = 2.0;   ///< Older packets are not used for recovery proposals.
   double proposal_level_jump = 0.1;  ///< Probability a ring particle is put on a level next to the beacon's.
-  double proposal_ring_scale = 1.0;  ///< Ring width in units of the RSSI model's sigma.
-
-  /// A scan of k readings multiplies their likelihoods raised to k^-gamma.
-  /// 0 treats readings as independent; 1 counts the whole scan as one measurement.
-  double scan_tempering = 0.0;
 
   // Floor model; only active in multi-level venues.
   double level_change_prob_step = 0.08;  ///< Per step, for particles standing in a connector footprint.
   double level_change_prob_baro = 0.1;   ///< Per barometer update in a connector (lift rides have no steps).
-  bool use_barometer = true;
   double baro_update_interval_s = 0.5;
   double baro_sigma_m = 0.8;  ///< Altitude vs. floor elevation spread (stairs, phone height, residual drift).
   double baro_outlier_prob = 0.05;
   double baro_offset_sigma_m = 0.3;  ///< Spread of a new particle's altitude offset.
   double baro_offset_walk_m = 0.05;  ///< Random walk of the offset per barometer update (weather drift).
-};
-
-struct Particle {
-  Vec2 pos;
-  double heading = 0.0;
-  double step_scale = 1.0;
-  double rssi_offset = 0.0;
-  double weight = 0.0;
-  int level = 0;             ///< Level index.
-  double baro_offset = 0.0;  ///< Barometric altitude minus the floor elevation [m].
 };
 
 /// Sequential importance resampling filter fusing PDR steps, magnetometer
@@ -106,8 +93,7 @@ class ParticleFilter {
   void on_step(const StepEvent& step);
   void on_heading(double t, double heading, double sigma);
   void on_rssi(double t, std::size_t beacon_index, double rssi);
-  /// One weight update, resample and estimate for the whole scan, with the
-  /// readings' summed log-likelihood tempered by `scan_tempering`.
+  /// One weight update, resample and estimate for the whole scan.
   void on_rssi_scan(double t, std::span<const RssiReading> readings);
   void on_pressure(double t, double hpa);
 
@@ -132,12 +118,6 @@ class ParticleFilter {
   [[nodiscard]] static double ring_density(double d, double log10_mean, double log10_sigma);
 
  private:
-  struct BeaconHealth {
-    double mean_residual = 0.0;
-    int samples = 0;
-    bool excluded = false;
-  };
-
   struct Packet {
     double t = 0.0;
     std::size_t beacon = 0;
@@ -186,13 +166,13 @@ class ParticleFilter {
   /// Multiplies weights by exp(loglik - max) and renormalises. Returns false
   /// if every particle ended with zero weight.
   bool apply_log_likelihoods(const std::vector<double>& loglik);
+  /// Applies `loglik_` as one measurement update, then finish_update(t).
+  void commit_log_likelihoods(double t);
+  /// Normalises (re-seeding if every particle died), resamples if needed and updates the estimate.
+  void finish_update(double t);
   void normalize_or_recover();
   void resample_if_needed();
   void update_estimate(double t);
-  /// `mean` if it is on the map next to a particle on `level`, else the mean of
-  /// the heaviest group of particles (see `map_consistent_estimate`).
-  [[nodiscard]] Vec2 map_consistent_position(Vec2 mean, int level);
-  [[nodiscard]] std::size_t mode_cell(Vec2 p) const;
 
   const Venue* venue_;
   ParticleFilterConfig cfg_;
@@ -202,7 +182,8 @@ class ParticleFilter {
   std::vector<Particle> scratch_;
   std::vector<double> loglik_;
   std::vector<RssiReading> scan_;  ///< Readings of the current scan that passed the integrity check.
-  std::vector<BeaconHealth> health_;
+  BeaconIntegrityMonitor integrity_;
+  std::optional<MapConsistentEstimate> map_estimate_;  ///< Engaged when `map_consistent_estimate` is on.
   double mean_rssi_offset_ = 0.0;
   Estimate estimate_;  ///< What is reported: the cloud mean, or its dominant mode (map_consistent_estimate).
   Estimate cloud_;     ///< Mean and covariance of the whole cloud; what the filter's own decisions use.
@@ -227,14 +208,6 @@ class ParticleFilter {
   bool baro_ready_ = false;  ///< Particle altitude offsets have been initialised.
   double last_baro_update_t_ = -1e300;
   std::vector<double> level_weight_;
-
-  // Weight histogram for map_consistent_position; only touched cells are cleared.
-  static constexpr double kModeCellM = 2.0;
-  double mode_cell_m_ = kModeCellM;
-  int mode_nx_ = 1;
-  int mode_ny_ = 1;
-  std::vector<double> mode_weight_;
-  std::vector<std::size_t> mode_touched_;
 };
 
 }  // namespace ipe
