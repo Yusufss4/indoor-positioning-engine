@@ -96,7 +96,22 @@ td:first-child { text-transform: uppercase; letter-spacing: 0.08em; }
 #zoom2d button { min-width: 2.4em; padding: 3px 8px; }
 .toggle button.active { background: var(--ink); color: var(--paper); border-color: var(--ink); }
 
-.view { display: flex; flex-direction: column; gap: 4px; }
+.view { display: flex; flex-direction: column; gap: 4px; position: relative; }
+
+/* Details of a clicked map item, placed next to the click. */
+.info {
+  position: absolute; z-index: 5; width: 280px; max-width: calc(100% - 8px);
+  background: var(--sheet); border: 1px solid var(--ink); box-shadow: 0 4px 14px rgba(29, 78, 137, 0.18);
+}
+.info-head {
+  display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 4px 4px 4px 8px;
+  font-weight: 600; letter-spacing: 0.06em; color: var(--ink); border-bottom: 1px solid var(--rule-faint);
+}
+.info-head button { border: none; padding: 0 6px; font-size: 1.1rem; line-height: 1; }
+.info table { border: none; font-size: 0.8rem; }
+.info th, .info td { border: none; border-bottom: 1px solid var(--rule-faint); padding: 2px 8px; }
+.info th { text-align: left; font-variant-caps: normal; letter-spacing: 0; font-weight: 500; color: var(--muted); }
+.info td { text-align: right; text-transform: none; letter-spacing: 0; }
 
 .timeline { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; width: 1000px; max-width: 100%; }
 .timeline button { padding: 4px 8px; line-height: 0; }

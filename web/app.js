@@ -12,6 +12,8 @@ const MAX_RECORDED_PARTICLES = 1000;
 const COMPUTE_BUDGET_MS = 25; // engine time per animation frame when running ahead
 const TRAIL_START_S = 3;
 const PING_S = 0.6;
+const TRAIL_STEP_3D = 0.4; // metres between trail points in 3D
+const INFO_REFRESH_MS = 200;
 
 const icon = (shapes) => `<svg viewBox="0 0 12 12" aria-hidden="true">${shapes}</svg>`;
 const ICONS = {
@@ -48,6 +50,8 @@ let background = null; // floor plan image of a recording
 let waypoints = []; // [t, x, y] surveyor waypoints of a recording
 let zoom = { k: 1, x: 0, y: 0 }; // 2D view: canvas px = k * fitted px + (x, y)
 let roomLog = []; // room enter/exit events recorded so far, oldest first
+let selected = null; // clicked map item {kind, id}, shown in the info card
+let infoRefresh = 0;
 let lastFix = {}; // last valid estimate per filter, to break its trail where it jumps a wall
 let roomLogKey = null; // what the rooms panel currently shows
 
@@ -118,11 +122,10 @@ async function startSimulated(name) {
   geojsonUrl = new URL(venueUrl.href.replace(/\/venues\/([^/]+)\.json$/, "/geojson/$1.geojson"));
   background = null;
   waypoints = [];
-  el("description").textContent =
-    (scenario.description || "") +
-    (scenario.demo_config ? ` The particle filter uses ${scenario.demo_config.replace(/^(\.\.\/)+/, "data/")}.` : "");
+  // The real-building tour explains itself on the map; the synthetic scenarios name the effect they inject.
+  el("description").textContent = scenario.demo_config ? "" : scenario.description || "";
   if (demo) demo.delete();
-  demo = new Module.Demo(venueText, scenarioText, Number(el("seed").value) >>> 0, configText);
+  demo = new Module.Demo(venueText, scenarioText, 1, configText);
 }
 
 async function startRecording(entry) {
@@ -148,8 +151,8 @@ async function start() {
   real = name.startsWith("real:") ? realDemos.get(name.slice(5)) : null;
   if (real) await startRecording(real);
   else await startSimulated(name);
-  el("seed").disabled = !!real;
   recorded = [];
+  closeInfo();
   roomLog = [];
   lastFix = {};
   roomLogKey = null;
@@ -204,7 +207,7 @@ function record() {
     truth: demo.truth(),
     est,
     rooms,
-    ble: demo.recentBle().map((b) => b.id),
+    ble: demo.recentBle(), // [{id, rssi}]
     particles: k % PARTICLE_EVERY === 0 ? sampleParticles(demo.particles()) : recorded[k - 1].particles,
   });
   roomLog.push(...demo.roomEvents());
@@ -427,7 +430,7 @@ function recentPings(idx) {
   const pings = new Map();
   const now = recorded[idx].t;
   for (let k = idx; k >= 0 && now - recorded[k].t < PING_S; --k) {
-    for (const id of recorded[k].ble) if (!pings.has(id)) pings.set(id, recorded[k].t);
+    for (const { id } of recorded[k].ble) if (!pings.has(id)) pings.set(id, recorded[k].t);
   }
   return pings;
 }
@@ -510,14 +513,16 @@ function draw(level, idx) {
     }
   }
 
-  drawPath(idx, (h) => h.truth, T, COLORS.truth, 2, level);
+  const trails = el("show-trails").checked;
+  if (trails) drawPath(idx, (h) => h.truth, T, COLORS.truth, 2, level);
   ctx.fillStyle = COLORS.truth;
   for (const [t, x, y] of waypoints) {
     if (t > now) break;
     ctx.fillRect(T.toX(x) - 4, T.toY(y) - 4, 8, 8);
   }
   for (const f of visibleFilters()) {
-    drawPath(idx, (h) => (h.t > TRAIL_START_S && h.est[f].valid ? h.est[f] : null), T, COLORS[f], 1.3, level);
+    const fix = (h) => (h.t > TRAIL_START_S && h.est[f].valid ? h.est[f] : null);
+    if (trails) drawPath(idx, fix, T, COLORS[f], 1.3, level);
     const e = fr.est[f];
     if (!e.valid) continue;
     // An estimate on another floor is drawn dashed: you see the miss, not a phantom on this floor.
@@ -554,11 +559,39 @@ function updateStats(fr) {
   }).join("");
 }
 
-function currentFrame(fr, level) {
+/// Trail through recorded[0..last] as runs of points on one level, thinned to TRAIL_STEP_3D; a run ends where
+/// at() is null, the level changes or the point is marked as a jump.
+function trailRuns(last, at) {
+  const runs = [];
+  let run = null;
+  for (let k = 0; k <= last; ++k) {
+    const p = at(recorded[k]);
+    if (!p || !run || p.level !== run.level || p.jump) {
+      run = p ? { level: p.level, pts: [[p.x, p.y]] } : null;
+      if (run) runs.push(run);
+      continue;
+    }
+    const [lx, ly] = run.pts[run.pts.length - 1];
+    if (Math.hypot(p.x - lx, p.y - ly) >= TRAIL_STEP_3D || k === last) run.pts.push([p.x, p.y]);
+  }
+  return runs;
+}
+
+function currentFrame(fr, level, idx) {
+  const filters = visibleFilters();
+  const trails = el("show-trails").checked;
   return {
     t: fr.t,
     truth: fr.truth,
-    estimates: visibleFilters().map((f) => ({ name: f, color: COLORS[f], e: fr.est[f] })),
+    estimates: filters.map((f) => ({ name: f, color: COLORS[f], e: fr.est[f] })),
+    trailKey: trails ? `${idx}|${filters}` : "off",
+    trails: () => !trails ? [] : [
+      { color: COLORS.truth, width: 0.4, runs: trailRuns(idx, (h) => h.truth) },
+      ...filters.map((f) => ({
+        color: COLORS[f], width: 0.3,
+        runs: trailRuns(idx, (h) => (h.t > TRAIL_START_S && h.est[f].valid ? h.est[f] : null)),
+      })),
+    ],
     particles: el("show-particles").checked ? fr.particles : null,
     rooms: el("show-pf").checked ? fr.rooms.pf.map((i) => venue.rooms[i].id) : [],
     focusLevel: level,
@@ -583,8 +616,12 @@ function tick(ts) {
     const fr = recorded[idx];
     const level = shownLevel(fr);
     if (view === "2d") draw(level, idx);
-    if (view === "3d" && map3d) map3d.update(currentFrame(fr, level));
+    if (view === "3d" && map3d) map3d.update(currentFrame(fr, level, idx));
     updateStats(fr);
+    if (selected && ts - infoRefresh > INFO_REFRESH_MS) {
+      infoRefresh = ts;
+      renderInfo(idx);
+    }
     renderRoomLog(fr);
     updateTimeline(fr);
   }
@@ -629,6 +666,10 @@ async function show3d() {
     status.textContent = "loading 3D view...";
     if (!map3dReady) {
       const m = new Map3D(el("map3d"));
+      m.onPick = (pick, point) => {
+        const r = el("map3d").getBoundingClientRect();
+        openInfo(pick, r.left + point.x, r.top + point.y);
+      };
       map3dReady = m.init().then(() => {
         m.exploded = Number(el("exploded").value);
         m.follow = el("follow").checked;
@@ -654,6 +695,7 @@ async function show3d() {
 
 function setView(v) {
   view = v;
+  closeInfo();
   el("map").hidden = v !== "2d";
   el("map3d").hidden = v !== "3d";
   el("controls3d").hidden = v !== "3d";
@@ -717,8 +759,10 @@ canvas.addEventListener("wheel", (ev) => {
 }, { passive: false });
 canvas.addEventListener("dblclick", () => (zoom = { k: 1, x: 0, y: 0 }));
 let drag = null;
+let dragMoved = 0;
 canvas.addEventListener("pointerdown", (ev) => {
   drag = canvasPoint(ev);
+  dragMoved = 0;
   canvas.setPointerCapture(ev.pointerId);
   canvas.classList.add("dragging");
 });
@@ -726,13 +770,19 @@ canvas.addEventListener("pointermove", (ev) => {
   if (!drag) return;
   const [px, py] = canvasPoint(ev);
   zoom = { ...zoom, x: zoom.x + px - drag[0], y: zoom.y + py - drag[1] };
+  dragMoved += Math.hypot(px - drag[0], py - drag[1]);
   drag = [px, py];
 });
 const endDrag = () => {
   drag = null;
   canvas.classList.remove("dragging");
 };
-canvas.addEventListener("pointerup", endDrag);
+canvas.addEventListener("pointerup", (ev) => {
+  const click = drag && dragMoved < 4;
+  endDrag();
+  if (click && recorded.length) openInfo(pick2d(...canvasPoint(ev)), ev.clientX, ev.clientY);
+});
+el("info-close").addEventListener("click", closeInfo);
 canvas.addEventListener("pointercancel", endDrag);
 el("view2d").addEventListener("click", () => setView("2d"));
 el("view3d").addEventListener("click", async () => {
@@ -742,6 +792,172 @@ el("view3d").addEventListener("click", async () => {
 el("exploded").addEventListener("input", () => map3d && map3d.setExploded(Number(el("exploded").value)));
 el("follow").addEventListener("change", () => map3d && (map3d.follow = el("follow").checked));
 el("underlay").addEventListener("change", () => map3d && map3d.setUnderlay(el("underlay").checked));
+
+// ---- Clicking map items: beacons, rooms, stairs and lifts, the walker and the estimate ----
+
+function pointInPolygon(px, py, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i];
+    const [xj, yj] = poly[j];
+    if ((yi > py) !== (yj > py) && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+function polygonArea(poly) {
+  let a = 0;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) a += poly[j][0] * poly[i][1] - poly[i][0] * poly[j][1];
+  return Math.abs(a) / 2;
+}
+
+/// The map item under canvas point (px, py) in the 2D view, or null.
+function pick2d(px, py) {
+  const fr = recorded[shownFrame()];
+  const level = shownLevel(fr);
+  const T = transform();
+  const near = (x, y, r) => Math.hypot(T.toX(x) - px, T.toY(y) - py) <= r;
+  if (fr.truth.level === level && near(fr.truth.x, fr.truth.y, 9)) return { kind: "truth" };
+  for (const f of visibleFilters()) {
+    const e = fr.est[f];
+    if (e.valid && e.level === level && near(e.x, e.y, 9)) return { kind: f };
+  }
+  const beacon = venue.beacons.find((b) => b.level === level && near(b.x, b.y, 9));
+  if (beacon) return { kind: "beacon", id: beacon.id };
+  const onScreen = (area) => area.map(([x, y]) => [T.toX(x), T.toY(y)]);
+  const conn = venue.connectors.find((c) => c.levels.includes(level) && pointInPolygon(px, py, onScreen(c.area)));
+  if (conn) return { kind: "connector", id: conn.id };
+  // Nested rooms: the smallest one under the cursor.
+  const rooms = venue.rooms.filter((r) => r.level === level && pointInPolygon(px, py, onScreen(r.area)));
+  rooms.sort((a, b) => polygonArea(a.area) - polygonArea(b.area));
+  return rooms.length ? { kind: "room", id: rooms[0].id } : null;
+}
+
+function openInfo(pick, clientX, clientY) {
+  if (!pick || pick.kind === "level") {
+    closeInfo();
+    return;
+  }
+  selected = pick;
+  const card = el("info");
+  card.hidden = false;
+  renderInfo(shownFrame());
+  // Next to the click, kept inside the view.
+  const box = card.parentElement.getBoundingClientRect();
+  const x = clientX - box.left + 14;
+  const y = clientY - box.top + 14;
+  card.style.left = `${Math.max(0, Math.min(x, box.width - card.offsetWidth - 4))}px`;
+  card.style.top = `${Math.max(0, Math.min(y, box.height - card.offsetHeight - 4))}px`;
+}
+
+function closeInfo() {
+  selected = null;
+  el("info").hidden = true;
+}
+
+const fmtM = (v) => `${v.toFixed(2)} m`;
+const levelName = (i) => (venue.levels[i] ? venue.levels[i].name : "-");
+
+/// Card rows for the beacon `b` as of frame idx: its model, and what the phone has heard from it so far.
+function beaconRows(b, idx) {
+  const fr = recorded[idx];
+  let count = 0;
+  let sum = 0;
+  let min = Infinity;
+  let max = -Infinity;
+  let last = null;
+  for (let k = 0; k <= idx; ++k) {
+    for (const m of recorded[k].ble) {
+      if (m.id !== b.id) continue;
+      ++count;
+      sum += m.rssi;
+      min = Math.min(min, m.rssi);
+      max = Math.max(max, m.rssi);
+      last = { t: recorded[k].t, rssi: m.rssi };
+    }
+  }
+  const t = fr.truth;
+  const d = Math.hypot(t.x - b.x, t.y - b.y);
+  const floors = Math.abs(t.level - b.level);
+  const rows = [
+    ["floor", levelName(b.level)],
+    ["position", `${b.x.toFixed(1)}, ${b.y.toFixed(1)} m`],
+  ];
+  if (b.tx_power !== undefined) rows.push(["tx power (1 m)", `${b.tx_power.toFixed(1)} dBm`]);
+  if (b.path_loss_exp !== undefined) rows.push(["path-loss exponent", b.path_loss_exp.toFixed(2)]);
+  rows.push(["walker distance", `${fmtM(d)}${floors ? `, ${floors} floor${floors > 1 ? "s" : ""} away` : ""}`]);
+  if (b.tx_power !== undefined && b.path_loss_exp !== undefined) {
+    const model = b.tx_power - 10 * b.path_loss_exp * Math.log10(Math.max(d, 1));
+    rows.push(["model RSSI there", `${model.toFixed(1)} dBm${floors ? " (before floor loss)" : ""}`]);
+  }
+  rows.push(["heard", `${count} time${count === 1 ? "" : "s"} so far`]);
+  if (count) {
+    rows.push(["last heard", `${last.t.toFixed(1)} s, ${last.rssi.toFixed(0)} dBm`]);
+    rows.push(["RSSI mean (min / max)", `${(sum / count).toFixed(1)} dBm (${min.toFixed(0)} / ${max.toFixed(0)})`]);
+  }
+  return rows;
+}
+
+function roomRows(r, i, fr) {
+  const visits = (f) => roomLog.slice(0, roomEventsUntil(fr.t)).filter((e) => e.filter === f && e.room === i &&
+    e.type === "enter").length;
+  const rows = [
+    ["floor", levelName(r.level)],
+    ["id", r.id],
+    ["area", `${polygonArea(r.area).toFixed(1)} m\u00b2`],
+    ["walker inside", fr.rooms.truth.includes(i) ? "yes" : "no"],
+    ["walker visits", String(visits("truth"))],
+  ];
+  for (const f of visibleFilters()) {
+    rows.push([`${f} inside`, fr.rooms[f].includes(i) ? "yes" : "no"], [`${f} visits`, String(visits(f))]);
+  }
+  return rows;
+}
+
+/// Fills the info card for `selected` as of frame idx.
+function renderInfo(idx) {
+  const fr = recorded[idx];
+  let title = "";
+  let rows = [];
+  const { kind, id } = selected;
+  if (kind === "beacon") {
+    const b = venue.beacons.find((x) => x.id === id);
+    if (!b) return closeInfo();
+    title = `${real ? "Access point" : "Beacon"} ${b.id}`;
+    rows = beaconRows(b, idx);
+  } else if (kind === "room") {
+    const i = venue.rooms.findIndex((r) => r.id === id);
+    if (i < 0) return closeInfo();
+    title = venue.rooms[i].name;
+    rows = roomRows(venue.rooms[i], i, fr);
+  } else if (kind === "connector") {
+    const c = venue.connectors.find((x) => x.id === id);
+    if (!c) return closeInfo();
+    title = c.kind === "elevator" ? "Lift" : c.kind === "escalator" ? "Escalator" : "Stairs";
+    rows = [["id", c.id], ["floors", c.levels.map(levelName).join(", ")]];
+  } else if (kind === "truth") {
+    const t = fr.truth;
+    title = "Walker (ground truth)";
+    rows = [["position", `${t.x.toFixed(2)}, ${t.y.toFixed(2)} m`], ["floor", levelName(t.level)],
+            ["steps", String(fr.steps)], ["time", `${fr.t.toFixed(1)} s`]];
+    const inRooms = fr.rooms.truth.map((i) => venue.rooms[i].name).join(", ");
+    if (venue.rooms.length) rows.push(["room", inRooms || "-"]);
+  } else if (FILTERS.includes(kind)) {
+    const e = fr.est[kind];
+    title = `${kind.toUpperCase()} estimate`;
+    if (!e.valid) rows = [["state", "no fix yet"]];
+    else {
+      rows = [["position", `${e.x.toFixed(2)}, ${e.y.toFixed(2)} m`], ["floor", levelName(e.level)],
+              ["sigma", fmtM(e.sigma)], ["error now", e.error < 0 ? "-" : fmtM(e.error)],
+              ["mean error", e.mean < 0 ? "-" : fmtM(e.mean)], ["CEP95", e.cep95 > 0 ? fmtM(e.cep95) : "-"]];
+      const inRooms = fr.rooms[kind].map((i) => venue.rooms[i].name).join(", ");
+      if (venue.rooms.length) rows.push(["room", inRooms || "-"]);
+    }
+  } else return closeInfo();
+  el("info-title").textContent = title;
+  el("info-body").innerHTML = rows.map(([k, v]) => `<tr><th>${escapeHtml(k)}</th><td>${escapeHtml(v)}</td></tr>`)
+    .join("");
+}
 
 createIpeModule().then(async (m) => {
   Module = m;
