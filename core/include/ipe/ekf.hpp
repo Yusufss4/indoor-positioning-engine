@@ -25,12 +25,17 @@ struct EkfConfig {
   int init_min_beacons = 3;         ///< Distinct beacons needed before initialising.
   double init_window_s = 2.0;
   int reinit_after_rejections = 25;  ///< Consecutive gated RSSI before re-initialising.
+  /// Report a position that follows the mean without crossing walls (see
+  /// MapFollower); the filter itself is unchanged.
+  bool wall_constraint = false;
+  double wall_escape_s = 3.0;  ///< How long the mean may stay behind a wall before the estimate jumps to it [s].
 };
 
 /// Extended Kalman filter on the state [x, y, heading]. Steps drive the
 /// prediction; magnetometer heading and per-beacon RSSI are scalar updates.
-/// It has no notion of walls: it is the map-free baseline the particle
-/// filter is compared against.
+/// The filter has no notion of walls: it is the map-free baseline the particle
+/// filter is compared against. With `wall_constraint` only the reported
+/// position is held to the map; the covariance is widened by the offset.
 ///
 /// In multi-level venues the level is not part of the Gaussian state. It is
 /// voted from the strongest beacons at (re)initialisation, which also anchors
@@ -54,6 +59,7 @@ class Ekf final : public Filter {
   [[nodiscard]] const std::array<double, 3>& state() const { return x_; }
   [[nodiscard]] const Mat3& covariance() const { return P_; }
   [[nodiscard]] std::uint64_t rejected_updates() const { return rejected_total_; }
+  [[nodiscard]] const MapFollower& map_follower() const { return follower_; }
 
  private:
   struct Pending {
@@ -65,6 +71,10 @@ class Ekf final : public Filter {
   void try_initialize(double t);
   /// Scalar measurement update with Jacobian H. Returns false if gated.
   bool scalar_update(const std::array<double, 3>& H, double innovation, double R, double gate_chi2);
+  /// Moves the reported position after the mean changed (wall_constraint only).
+  void follow(double t) {
+    if (cfg_.wall_constraint && initialized_) follower_.follow(t, {x_[0], x_[1]}, level_);
+  }
 
   const Venue* venue_;
   EkfConfig cfg_;
@@ -84,6 +94,7 @@ class Ekf final : public Filter {
   int level_ = 0;
   bool baro_anchored_ = false;
   double baro_anchor_m_ = 0.0;  ///< Floor elevation minus relative altitude at the anchor.
+  MapFollower follower_;
 };
 
 }  // namespace ipe

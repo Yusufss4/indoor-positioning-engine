@@ -48,6 +48,7 @@ let background = null; // floor plan image of a recording
 let waypoints = []; // [t, x, y] surveyor waypoints of a recording
 let zoom = { k: 1, x: 0, y: 0 }; // 2D view: canvas px = k * fitted px + (x, y)
 let roomLog = []; // room enter/exit events recorded so far, oldest first
+let lastFix = {}; // last valid estimate per filter, to break its trail where it jumps a wall
 let roomLogKey = null; // what the rooms panel currently shows
 
 const REAL_BASE = new URL("data/real/", window.location.href);
@@ -150,6 +151,7 @@ async function start() {
   el("seed").disabled = !!real;
   recorded = [];
   roomLog = [];
+  lastFix = {};
   roomLogKey = null;
   viewT = 0;
   lastFrame = null;
@@ -188,7 +190,12 @@ function record() {
   const est = {};
   const rooms = { truth: demo.currentRooms("truth") };
   for (const f of FILTERS) {
-    est[f] = demo.estimate(f);
+    const e = demo.estimate(f);
+    const prev = lastFix[f];
+    // A jump through a wall (a mode switch, a re-initialisation) leaves a gap in the trail, not a line through it.
+    e.jump = !!(e.valid && prev && prev.level === e.level && crossesWall(prev, e, e.level));
+    if (e.valid) lastFix[f] = e;
+    est[f] = e;
     rooms[f] = demo.currentRooms(f);
   }
   recorded.push({
@@ -257,6 +264,34 @@ function canvasPoint(ev) {
 
 /// Draws the trail through recorded[0..last] that lies on `level`; `at(frame)` gives the {x, y, level} point
 /// of a frame or null for a gap.
+/// Same rule as the engine's segments_intersect: touching counts.
+function segmentsIntersect(p1x, p1y, p2x, p2y, q1x, q1y, q2x, q2y) {
+  const orient = (ax, ay, bx, by, cx, cy) => {
+    const v = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+    return v > 1e-12 ? 1 : v < -1e-12 ? -1 : 0;
+  };
+  const within = (ax, ay, bx, by, px, py) =>
+    Math.min(ax, bx) <= px && px <= Math.max(ax, bx) && Math.min(ay, by) <= py && py <= Math.max(ay, by);
+  const o1 = orient(p1x, p1y, p2x, p2y, q1x, q1y);
+  const o2 = orient(p1x, p1y, p2x, p2y, q2x, q2y);
+  const o3 = orient(q1x, q1y, q2x, q2y, p1x, p1y);
+  const o4 = orient(q1x, q1y, q2x, q2y, p2x, p2y);
+  if (o1 !== o2 && o3 !== o4) return true;
+  return (
+    (o1 === 0 && within(p1x, p1y, p2x, p2y, q1x, q1y)) ||
+    (o2 === 0 && within(p1x, p1y, p2x, p2y, q2x, q2y)) ||
+    (o3 === 0 && within(q1x, q1y, q2x, q2y, p1x, p1y)) ||
+    (o4 === 0 && within(q1x, q1y, q2x, q2y, p2x, p2y))
+  );
+}
+
+function crossesWall(a, b, level) {
+  const walls = venue.levels[level]?.walls || [];
+  return walls.some(([ax, ay, bx, by]) => segmentsIntersect(a.x, a.y, b.x, b.y, ax, ay, bx, by));
+}
+
+/// Polyline through at(frame) for the frames up to `last` on `level`; the pen lifts where at() is null,
+/// on another level, or marked as a jump.
 function drawPath(last, at, T, color, width, level) {
   ctx.strokeStyle = color;
   ctx.lineWidth = width;
@@ -268,7 +303,7 @@ function drawPath(last, at, T, color, width, level) {
       pen = false;
       continue;
     }
-    if (pen) ctx.lineTo(T.toX(p.x), T.toY(p.y));
+    if (pen && !p.jump) ctx.lineTo(T.toX(p.x), T.toY(p.y));
     else ctx.moveTo(T.toX(p.x), T.toY(p.y));
     pen = true;
   }

@@ -19,17 +19,19 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(RssiModelConfig, sigma_db, outli
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(BaroConfig, lowpass_tau_s, sea_level_hpa)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
     ParticleFilterConfig, num_particles, seed, step_length_sigma, step_scale_sigma, step_scale_walk, heading_sigma_deg,
-    heading_outlier_prob, wall_constraint, estimate_rssi_offset, rssi_offset_sigma, rssi_offset_walk, beacon_integrity,
-    integrity_threshold_db, integrity_alpha, integrity_min_samples, integrity_max_sigma_m, resample_ess_ratio,
-    roughening_m, recovery, recovery_alpha_slow, recovery_alpha_fast, recovery_max_fraction, init_proposal,
-    init_proposal_fraction, init_window_s, recovery_proposal, proposal_history, proposal_max_age_s, proposal_level_jump,
-    proposal_ring_scale, scan_tempering, level_change_prob_step, level_change_prob_baro, use_barometer,
-    baro_update_interval_s, baro_sigma_m, baro_outlier_prob, baro_offset_sigma_m, baro_offset_walk_m)
+    heading_outlier_prob, wall_constraint, map_consistent_estimate, estimate_rssi_offset, rssi_offset_sigma,
+    rssi_offset_walk, beacon_integrity, integrity_threshold_db, integrity_alpha, integrity_min_samples,
+    integrity_max_sigma_m, resample_ess_ratio, roughening_m, recovery, recovery_alpha_slow, recovery_alpha_fast,
+    recovery_max_fraction, init_proposal, init_proposal_fraction, init_window_s, recovery_proposal, proposal_history,
+    proposal_max_age_s, proposal_level_jump, proposal_ring_scale, scan_tempering, level_change_prob_step,
+    level_change_prob_baro, use_barometer, baro_update_interval_s, baro_sigma_m, baro_outlier_prob, baro_offset_sigma_m,
+    baro_offset_walk_m)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(EkfConfig, step_length_sigma_rel, step_length_sigma_abs,
                                                 heading_sigma_deg, init_pos_sigma, init_heading_sigma_deg, rssi_min_dbm,
                                                 rssi_gate_chi2, heading_gate_chi2, init_min_beacons, init_window_s,
-                                                reinit_after_rejections)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(WclConfig, window_s, top_k, weight_exponent)
+                                                reinit_after_rejections, wall_constraint, wall_escape_s)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(WclConfig, window_s, top_k, weight_exponent, wall_constraint,
+                                                wall_escape_s)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(RoomEventConfig, enter_prob, exit_prob, enter_dwell_s, exit_dwell_s,
                                                 update_period_s)
 
@@ -83,16 +85,23 @@ EngineConfig preset_config(std::string_view preset) {
     cfg.pf.beacon_integrity = false;
   } else if (preset == "ekf") {
     cfg.filter = FilterKind::Ekf;
+  } else if (preset == "ekf-map") {
+    cfg.filter = FilterKind::Ekf;
+    cfg.ekf.wall_constraint = true;
   } else if (preset == "wcl") {
     cfg.filter = FilterKind::WeightedCentroid;
+  } else if (preset == "wcl-map") {
+    cfg.filter = FilterKind::WeightedCentroid;
+    cfg.wcl.wall_constraint = true;
   } else {
-    throw std::invalid_argument("unknown preset '" + std::string(preset) + "' (expected pf, pf-nomap, ekf or wcl)");
+    throw std::invalid_argument("unknown preset '" + std::string(preset) +
+                                "' (expected pf, pf-nomap, ekf, ekf-map, wcl or wcl-map)");
   }
   return cfg;
 }
 
 const std::vector<std::string>& preset_names() {
-  static const std::vector<std::string> names = {"pf", "pf-nomap", "ekf", "wcl"};
+  static const std::vector<std::string> names = {"pf", "pf-nomap", "ekf", "ekf-map", "wcl", "wcl-map"};
   return names;
 }
 

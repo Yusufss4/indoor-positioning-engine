@@ -17,7 +17,7 @@ Runs a trace through the positioning engine and prints accuracy metrics as
 JSON. With --scenario the trace is simulated in memory first.
 
 options:
-  --filter NAME          pf (default), pf-nomap, ekf, wcl
+  --filter NAME          pf (default), pf-nomap, ekf, ekf-map, wcl, wcl-map
   --config FILE          JSON merge patch applied to the preset config
   --set JSON             inline JSON merge patch, e.g. '{"pf":{"num_particles":500}}'
   --warmup SECONDS       exclude the first seconds from error stats (default 5)

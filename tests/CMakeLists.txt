@@ -20,7 +20,8 @@ add_executable(ipe_tests
   test_rssi_model.cpp
   test_simulator.cpp
   test_trace.cpp
-  test_venue.cpp)
+  test_venue.cpp
+  test_wcl.cpp)
 target_link_libraries(ipe_tests PRIVATE ipe_eval ipe_geo GTest::gtest_main)
 target_compile_definitions(ipe_tests PRIVATE IPE_DATA_DIR="${PROJECT_SOURCE_DIR}/data")
 

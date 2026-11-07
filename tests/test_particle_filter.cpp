@@ -120,6 +120,70 @@ TEST(ParticleFilter, WallConstraintRemovesParticlesThatCrossWalls) {
   }
 }
 
+namespace {
+
+/// 20 x 10 m split by a solid wall at x = 10, with one beacon on the wall.
+Venue split_venue() {
+  return parse_venue(R"({
+    "name": "split",
+    "bounds": [0, 0, 20, 10],
+    "walls": [[0,0,20,0],[20,0,20,10],[20,10,0,10],[0,10,0,0],[10,0,10,10]],
+    "beacons": [{"id": "M", "x": 10, "y": 5}]
+  })");
+}
+
+/// A ring of particles around the beacon, half on each side of the wall: its mean is on the wall.
+void feed_split_cloud(ParticleFilter& pf, const Venue& v) {
+  const RssiModel model(v);
+  const double rssi = model.expected_rssi(v.beacons()[0], {7.0, 5.0});
+  for (int k = 0; k < 30; ++k) pf.on_rssi(0.1 * k, 0, rssi);
+}
+
+}  // namespace
+
+TEST(ParticleFilter, SplitCloudMeanLiesOnTheWallWithoutTheOption) {
+  const Venue v = split_venue();
+  auto cfg = test_config();
+  cfg.map_consistent_estimate = false;
+  ParticleFilter pf(v, cfg, {});
+  feed_split_cloud(pf, v);
+  ASSERT_TRUE(pf.estimate().valid);
+  EXPECT_LT(std::abs(pf.estimate().pos.x - 10.0), 1.0);
+}
+
+TEST(ParticleFilter, SplitCloudEstimateStaysOffTheWall) {
+  const Venue v = split_venue();
+  ParticleFilter pf(v, test_config(), {});
+  feed_split_cloud(pf, v);
+  const auto est = pf.estimate();
+  ASSERT_TRUE(est.valid);
+  EXPECT_GT(std::abs(est.pos.x - 10.0), 0.05);
+  EXPECT_TRUE(v.inside(est.pos));
+  // On the side of the wall that holds particles, in sight of them.
+  const bool west = est.pos.x < 10.0;
+  double same_side = 0.0;
+  for (const auto& p : pf.particles()) {
+    if ((p.pos.x < 10.0) == west && !v.crosses_wall(est.pos, p.pos)) same_side += p.weight;
+  }
+  EXPECT_GT(same_side, 0.3);
+  // Taken about the reported point, the covariance still reaches the other half of the ring.
+  EXPECT_GT(std::sqrt(est.cov_xx), 2.0);
+}
+
+TEST(ParticleFilter, MapConsistentEstimateIsTheMeanForOneGroup) {
+  const Venue v = test::two_room_venue();
+  auto on = test_config();
+  auto off = test_config();
+  off.map_consistent_estimate = false;
+  ParticleFilter a(v, on, {});
+  ParticleFilter b(v, off, {});
+  feed_rssi(a, v, {5.0, 5.0}, 60);
+  feed_rssi(b, v, {5.0, 5.0}, 60);
+  EXPECT_DOUBLE_EQ(a.estimate().pos.x, b.estimate().pos.x);
+  EXPECT_DOUBLE_EQ(a.estimate().pos.y, b.estimate().pos.y);
+  EXPECT_DOUBLE_EQ(a.estimate().cov_xx, b.estimate().cov_xx);
+}
+
 TEST(ParticleFilter, RecoversWhenEveryParticleIsInvalidated) {
   const Venue v = test::two_room_venue();
   ParticleFilter pf(v, test_config(), {});

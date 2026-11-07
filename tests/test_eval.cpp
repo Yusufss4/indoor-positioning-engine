@@ -177,6 +177,11 @@ TEST(Eval, PresetsDiffer) {
   EXPECT_FALSE(preset_config("pf-nomap").pf.wall_constraint);
   EXPECT_FALSE(preset_config("pf-nomap").rssi.wall_aware);
   EXPECT_EQ(preset_config("ekf").filter, FilterKind::Ekf);
+  EXPECT_FALSE(preset_config("ekf").ekf.wall_constraint);
+  EXPECT_TRUE(preset_config("ekf-map").ekf.wall_constraint);
+  EXPECT_FALSE(preset_config("wcl").wcl.wall_constraint);
+  EXPECT_TRUE(preset_config("wcl-map").wcl.wall_constraint);
+  EXPECT_TRUE(preset_config("pf").pf.map_consistent_estimate);
   EXPECT_THROW(preset_config("kalman"), std::invalid_argument);
 }
 

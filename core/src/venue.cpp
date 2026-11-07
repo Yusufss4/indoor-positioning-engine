@@ -272,6 +272,74 @@ bool Venue::crosses_wall(Vec2 a, Vec2 b, int level) const {
   return hit;
 }
 
+Vec2 Venue::clip_move(Vec2 from, Vec2 to, int level, bool slide) const {
+  constexpr double kMargin = 0.05;  // Distance kept from a wall that stopped the move [m].
+  constexpr int kBisections = 12;
+
+  Vec2 end = to;
+  if (inside(from) && !inside(end)) {
+    // The footprint is a polygon, not a wall list: bisect to its edge.
+    double lo = 0.0, hi = 1.0;
+    for (int i = 0; i < kBisections; ++i) {
+      const double mid = 0.5 * (lo + hi);
+      (inside(from + (to - from) * mid) ? lo : hi) = mid;
+    }
+    end = from + (to - from) * lo;
+    slide = false;
+  }
+
+  const Vec2 d = end - from;
+  const double len = d.norm();
+  if (len <= 0.0) return from;
+  double first = 2.0;
+  const Segment* hit = nullptr;
+  for_each_candidate_wall(from, end, level, [&](const Segment& w) {
+    const double t = segment_intersection_param(from, end, w.a, w.b);
+    // A start exactly on a wall (a fix that was never clipped) must not freeze the move.
+    if (t >= 0.0 && t * len > 1e-9 && t < first) {
+      first = t;
+      hit = &w;
+    }
+    return true;
+  });
+  if (!hit) return end;
+
+  const Vec2 stop = from + d * std::max(0.0, first - kMargin / len);
+  if (!slide) return stop;
+  const Vec2 along = hit->b - hit->a;
+  const double along2 = along.norm2();
+  if (along2 <= 0.0) return stop;
+  const Vec2 rest = end - stop;
+  const Vec2 slid = stop + along * (dot(rest, along) / along2);
+  if (!inside(slid) || crosses_wall(stop, slid, level)) return stop;
+  return slid;
+}
+
+Vec2 MapFollower::follow(double t, Vec2 target, int level) {
+  if (!valid_ || level != level_) {
+    pos_ = target;
+    level_ = level;
+    valid_ = true;
+    blocked_since_ = -1.0;
+    return pos_;
+  }
+  const Vec2 next = venue_->clip_move(pos_, target, level, true);
+  if (next.x == target.x && next.y == target.y) {
+    blocked_since_ = -1.0;
+  } else {
+    if (blocked_since_ < 0.0) blocked_since_ = t;
+    if (t - blocked_since_ >= escape_s_) {
+      ++escapes_;
+      blocked_since_ = -1.0;
+      pos_ = target;
+      return pos_;
+    }
+    ++held_;
+  }
+  pos_ = next;
+  return pos_;
+}
+
 int Venue::count_wall_crossings(Vec2 a, Vec2 b, int level) const {
   int n = 0;
   for_each_candidate_wall(a, b, level, [&](const Segment& w) {

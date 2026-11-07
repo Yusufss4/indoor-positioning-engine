@@ -23,6 +23,10 @@ struct ParticleFilterConfig {
   double heading_outlier_prob = 0.15;  ///< Magnetic disturbances are frequent indoors.
 
   bool wall_constraint = true;  ///< Kill particles whose step crosses a wall.
+  /// The cloud mean can fall where no particle can be (on a wall, in an empty
+  /// shop between two groups). Report the dominant group's mean instead then;
+  /// the covariance still covers the whole cloud.
+  bool map_consistent_estimate = true;
 
   bool estimate_rssi_offset = true;  ///< Track a per-device RSSI bias as a state.
   double rssi_offset_sigma = 8.0;    ///< Prior spread of the device RSSI offset [dB].
@@ -185,6 +189,10 @@ class ParticleFilter final : public Filter {
   void normalize_or_recover();
   void resample_if_needed();
   void update_estimate(double t);
+  /// `mean` if it is on the map next to a particle on `level`, else the mean of
+  /// the heaviest group of particles (see `map_consistent_estimate`).
+  [[nodiscard]] Vec2 map_consistent_position(Vec2 mean, int level);
+  [[nodiscard]] std::size_t mode_cell(Vec2 p) const;
 
   const Venue* venue_;
   ParticleFilterConfig cfg_;
@@ -196,7 +204,8 @@ class ParticleFilter final : public Filter {
   std::vector<RssiReading> scan_;  ///< Readings of the current scan that passed the integrity check.
   std::vector<BeaconHealth> health_;
   double mean_rssi_offset_ = 0.0;
-  Estimate estimate_;
+  Estimate estimate_;  ///< What is reported: the cloud mean, or its dominant mode (map_consistent_estimate).
+  Estimate cloud_;     ///< Mean and covariance of the whole cloud; what the filter's own decisions use.
 
   double w_slow_ = 0.0;
   double w_fast_ = 0.0;
@@ -218,6 +227,14 @@ class ParticleFilter final : public Filter {
   bool baro_ready_ = false;  ///< Particle altitude offsets have been initialised.
   double last_baro_update_t_ = -1e300;
   std::vector<double> level_weight_;
+
+  // Weight histogram for map_consistent_position; only touched cells are cleared.
+  static constexpr double kModeCellM = 2.0;
+  double mode_cell_m_ = kModeCellM;
+  int mode_nx_ = 1;
+  int mode_ny_ = 1;
+  std::vector<double> mode_weight_;
+  std::vector<std::size_t> mode_touched_;
 };
 
 }  // namespace ipe

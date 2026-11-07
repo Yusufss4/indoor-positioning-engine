@@ -62,6 +62,11 @@ bool segments_intersect(Vec2 p1, Vec2 p2, Vec2 q1, Vec2 q2);
 
 inline bool segments_intersect(const Segment& s, const Segment& t) { return segments_intersect(s.a, s.b, t.a, t.b); }
 
+/// Fraction t in [0, 1] along p1-p2 of the first point it shares with q1-q2,
+/// or a negative value if they do not meet. For collinear overlaps it is the
+/// start of the overlap.
+double segment_intersection_param(Vec2 p1, Vec2 p2, Vec2 q1, Vec2 q2);
+
 /// Simple polygon as a vertex ring; the closing edge back to the first vertex is implicit.
 using Polygon = std::vector<Vec2>;
 

@@ -148,6 +148,70 @@ the default filter is bit-identical (unit test `ProposalSettingsAreInertWhenDisa
 the init proposal for large open venues:
 `ipe-replay --config data/configs/open_venue.json ...`.
 
+## 6. Estimates that go through walls
+
+**Symptom.** In the web demo the dots slide into and through walls, mostly on the mall walks.
+
+**Cause.** No particle crosses a wall: 1.3 M particle steps on two mall walks were checked with
+`crosses_wall(before, after)`, and none did. The particle filter's dot is the weighted mean of the
+cloud, though. When the cloud is split across a wall (corridor and shop, two corridors), the mean lands
+between the groups: on the wall, in an empty shop, or behind a wall from every particle. On the ten
+`data/real` demo walks (shop walls), 1,705 of 64,776 PF estimates were outside the walkable area or
+separated by a wall from their nearest particle. The EKF and weighted centroid ignore the map entirely.
+
+**Change.** The PF reports the mean of its dominant group when the cloud mean is not on the map
+(`pf.map_consistent_estimate`, on by default). The EKF and WCL can hold their reported position to the
+map with a `MapFollower` (`wall_constraint`, presets `ekf-map` and `wcl-map`, off by default). All
+three only change what is reported; the filters evolve as before. The web demo leaves a gap in a trail
+where two consecutive estimates are separated by a wall.
+
+An earlier version clipped the EKF state itself at walls. It collapsed (`office_nominal` CEP50 0.95 to
+12.7 m, `kit_tour` 1.41 to 33.9 m): the mean got pinned against a wall next to the door the walker
+used, and the escape timer reset whenever an update happened not to need clipping.
+
+**Results.** CEP50 / CEP95 [m]. Simulated: 10 seeds per scenario. Real: `ipe-regress --traces`
+with `msil_wifi.json`, median over walks. PF "before" is the code before the change, and is
+bit-identical to `map_consistent_estimate=false`.
+
+| Data | pf before | pf | ekf | ekf-map | wcl | wcl-map |
+|---|---:|---:|---:|---:|---:|---:|
+| office_nominal | 0.66 / 1.59 | 0.66 / 1.59 | 0.95 / 4.13 | 0.96 / 4.25 | 2.32 / 4.88 | 2.32 / 4.85 |
+| office_field_issue | 0.72 / 2.00 | 0.72 / 1.98 | 2.85 / 5.75 | 2.87 / 5.82 | 2.99 / 12.95 | 3.05 / 12.85 |
+| office_mag_disturbance | 1.09 / 2.63 | 1.09 / 2.60 | 1.60 / 3.85 | 1.64 / 4.43 | 2.28 / 4.93 | 2.29 / 4.99 |
+| airport_hall_sparse | 1.30 / 7.25 | 1.30 / 7.25 | 1.60 / 10.47 | 1.61 / 10.49 | 4.73 / 12.85 | 4.74 / 12.83 |
+| kit_tour | 2.27 / 11.10 | 2.28 / 11.02 | 1.41 / 5.33 | 1.45 / 5.60 | 2.74 / 7.26 | 2.81 / 7.36 |
+| MSIL holdout, floor outline (109 walks) | 11.79 / 15.25 | 11.79 / 15.43 | 12.23 / 15.16 | 12.22 / 15.17 | 10.70 / 16.27 | 10.70 / 16.27 |
+| MSIL holdout, shop walls (demo maps) | 12.23 / 17.28 | 12.20 / 17.45 | 12.23 / 15.16 | 12.14 / 15.27 | 10.70 / 16.27 | 11.18 / 17.55 |
+| MSIL tune, shop walls | 11.45 / 15.83 | 11.36 / 16.38 | 16.06 / 18.36 | 15.79 / 18.67 | 11.83 / 16.40 | 12.72 / 18.64 |
+
+The other seven simulated scenarios behave the same way: `pf` is unchanged to within 0.01 m, and
+`ekf-map` and `wcl-map` are 0-3% worse at CEP50 and 1-15% worse at CEP95.
+
+Estimates on the ten demo walks (shop walls), as reported to the demo:
+
+| | pf before | pf | ekf | ekf-map | wcl | wcl-map |
+|---|---:|---:|---:|---:|---:|---:|
+| Moves through a wall | 4.8% | 3.6% | 8.3% | 4.2% | 28.5% | 18.5% |
+| PF estimate off the map | 1,705 | 0 | - | - | - | - |
+
+The remaining moves through a wall are jumps: the PF switching groups, and the followers escaping after
+3 s. The demo draws them as gaps.
+
+**Findings.**
+
+- The PF change is neutral on accuracy. Simulated scenarios move by 0.01 m or less. On real data CEP50 is
+  unchanged and CEP95 rises by 1-3%. It fails the `real_data_regression` gate on one group: site2 F5,
+  CEP95 75.6 to 84.3 m (+11.5%, tolerance 10%). That group has 2 walks that every filter loses (PF CEP50
+  54 m). When the cloud is lost, its mean happens to be closer to the truth than either group.
+- The map followers cost a little in simulation, because the reported point lags the filter at walls.
+  On real data with shop walls the EKF is neutral, and the weighted centroid is 4-8% worse: its centroid
+  jumps tens of metres, and is held behind a shop wall for up to 3 s. With the floor outline only they
+  change nothing.
+- `compute_us_per_update` (`--serial`, 2 seeds) moves by 1% or less with the PF option.
+
+**Kept.** `map_consistent_estimate` on. `ekf-map` and `wcl-map` are available as presets; the `ekf` and
+`wcl` baselines stay map-free.
+
 ## Open questions
 
 - The beacon-driven init proposal (experiment 4) fixes the airport hall but slows small walled offices.

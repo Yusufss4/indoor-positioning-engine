@@ -40,7 +40,8 @@ Ekf::Ekf(const Venue& venue, EkfConfig cfg, RssiModelConfig rssi_cfg, BaroConfig
                     rssi_cfg.wall_aware = false;
                     return rssi_cfg;
                   }()),
-      altimeter_(baro_cfg) {}
+      altimeter_(baro_cfg),
+      follower_(venue, cfg.wall_escape_s) {}
 
 void Ekf::try_initialize(double t) {
   std::erase_if(pending_, [&](const Pending& p) { return t - p.t > cfg_.init_window_s; });
@@ -92,6 +93,8 @@ void Ekf::try_initialize(double t) {
   initialized_ = true;
   consecutive_rejections_ = 0;
   pending_.clear();
+  follower_.reset();
+  follow(t);
 }
 
 bool Ekf::scalar_update(const std::array<double, 3>& H, double innovation, double R, double gate_chi2) {
@@ -139,6 +142,7 @@ void Ekf::on_step(const StepEvent& step) {
   P_ = mul(mul(F, P_), transpose(F));
   for (int i = 0; i < 9; ++i) P_[i] += Q[i];
   symmetrize(P_);
+  follow(step.t);
 }
 
 void Ekf::on_heading(double t, double heading, double sigma) {
@@ -146,7 +150,8 @@ void Ekf::on_heading(double t, double heading, double sigma) {
   heading_known_ = true;
   last_heading_ = heading;
   if (!initialized_) return;
-  scalar_update({0.0, 0.0, 1.0}, wrap_angle(heading - x_[2]), sigma * sigma, cfg_.heading_gate_chi2);
+  // Position-heading correlation lets a heading update move the mean too.
+  if (scalar_update({0.0, 0.0, 1.0}, wrap_angle(heading - x_[2]), sigma * sigma, cfg_.heading_gate_chi2)) follow(t);
 }
 
 void Ekf::on_rssi(double t, std::size_t beacon_index, double rssi) {
@@ -175,6 +180,7 @@ void Ekf::on_rssi(double t, std::size_t beacon_index, double rssi) {
 
   if (scalar_update(H, rssi - predicted, sigma * sigma, cfg_.rssi_gate_chi2)) {
     consecutive_rejections_ = 0;
+    follow(t);
     return;
   }
   ++rejected_total_;
@@ -196,6 +202,7 @@ void Ekf::on_pressure(double t, double hpa) {
     return;
   }
   level_ = venue_->nearest_level(alt + baro_anchor_m_);
+  follow(t);
 }
 
 Estimate Ekf::estimate() const {
@@ -209,6 +216,14 @@ Estimate Ekf::estimate() const {
   e.cov_xx = P_[0];
   e.cov_xy = P_[1];
   e.cov_yy = P_[4];
+  if (cfg_.wall_constraint && initialized_) {
+    // Second moments about the reported point.
+    const Vec2 off = e.pos - follower_.pos();
+    e.pos = follower_.pos();
+    e.cov_xx += off.x * off.x;
+    e.cov_xy += off.x * off.y;
+    e.cov_yy += off.y * off.y;
+  }
   return e;
 }
 

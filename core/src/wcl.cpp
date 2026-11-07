@@ -7,10 +7,14 @@
 namespace ipe {
 
 WeightedCentroid::WeightedCentroid(const Venue& venue, WclConfig cfg, RssiModelConfig rssi_cfg)
-    : venue_(&venue), cfg_(cfg), rssi_model_(venue, [&] {
-        rssi_cfg.wall_aware = false;
-        return rssi_cfg;
-      }()) {}
+    : venue_(&venue),
+      cfg_(cfg),
+      rssi_model_(venue,
+                  [&] {
+                    rssi_cfg.wall_aware = false;
+                    return rssi_cfg;
+                  }()),
+      follower_(venue, cfg.wall_escape_s) {}
 
 void WeightedCentroid::on_rssi(double t, std::size_t beacon_index, double rssi) {
   const auto n_beacons = venue_->beacons().size();
@@ -63,6 +67,7 @@ void WeightedCentroid::on_rssi(double t, std::size_t beacon_index, double rssi) 
   if (wsum <= 0.0) return;
   estimate_.t = t;
   estimate_.pos = {wx / wsum, wy / wsum};
+  if (cfg_.wall_constraint) estimate_.pos = follower_.follow(t, estimate_.pos, estimate_.level);
   estimate_.valid = true;
 }
 

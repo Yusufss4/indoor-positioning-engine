@@ -107,6 +107,14 @@ floor of level 0 at the start of the walk. It absorbs weather, device bias and t
 - **Estimate.** The level is the weighted mode over particles. Position and covariance are computed from
   the particles on that level only, so a minority hypothesis upstairs does not drag the mean into the
   wrong room.
+- **Estimate on the map** (`map_consistent_estimate`, on by default). Particles never cross walls, but the
+  weighted mean of a cloud split across a wall (corridor and shop, two corridors) can fall on the wall,
+  in an empty shop or behind a wall from every particle. If the mean is outside the walkable area or a
+  wall separates it from its nearest particle, the reported position is the mean of the dominant group
+  instead: the heaviest 3x3 block of a 2 m weight histogram, keeping only the block's particles on the
+  same side of the walls as the one nearest the block's centre. The covariance is taken about the
+  reported point, so it still covers the whole cloud. The integrity monitor and recovery keep using the
+  cloud mean, so the option changes what is reported, not how the filter evolves (experiment 6).
 
 Everything stays O(N) per measurement. On a single-floor venue none of this runs: no extra random draws,
 no extra arithmetic, and the results are bit-identical to the single-floor engine.
@@ -135,6 +143,13 @@ State `[x, y, psi]`. Steps drive the prediction with control noise mapped throug
 magnetometer heading and each RSSI packet are scalar updates with chi-square gating, Joseph-form
 covariance update and re-initialisation after 25 consecutive rejected packets. It is deliberately
 map-free.
+
+`ekf-map` and `wcl-map` (`wall_constraint`, off by default) hold only the *reported* position to the map:
+a `MapFollower` moves it towards the filter's mean (or the centroid) along a straight line that stops at
+walls and slides along them, and jumps to the mean once it has been out of reach for `wall_escape_s`
+(3 s), since a straight line cannot go round to a door. The filter state is untouched. Clipping the EKF
+state itself was tried first and fails: the mean gets pinned against a wall next to the door the walker
+used, and the gain is too small to pull it back (CEP50 0.95 to 12.7 m on `office_nominal`, experiment 6).
 
 Packets weaker than -85 dBm are ignored. Without that, far beacons behind walls read ~10 dB below the
 free-space prediction; because the linearised model is nearly flat at long range, each such packet pushes

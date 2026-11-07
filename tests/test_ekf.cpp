@@ -5,6 +5,7 @@
 #include "ipe/ekf.hpp"
 #include "ipe/rng.hpp"
 #include "ipe/rssi_model.hpp"
+#include "test_util.hpp"
 
 using namespace ipe;
 
@@ -107,4 +108,73 @@ TEST(Ekf, GatesOutlierRssi) {
   ekf.on_rssi(100.0, 0, -45.0);  // ~35 dB too strong for 11 m
   EXPECT_EQ(ekf.rejected_updates(), 1u);
   EXPECT_EQ(ekf.estimate().pos.x, pos.x);
+}
+
+namespace {
+
+/// Heading +x, then an EKF fix at `pos` in the two-room venue from free-space RSSI.
+Ekf fixed_ekf(const Venue& v, Vec2 pos, bool walls, double escape_s = 3.0, int rounds = 40) {
+  EkfConfig cfg;
+  cfg.wall_constraint = walls;
+  cfg.wall_escape_s = escape_s;
+  Ekf ekf(v, cfg, {});
+  ekf.on_heading(0.0, 0.0, 0.05);
+  feed(ekf, v, pos, rounds);
+  return ekf;
+}
+
+}  // namespace
+
+TEST(Ekf, WallConstraintStopsStepsAtWalls) {
+  const Venue v = test::two_room_venue();
+  for (const bool walls : {false, true}) {
+    Ekf ekf = fixed_ekf(v, {8.0, 2.0}, walls);
+    ASSERT_LT(ekf.estimate().pos.x, 10.0);
+    for (int k = 0; k < 6; ++k) {
+      StepEvent step;
+      step.t = 10.0 + 0.4 * k;  // all within the escape time
+      step.length = 1.0;
+      ekf.on_step(step);
+    }
+    // The filter itself walks on through the wall either way; only the report is held.
+    EXPECT_GT(ekf.state()[0], 12.0);
+    if (walls) {
+      EXPECT_LT(ekf.estimate().pos.x, 10.0);
+      EXPECT_GT(ekf.estimate().pos.x, 9.5);
+      // The covariance is widened to reach the mean.
+      EXPECT_GT(ekf.estimate().cov_xx, ekf.covariance()[0] + 4.0);
+    } else {
+      EXPECT_GT(ekf.estimate().pos.x, 12.0);
+    }
+  }
+}
+
+TEST(Ekf, WallConstraintHoldsRadioPullUntilTheEscapeTime) {
+  const Venue v = test::two_room_venue();
+  // Just initialised: the covariance is still wide, so the radio can pull the mean a long way.
+  Ekf ekf = fixed_ekf(v, {7.0, 2.0}, true, 2.0, 1);
+  ASSERT_LT(ekf.estimate().pos.x, 10.0);
+  // The radio now says east of the wall; for 1 s the report is held on this side.
+  feed(ekf, v, {14.0, 2.0}, 5, nullptr, 20.0);
+  ASSERT_GT(ekf.state()[0], 10.0);
+  EXPECT_LT(ekf.estimate().pos.x, 10.0);
+  EXPECT_GT(ekf.map_follower().held_updates(), 0u);
+  // After the escape time it jumps to the mean.
+  feed(ekf, v, {14.0, 2.0}, 40, nullptr, 21.0);
+  EXPECT_GT(ekf.estimate().pos.x, 10.0);
+  EXPECT_GE(ekf.map_follower().escapes(), 1u);
+}
+
+TEST(Ekf, WallConstraintIsInertInTheOpen) {
+  const Venue v = open_venue();
+  EkfConfig on;
+  on.wall_constraint = true;
+  Ekf a(v, on, {});
+  Ekf b(v, {}, {});
+  Rng ra(5), rb(5);
+  feed(a, v, {6.0, 9.0}, 30, &ra);
+  feed(b, v, {6.0, 9.0}, 30, &rb);
+  EXPECT_DOUBLE_EQ(a.estimate().pos.x, b.estimate().pos.x);
+  EXPECT_DOUBLE_EQ(a.estimate().pos.y, b.estimate().pos.y);
+  EXPECT_DOUBLE_EQ(a.estimate().cov_xx, b.estimate().cov_xx);
 }

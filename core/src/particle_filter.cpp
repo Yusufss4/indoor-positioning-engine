@@ -18,6 +18,15 @@ ParticleFilter::ParticleFilter(const Venue& venue, ParticleFilterConfig cfg, Rss
   cfg_.num_particles = std::max(cfg_.num_particles, 1);
   health_.resize(venue.beacons().size());
   level_weight_.resize(static_cast<std::size_t>(std::max(venue.level_count(), 1)));
+  const auto& b = venue.bounds();
+  // Coarser cells for huge venues keep the histogram under a million cells.
+  mode_cell_m_ = std::max(kModeCellM, std::sqrt(b.width() * b.height() / 1e6));
+  mode_nx_ = std::max(1, static_cast<int>(std::ceil(b.width() / mode_cell_m_)));
+  mode_ny_ = std::max(1, static_cast<int>(std::ceil(b.height() / mode_cell_m_)));
+  if (cfg_.map_consistent_estimate) {
+    mode_weight_.assign(static_cast<std::size_t>(mode_nx_) * static_cast<std::size_t>(mode_ny_), 0.0);
+    mode_touched_.reserve(static_cast<std::size_t>(cfg_.num_particles));
+  }
   initialize_uniform();
 }
 
@@ -29,11 +38,10 @@ bool ParticleFilter::check_beacon(std::size_t beacon_index, double rssi) {
   auto& h = health_[beacon_index];
   if (!cfg_.beacon_integrity) return true;
   // Residuals are only meaningful once the estimate itself can be trusted.
-  if (estimate_.sigma_radius() > cfg_.integrity_max_sigma_m) return !h.excluded;
+  if (cloud_.sigma_radius() > cfg_.integrity_max_sigma_m) return !h.excluded;
 
   const Beacon& beacon = venue_->beacons()[beacon_index];
-  const double residual =
-      rssi - (rssi_model_.expected_rssi(beacon, estimate_.pos, estimate_.level) + mean_rssi_offset_);
+  const double residual = rssi - (rssi_model_.expected_rssi(beacon, cloud_.pos, cloud_.level) + mean_rssi_offset_);
   h.mean_residual = h.samples == 0 ? residual : h.mean_residual + cfg_.integrity_alpha * (residual - h.mean_residual);
   ++h.samples;
 
@@ -439,12 +447,12 @@ void ParticleFilter::normalize_or_recover() {
     const double n = static_cast<double>(particles_.size());
     for (auto& p : particles_) {
       Particle fresh = sample_uniform_particle();
-      if (estimate_.valid) {
-        Vec2 pos = estimate_.pos + Vec2{rng_.normal(0.0, 3.0), rng_.normal(0.0, 3.0)};
+      if (cloud_.valid) {
+        Vec2 pos = cloud_.pos + Vec2{rng_.normal(0.0, 3.0), rng_.normal(0.0, 3.0)};
         if (venue_->inside(pos)) fresh.pos = pos;
-        fresh.heading = wrap_angle(estimate_.heading + rng_.normal(0.0, 0.5));
+        fresh.heading = wrap_angle(cloud_.heading + rng_.normal(0.0, 0.5));
         if (multi_level_) {
-          fresh.level = estimate_.level;
+          fresh.level = cloud_.level;
           if (baro_ready_) fresh.baro_offset = altimeter_.altitude() - elevation(fresh.level);
         }
       }
@@ -525,6 +533,8 @@ void ParticleFilter::update_estimate(double t) {
     so /= level_w;
   }
   mean_rssi_offset_ = so;
+  const Vec2 mean{sx, sy};
+  const Vec2 pos = cfg_.map_consistent_estimate && localized_ ? map_consistent_position(mean, level) : mean;
   double cxx = 0.0, cxy = 0.0, cyy = 0.0;
   for (const auto& p : particles_) {
     if (!counts(p)) continue;
@@ -540,12 +550,105 @@ void ParticleFilter::update_estimate(double t) {
     cyy /= level_w;
   }
   estimate_.t = t;
-  estimate_.pos = {sx, sy};
+  estimate_.pos = mean;
   estimate_.heading = std::atan2(ss, sc);
   estimate_.cov_xx = cxx;
   estimate_.cov_xy = cxy;
   estimate_.cov_yy = cyy;
   estimate_.valid = localized_;
+  cloud_ = estimate_;
+  // Second moments about the reported point, so a mode estimate keeps the spread of the whole cloud.
+  const Vec2 off = mean - pos;
+  estimate_.pos = pos;
+  estimate_.cov_xx += off.x * off.x;
+  estimate_.cov_xy += off.x * off.y;
+  estimate_.cov_yy += off.y * off.y;
+}
+
+std::size_t ParticleFilter::mode_cell(Vec2 p) const {
+  const auto& b = venue_->bounds();
+  const int x = std::clamp(static_cast<int>(std::floor((p.x - b.min_x) / mode_cell_m_)), 0, mode_nx_ - 1);
+  const int y = std::clamp(static_cast<int>(std::floor((p.y - b.min_y) / mode_cell_m_)), 0, mode_ny_ - 1);
+  return static_cast<std::size_t>(y) * static_cast<std::size_t>(mode_nx_) + static_cast<std::size_t>(x);
+}
+
+Vec2 ParticleFilter::map_consistent_position(Vec2 mean, int level) {
+  const auto counts = [&](const Particle& p) { return p.weight > 0.0 && (!multi_level_ || p.level == level); };
+
+  // The mean is fine if it is walkable and in sight of the particle closest to it.
+  const Particle* nearest = nullptr;
+  double best_d2 = std::numeric_limits<double>::infinity();
+  for (const auto& p : particles_) {
+    if (!counts(p)) continue;
+    const double d2 = (p.pos - mean).norm2();
+    if (d2 < best_d2) {
+      best_d2 = d2;
+      nearest = &p;
+    }
+  }
+  if (!nearest) return mean;
+  if (venue_->inside(mean) && !venue_->crosses_wall(nearest->pos, mean, level)) return mean;
+
+  // Dominant mode: the heaviest 3x3 block of a coarse weight histogram.
+  for (const auto& p : particles_) {
+    if (!counts(p)) continue;
+    const std::size_t c = mode_cell(p.pos);
+    if (mode_weight_[c] == 0.0) mode_touched_.push_back(c);
+    mode_weight_[c] += p.weight;
+  }
+  const auto nx = static_cast<std::size_t>(mode_nx_);
+  const auto ny = static_cast<std::size_t>(mode_ny_);
+  std::size_t best_cell = mode_touched_.front();
+  double best_w = -1.0;
+  for (std::size_t c : mode_touched_) {
+    const std::size_t cx = c % nx, cy = c / nx;
+    double w = 0.0;
+    for (std::size_t y = cy > 0 ? cy - 1 : 0; y <= std::min(cy + 1, ny - 1); ++y) {
+      for (std::size_t x = cx > 0 ? cx - 1 : 0; x <= std::min(cx + 1, nx - 1); ++x) w += mode_weight_[y * nx + x];
+    }
+    if (w > best_w) {
+      best_w = w;
+      best_cell = c;
+    }
+  }
+  for (std::size_t c : mode_touched_) mode_weight_[c] = 0.0;
+  mode_touched_.clear();
+
+  const auto bx = static_cast<long>(best_cell % nx), by = static_cast<long>(best_cell / nx);
+  const auto in_block = [&](const Particle& p) {
+    const std::size_t c = mode_cell(p.pos);
+    return std::abs(static_cast<long>(c % nx) - bx) <= 1 && std::abs(static_cast<long>(c / nx) - by) <= 1;
+  };
+  Vec2 centre{};
+  double w_block = 0.0;
+  for (const auto& p : particles_) {
+    if (!counts(p) || !in_block(p)) continue;
+    centre += p.pos * p.weight;
+    w_block += p.weight;
+  }
+  centre = centre * (1.0 / w_block);
+  const Particle* anchor = nullptr;
+  best_d2 = std::numeric_limits<double>::infinity();
+  for (const auto& p : particles_) {
+    if (!counts(p) || !in_block(p)) continue;
+    const double d2 = (p.pos - centre).norm2();
+    if (d2 < best_d2) {
+      best_d2 = d2;
+      anchor = &p;
+    }
+  }
+  // The block can still straddle a wall: keep the particles on the anchor's side.
+  Vec2 mode{};
+  double w_mode = 0.0;
+  for (const auto& p : particles_) {
+    if (!counts(p) || !in_block(p) || venue_->crosses_wall(anchor->pos, p.pos, level)) continue;
+    mode += p.pos * p.weight;
+    w_mode += p.weight;
+  }
+  if (w_mode <= 0.0) return anchor->pos;
+  mode = mode * (1.0 / w_mode);
+  if (venue_->inside(mode) && !venue_->crosses_wall(anchor->pos, mode, level)) return mode;
+  return anchor->pos;
 }
 
 }  // namespace ipe
