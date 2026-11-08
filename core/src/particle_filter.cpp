@@ -33,6 +33,11 @@ ParticleFilter::ParticleFilter(const Venue& venue, ParticleFilterConfig cfg, Rss
       level_selector_(cfg.level_smoothing_s, cfg.level_hysteresis) {
   floor_p_.assign(static_cast<std::size_t>(std::max(venue.level_count(), 1)), 1.0);
   cfg_.num_particles = std::max(cfg_.num_particles, 1);
+  if (!cfg_.init_proposal && cfg_.init_proposal_auto_density > 0.0) {
+    double area = 0.0;
+    for (int l = 0; l < venue.level_count(); ++l) area += venue.walkable_area(l);
+    cfg_.init_proposal = area > 0.0 && cfg_.num_particles / area < cfg_.init_proposal_auto_density;
+  }
   level_weight_.resize(static_cast<std::size_t>(std::max(venue.level_count(), 1)));
   if (cfg_.map_consistent_estimate) map_estimate_.emplace(venue, static_cast<std::size_t>(cfg_.num_particles));
   initialize_uniform();

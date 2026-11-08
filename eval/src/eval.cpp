@@ -25,11 +25,11 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
     heading_outlier_prob, map_consistent_estimate, level_smoothing_s, level_hysteresis, estimate_rssi_offset,
     rssi_offset_sigma, rssi_offset_walk, beacon_integrity, integrity_threshold_db, integrity_alpha,
     integrity_min_samples, integrity_max_sigma_m, resample_ess_ratio, roughening_m, recovery, recovery_alpha_slow,
-    recovery_alpha_fast, recovery_max_fraction, init_proposal, init_proposal_fraction, init_window_s, recovery_proposal,
-    proposal_history, proposal_max_age_s, proposal_level_jump, level_change_prob_step, level_change_prob_baro,
-    baro_update_interval_s, baro_sigma_m, baro_outlier_prob, baro_offset_sigma_m, baro_offset_walk_m, baro_jump,
-    baro_jump_radius_m, baro_jump_hold_s, baro_jump_prob, baro_reseed_keep_reference, floor_prior_weight, floor_prior_k,
-    floor_prior_eps, floor_prior_max_age_s)
+    recovery_alpha_fast, recovery_max_fraction, init_proposal, init_proposal_auto_density, init_proposal_fraction,
+    init_window_s, recovery_proposal, proposal_history, proposal_max_age_s, proposal_level_jump, level_change_prob_step,
+    level_change_prob_baro, baro_update_interval_s, baro_sigma_m, baro_outlier_prob, baro_offset_sigma_m,
+    baro_offset_walk_m, baro_jump, baro_jump_radius_m, baro_jump_hold_s, baro_jump_prob, baro_reseed_keep_reference,
+    floor_prior_weight, floor_prior_k, floor_prior_eps, floor_prior_max_age_s)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(TrackSmootherConfig, enabled, tau_s, max_correction_mps, snap_m,
                                                 extrapolate_steps, max_step_interval_s)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(RoomEventConfig, enter_prob, exit_prob, enter_dwell_s, exit_dwell_s,
