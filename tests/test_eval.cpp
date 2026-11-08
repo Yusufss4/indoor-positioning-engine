@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <stdexcept>
@@ -56,6 +57,74 @@ TEST(Eval, FloorMetricsCountWrongLevelSeparately) {
   EXPECT_DOUBLE_EQ(m.floor_switch_latency_s, 2.0);
   EXPECT_DOUBLE_EQ(m.floor_accuracy, 36.0 / 40.0);
   EXPECT_DOUBLE_EQ(m.max_m, 1.0);  // wrong-floor fixes are not horizontal errors
+}
+
+TEST(Eval, SmoothnessOfASteadyWalkIsZero) {
+  // 1 m/s along x, sampled every 0.2 s, truth identical: no jitter, no jumps, path ratio 1.
+  std::vector<TrackSample> track;
+  std::vector<EstimateRecord> recs;
+  for (int i = 0; i <= 100; ++i) {
+    const double t = i * 0.2;
+    track.push_back({t, {t, 0.0}, 0, true});
+    EstimateRecord r;
+    r.t = t;
+    r.truth = {t, 0.0};
+    recs.push_back(r);
+  }
+  Metrics m;
+  compute_smoothness(m, track, 0.2, recs, 0.0);
+  EXPECT_NEAR(m.jitter_p50_m, 0.0, 1e-9);
+  EXPECT_NEAR(m.jitter_p95_m, 0.0, 1e-9);
+  EXPECT_DOUBLE_EQ(m.jumps_per_min, 0.0);
+  EXPECT_EQ(m.level_flips, 0);
+  EXPECT_NEAR(m.path_ratio, 1.0, 1e-9);
+
+  // The same walk zigzagging 0.1 m either side: every second difference is 0.4 m, the path is longer.
+  for (std::size_t i = 0; i < track.size(); ++i) track[i].pos.y = i % 2 ? 0.1 : -0.1;
+  Metrics z;
+  compute_smoothness(z, track, 0.2, recs, 0.0);
+  EXPECT_NEAR(z.jitter_p50_m, 0.4, 1e-9);
+  EXPECT_NEAR(z.jitter_p95_m, 0.4, 1e-9);
+  EXPECT_NEAR(z.path_ratio, std::hypot(0.2, 0.2) / 0.2, 1e-9);
+}
+
+TEST(Eval, SmoothnessCountsJitterJumpsAndFlips) {
+  // Standing still at the origin, with one 0.5 m wobble, one 10 m excursion that comes back and a level
+  // flip there and back. Truth is sparse (waypoints), so there is no path ratio.
+  std::vector<TrackSample> track;
+  for (int i = 0; i < 300; ++i) track.push_back({i * 0.2, {0.0, 0.0}, 0, true});
+  track[50].pos = {0.5, 0.0};
+  for (int i = 100; i < 110; ++i) track[static_cast<std::size_t>(i)].pos = {10.0, 0.0};
+  for (int i = 200; i < 210; ++i) track[static_cast<std::size_t>(i)].level = 1;
+  track[250].valid = false;  // a gap neither jitters nor jumps
+  track[250].pos = {50.0, 0.0};
+  std::vector<EstimateRecord> recs(2);
+  recs[1].t = 60.0;
+  recs[1].truth = {1.0, 0.0};
+
+  Metrics m;
+  compute_smoothness(m, track, 0.2, recs, 0.0);
+  EXPECT_DOUBLE_EQ(m.jitter_p50_m, 0.0);  // the wobbles are rare
+  EXPECT_DOUBLE_EQ(m.jitter_p95_m, 0.0);
+  EXPECT_EQ(m.level_flips, 2);
+  // 1 s windows start every 5 samples: 59 of them, minus two touching the level flip and two touching
+  // the gap. The excursion jumps out (window 95-100) and back (105-110).
+  EXPECT_DOUBLE_EQ(m.jumps_per_min, 2.0 / (55.0 / 60.0));
+  EXPECT_DOUBLE_EQ(m.path_ratio, -1.0);
+}
+
+TEST(Eval, ReplayRecordsAnEvenTrack) {
+  const auto sc = sim::load_scenario_file(test::data_path("scenarios/office_nominal.json"));
+  const auto venue = load_venue_file(sc.venue_path);
+  const auto trace = sim::simulate(sc, venue);
+  const auto result = replay(venue, trace, preset_config("pf"));
+  ASSERT_GT(result.track.size(), 10u);
+  for (std::size_t i = 1; i < result.track.size(); ++i) {
+    EXPECT_NEAR(result.track[i].t - result.track[i - 1].t, 0.2, 1e-9);
+  }
+  EXPECT_GE(result.metrics.jitter_p50_m, 0.0);
+  EXPECT_GE(result.metrics.jumps_per_min, 0.0);
+  EXPECT_GT(result.metrics.path_ratio, 0.0);
 }
 
 TEST(Eval, RoomEventsMatchWithinTheWindow) {

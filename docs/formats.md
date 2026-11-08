@@ -177,6 +177,8 @@ truth after the warm-up are skipped. `--baseline` and `--update` work as for sce
 
 - `--out`: `t,truth_x,truth_y,est_x,est_y,sigma_m,error_m,has_fix,truth_level,est_level,cov_xx,cov_xy,cov_yy`,
   one row per ground-truth sample.
+- `--track`: `t,x,y,level,valid`, the engine's estimate every 0.2 s of trace time from the first
+  ground-truth sample on (what a client polling the engine would draw; the smoothness metrics use it).
 - `--particles`: `t,x,y,w,level`, subsampled particle cloud every N ground-truth samples.
 - `--events`: `t,source,room_id,room_name,type,probability`, the engine's room events (`source` is
   `estimate`) and the events of the ground-truth path (`truth`), sorted by time. `type` is `enter` or
@@ -185,7 +187,8 @@ truth after the warm-up are skipped. `--baseline` and `--update` work as for sce
 - stdout / `--metrics`: JSON with `mean_m`, `rmse_m`, `cep50_m`, `cep95_m`, `max_m`, `availability`,
   `time_to_first_fix_s`, `convergence_s`, `steps`, `compute_us_per_update`, `floor_accuracy`,
   `floor_switch_latency_s`, `level_changes`, `coverage95`, `nees_median`, `room_events`,
-  `room_event_precision`, `room_event_recall`, `room_event_latency_median_s`, `room_accuracy`.
+  `room_event_precision`, `room_event_recall`, `room_event_latency_median_s`, `room_accuracy`,
+  `jitter_p50_m`, `jitter_p95_m`, `jumps_per_min`, `level_flips`, `path_ratio`.
 
 `cep50`/`cep95` are the 50th/95th percentiles of horizontal error after a 5 s warm-up, over fixes on the
 correct floor. `floor_accuracy` is the share of fixes on the correct floor (1.0 on a single-floor venue).
@@ -198,6 +201,21 @@ NEES = e^T P^-1 e is the squared horizontal error measured against the reported 
 scores about 0.95, and lower means overconfident. `nees_median` is about 1.39 for an honest filter. Both
 are -1 when there is no scored fix with a covariance. They are reported, not gated:
 `ipe-regress` adds `coverage95` (and `median_coverage95` for recorded traces) to its JSON and tables.
+
+The smoothness metrics describe the `--track` stream after the warm-up, so they need no ground truth and
+work on recordings whose truth is a few waypoints. Consecutive samples on different floors, or with no
+fix, are left out of the horizontal figures.
+- `jitter_p50_m` and `jitter_p95_m` are percentiles of the second difference
+  |p(t+0.2) - 2 p(t) + p(t-0.2)|. Walking at a steady speed gives about 0. A dot that moves one step at a
+  time scores about the step length, and so does one that shakes.
+- `jumps_per_min` counts non-overlapping 1 s windows in which the estimate moved more than 3 m, faster
+  than anyone walks.
+- `level_flips` counts changes of the reported floor; `level_changes` counts the true ones.
+- `path_ratio` is the length of the estimated track over the length of the true one. It is only reported
+  when the truth is dense (median spacing <= 0.5 s), otherwise -1.
+
+`ipe-regress` reports them per case (mean over seeds, median over walks for recorded traces) and does not
+gate them.
 
 The room metrics compare the engine's events with those of the ground-truth path (a detector with no
 dwell and a 0.5 threshold on the true position). An estimated event matches the earliest unmatched true
