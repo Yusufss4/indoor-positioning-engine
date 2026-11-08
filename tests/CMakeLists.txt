@@ -47,4 +47,13 @@ if(IPE_BUILD_TOOLS)
                    $<TARGET_FILE:ipe-regress> ${IPE_MSIL_MANIFEST} ${PROJECT_SOURCE_DIR}/data/configs/msil_wifi.json
                    ${PROJECT_SOURCE_DIR}/tests/regression/msil_baseline.json)
   set_tests_properties(real_data_regression PROPERTIES LABELS "regression;realdata" SKIP_RETURN_CODE 77 TIMEOUT 1800)
+
+  # IPIN Track 3 scoring walks (docs/ipin.md), skipped until datasets/ipin/fetch.sh and
+  # convert.py --wifi --scans --out datasets/ipin/out_scans have run.
+  set(IPE_IPIN_MANIFEST ${PROJECT_SOURCE_DIR}/datasets/ipin/out_scans/manifest_holdout.json)
+  add_test(NAME ipin_regression
+           COMMAND sh -c "test -f \"$1\" || exit 77; exec \"$0\" --traces \"$1\" --presets pf --config \"$2\" --baseline \"$3\""
+                   $<TARGET_FILE:ipe-regress> ${IPE_IPIN_MANIFEST} ${PROJECT_SOURCE_DIR}/data/configs/msil_wifi.json
+                   ${PROJECT_SOURCE_DIR}/tests/regression/ipin_baseline.json)
+  set_tests_properties(ipin_regression PROPERTIES LABELS "regression;realdata" SKIP_RETURN_CODE 77 TIMEOUT 1800)
 endif()

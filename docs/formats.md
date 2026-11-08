@@ -56,6 +56,10 @@ Instead of top-level `walls`, a multi-floor venue has `levels`, and may add `con
   that fill only part of their bounds (an L or a U). The particle filter then starts, recovers and keeps
   particles inside it, and the beacon-ring proposal weights use its area. Without it the whole bounds
   rectangle is walkable; one covering 99% or more of the bounds is ignored.
+- A level may add its own `footprint` (`[[x, y], ...]`) when it is smaller than the building: a mezzanine,
+  or a stair landing such as floor -1 of `data/ipin/nuremberg.json`. Particles on that level stay inside it,
+  and new particles pick their level in proportion to each level's walkable area, so a small landing gets
+  few of them. Without level footprints every level gets the same share, as before.
 - A file has either top-level `walls` (one floor, ordinal 0) or `levels`, not both.
 
 ### Rooms

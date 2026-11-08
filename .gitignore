@@ -12,3 +12,7 @@ datasets/msil/out_scans/
 datasets/msil/out_doors/
 web/dist/
 .DS_Store
+datasets/ipin/raw/
+datasets/ipin/out*/
+datasets/uji_ble/raw/
+datasets/uji_ble/out*/

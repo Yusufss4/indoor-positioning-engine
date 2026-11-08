@@ -333,6 +333,34 @@ TEST(ParticleFilter, BeaconSeedWeightsRecoverTheLevelPrior) {
   EXPECT_NEAR(upper, 0.5, 0.03);
 }
 
+TEST(ParticleFilter, LevelFootprintBoundsEveryDraw) {
+  // Level 1 of the two-level venue shrunk to a 4 x 10 m landing at the east end (the lift side).
+  const Venue base = test::two_level_venue();
+  std::vector<Level> levels = base.levels();
+  levels[1].footprint = {{16, 0}, {20, 0}, {20, 10}, {16, 10}};
+  const Venue v(base.name(), base.bounds(), levels, base.beacons(), base.connectors(), base.wall_attenuation_db(),
+                base.floor_attenuation_db());
+  const auto all_inside = [&](const ParticleFilter& pf) {
+    return std::all_of(pf.particles().begin(), pf.particles().end(),
+                       [&](const Particle& p) { return v.inside(p.pos, p.level); });
+  };
+  ParticleFilter pf(v, test_config(), {});
+  EXPECT_TRUE(all_inside(pf));
+  // Levels are drawn by area: the 40 m^2 landing gets a sixth of the particles, not half.
+  const auto upper =
+      std::count_if(pf.particles().begin(), pf.particles().end(), [](const Particle& p) { return p.level == 1; });
+  EXPECT_NEAR(static_cast<double>(upper) / static_cast<double>(pf.particles().size()), 40.0 / 240.0, 0.04);
+
+  // Ring seed from an upper-level beacon: particles off the landing carry no weight.
+  ParticleFilter seeded(v, proposal_config(), {});
+  seeded.seed_from_beacon(4, -62.0);
+  for (const auto& p : seeded.particles()) {
+    if (!v.inside(p.pos, p.level)) {
+      EXPECT_EQ(p.weight, 0.0);
+    }
+  }
+}
+
 TEST(ParticleFilter, BeaconSeedWaitsForTheInitWindow) {
   const Venue v = test::two_room_venue();
   auto cfg = proposal_config();

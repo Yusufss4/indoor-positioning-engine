@@ -190,8 +190,14 @@ Emscripten) and MSVC. A golden-value test pins the generator.
   handling of pocket/swing carry modes.
 - Floors without a barometer: lift rides produce no steps, so only RSSI can reveal a lift ride on phones
   without a pressure sensor, and it does so slowly. Stair climbs are not detected from the IMU either.
-- Floors are flat slabs. Mezzanines, atriums and split levels (a floor that is open to the one below, or
-  ramps between half-levels) are not modelled; radio through an atrium is wrongly given slab loss.
+- Floors are flat slabs. A level can be smaller than the building (its own `footprint`, e.g. a stair
+  landing), but atriums and ramps between half-levels are not modelled; radio through an atrium is wrongly
+  given slab loss, and sloped outdoor ground reads as a floor change on the barometer
+  ([ipin.md](ipin.md#failure-modes)).
+- One loss per slab for the whole venue and one floor per transmitter separate floors poorly on real Wi-Fi:
+  on the IPIN buildings a nearest-neighbour fingerprint finds the floor for 93-95% of scans, while the
+  fitted slab loss is 2-4 dB ([ipin.md](ipin.md#failure-modes)).
+- Particles change floor only inside a connector, so the floor can only follow once the position is right.
 - Connectors are polygons on the plan, so a long staircase that is itself inside a corridor polygon must be
   drawn tightly, or particles can change level on the corridor floor next to it.
 - Shadowing is correlated in time per beacon, not in space.

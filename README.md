@@ -108,6 +108,16 @@ BSSIDs), seeding the start from the closest-looking access point and applying ea
 update instead of 40 separate ones are what brought them down. The uncertainty is still far too small: a new calibration metric
 (`coverage95`) shows the 95% ellipse holding the truth for under a fifth of the fixes. Method, per-floor
 numbers and failure modes: [docs/real_data.md](docs/real_data.md).
+Two more public datasets test what MSIL cannot:
+- **IPIN Track 3** ([docs/ipin.md](docs/ipin.md), [`datasets/ipin/`](datasets/ipin/)): two buildings with
+  barometer data and stairs, with walls extracted from the competition's floor plans. On the
+  competition's scoring walks the filter reaches a median CEP50 of 7.6 m (Nuremberg) and 13.5 m
+  (UMinho), with the floor right 76% and 64% of the time. The floor is the weak point: the radio model
+  barely separates floors, although a Wi-Fi fingerprint finds the floor for 93–95% of scans.
+- **UJI BLE** ([docs/uji_ble.md](docs/uji_ble.md), [`datasets/uji_ble/`](datasets/uji_ble/)): surveyed
+  beacons and standing-still fingerprints. They confirm the 5 dB RSSI spread, measure about 1 dB per
+  shelf edge rather than 3 dB per wall, and give 1.4–1.9 m CEP50 from BLE alone.
+
 Ten held-out walks, one on each floor whose longest held-out walk lasts at least a minute, play in the
 [live demo](https://yusufss4.github.io/indoor-positioning-engine/) under "Real recordings", over the
 mall's floor plan.

@@ -1,0 +1,14 @@
+{
+  "_comment": [
+    "Corrections for UMinho building 11 (IPIN 2022), in the site frame (metres, x along the image, y up).",
+    "Stairwells are read off the plans and checked against the landmarks where training walks change floor.",
+    "outdoor_ne is not drawn: training walks go from floor 0 at (82, 69) to floor 1 at (105, 67) outside the building in about 20 s, so the ground rises there (the building sits on a slope). Its area is the outdoor strip between those landmarks.",
+    "Doorways the plans draw shut (entrances to the patio) are cut where training walks cross them (sites.json walked_doors)."
+  ],
+  "connectors": [
+    {"id": "stairs_south", "kind": "stairs", "levels": [0, 1, 2], "area": [[33.9, 25.0], [37.5, 25.0], [37.5, 32.3], [33.9, 32.3]]},
+    {"id": "stairs_north", "kind": "stairs", "levels": [0, 1, 2], "area": [[30.3, 54.5], [33.8, 54.5], [33.8, 61.8], [30.3, 61.8]]},
+    {"id": "stairs_east", "kind": "stairs", "levels": [0, 1, 2], "area": [[89.7, 37.4], [98.5, 37.4], [98.5, 42.2], [89.7, 42.2]]},
+    {"id": "outdoor_ne", "kind": "stairs", "levels": [0, 1], "area": [[81.0, 63.0], [106.0, 63.0], [106.0, 72.0], [81.0, 72.0]]}
+  ]
+}

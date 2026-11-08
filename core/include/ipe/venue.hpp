@@ -27,6 +27,9 @@ struct Level {
   double elevation_m = 0.0;  ///< Floor height above the venue datum.
   double height_m = 4.0;     ///< Floor-to-floor height, used for rendering.
   std::vector<Segment> walls;
+  /// Walkable outline of this floor (a mezzanine or split level smaller than
+  /// the building); empty when the whole venue footprint is walkable.
+  Polygon footprint;
 };
 
 enum class ConnectorKind { Stairs, Elevator, Escalator };
@@ -85,10 +88,26 @@ class Venue {
   [[nodiscard]] bool inside(Vec2 p) const {
     return bounds_.contains(p) && (footprint_.empty() || point_in_polygon(p, footprint_));
   }
+  /// As inside(p), and also inside the footprint of `level` if it has one.
+  [[nodiscard]] bool inside(Vec2 p, int level) const {
+    if (!inside(p)) return false;
+    if (level < 0 || level >= level_count()) return true;
+    const Polygon& fp = levels_[static_cast<std::size_t>(level)].footprint;
+    return fp.empty() || point_in_polygon(p, fp);
+  }
   /// Area a position can be in: the footprint's, else the bounds'.
   [[nodiscard]] double walkable_area() const {
     return footprint_.empty() ? bounds_.width() * bounds_.height() : polygon_area(footprint_);
   }
+  /// Walkable area of one level: its own footprint's, else walkable_area().
+  [[nodiscard]] double walkable_area(int level) const {
+    const Polygon& fp = levels_[static_cast<std::size_t>(level)].footprint;
+    return fp.empty() ? walkable_area() : polygon_area(fp);
+  }
+  /// Box to sample positions on `level` from: its footprint's, else the bounds.
+  [[nodiscard]] Bounds sample_box(int level) const;
+  /// True if any level has its own footprint.
+  [[nodiscard]] bool has_level_footprints() const { return has_level_footprints_; }
   [[nodiscard]] const std::vector<Segment>& walls(int level = 0) const;
   [[nodiscard]] const std::vector<Beacon>& beacons() const { return beacons_; }
   [[nodiscard]] double wall_attenuation_db() const { return wall_attenuation_db_; }
@@ -157,6 +176,7 @@ class Venue {
   std::optional<GeoRef> georef_;
   std::vector<Grid> grids_;
   std::vector<RoomGrid> room_grids_;
+  bool has_level_footprints_ = false;
 };
 
 /// Parses the venue JSON format documented in docs/formats.md.
