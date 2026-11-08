@@ -208,6 +208,54 @@ through a wall are jumps from one group of particles to another, which the demo 
 
 **Kept.** `map_consistent_estimate` on.
 
+## 7. A reported floor that flickers
+
+**Symptom.** On `office_floor_bleed` the reported floor changed 20 times per walk for 2 real changes
+(10 seeds), and on the IPIN UMinho validation walks 20 times for 2. Each flip also moves the dot, because
+the position comes from the particles on the reported floor.
+
+**Cause.** The reported level was the most likely level of every update. When the cloud is split between
+floors, one packet moves enough weight to swap the two. The new smoothness metrics
+([formats.md](formats.md#replay-outputs)) made this visible: `level_flips` against `level_changes`.
+
+**Change.** `LevelSelector` (`core/src/level_selector.cpp`) averages the level weights with a 0.5 s time
+constant (`pf.level_smoothing_s`). It moves the reported level only when another level leads by 0.1 in
+the average (`pf.level_hysteresis`), or at once when the reported level has no particle left. The filter's
+own decisions keep using the most likely level of the update. Both settings at 0 reproduce the old
+output bit for bit (10 seeds, every metric).
+
+**Results.** 10 seeds; floor flips / true changes, floor accuracy, switch latency, jumps per minute:
+
+| Scenario | Flips before | Flips after | Floor ok | Switch [s] | Jumps/min |
+|---|---:|---:|---:|---:|---:|
+| office_floor_bleed | 20.2 / 2 | 3.8 / 2 | 96.3% -> 96.6% | 1.0 -> 2.5 | 5.3 -> 4.8 |
+| kit_tour | 9.5 / 3 | 4.4 / 3 | 94.2% -> 93.9% | 0.5 -> 0.9 | 4.3 -> 4.1 |
+| baro_drift_long | 5.8 / 4 | 4.4 / 4 | 99.5% -> 99.1% | 0.4 -> 0.8 | 1.2 -> 1.3 |
+| office_elevator | 3.0 / 2 | 2.0 / 2 | 99.5% -> 99.0% | 0.4 -> 0.8 | 1.8 -> 1.9 |
+| office_stairs_up_down | 3.2 / 2 | 2.0 / 2 | 99.5% -> 98.9% | 0.4 -> 0.8 | 1.9 -> 2.1 |
+
+CEP50/CEP95 move by 0.05 m or less on every scenario. The single-floor scenarios and the MSIL malls are
+bit-identical. IPIN validation walks (`ipin.json`): floor flips 7.5 -> 3.5 (Nuremberg) and 20 -> 14
+(UMinho) for 2 real changes each. Floor hit rate (3 seeds) 83% -> 83% and 69% -> 70%, IPIN p75
+unchanged.
+
+Variants tried and dropped (10 seeds):
+- **Hold for 1.5 s.** A 0.2 weight lead or 1.5 s as the most likely level, without averaging, still let
+  single packets through: 18.8 flips on `office_floor_bleed`.
+- **Averaging over 1 s.** 3.0 flips instead of 3.8 on `office_floor_bleed`, but switch latency
+  1.2-3.1 s and floor accuracy 1 point lower on the stairs and lift walks.
+- **Leaving a floor below 25% weight at once.** Meant to cut the lag on real floor changes, it brought the
+  flicker back: 11.2 flips on `office_floor_bleed`.
+- **Horizontal position from the most likely floor while the reported floor lags.** Worse jitter on
+  `office_floor_bleed` (jitter p95 5.6 vs 5.2 m).
+- **Sticky dominant group** in the map-consistent estimate (keep the group next to the previous
+  estimate unless another block outweighs it 1.5x or 2.5x). No measurable change on any scenario or on
+  MSIL, so it was not kept.
+
+**Kept.** The averaged, hysteretic reported level, on by default. The jumps that remain are horizontal:
+the dot moves one step at a time and follows every radio update (jitter p95 about 1 m on
+`office_nominal`, 4 jumps per minute on MSIL and 8 on IPIN). That is the next change.
+
 ## Open questions
 
 - The beacon-driven init proposal (experiment 4) fixes the airport hall but slows small walled offices.

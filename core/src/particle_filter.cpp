@@ -29,7 +29,8 @@ ParticleFilter::ParticleFilter(const Venue& venue, ParticleFilterConfig cfg, Rss
                                           cfg.integrity_max_sigma_m}),
       multi_level_(venue.multi_level()),
       altimeter_(baro_cfg),
-      floor_classifier_(venue, {cfg.floor_prior_k, cfg.floor_prior_eps}) {
+      floor_classifier_(venue, {cfg.floor_prior_k, cfg.floor_prior_eps}),
+      level_selector_(cfg.level_smoothing_s, cfg.level_hysteresis) {
   floor_p_.assign(static_cast<std::size_t>(std::max(venue.level_count(), 1)), 1.0);
   cfg_.num_particles = std::max(cfg_.num_particles, 1);
   level_weight_.resize(static_cast<std::size_t>(std::max(venue.level_count(), 1)));
@@ -121,7 +122,7 @@ void ParticleFilter::update_baro_drift(double t, double alt) {
     sum_r += p.weight * (alt - p.baro_offset - elevation(p.level));
   }
   const double r = sum_w > 0.0 ? sum_r / sum_w : 0.0;
-  const int level = estimate_.level;
+  const int level = cloud_.level;
   const int dir = r > 0.0 ? 1 : -1;
   const int next = level + dir;
   const bool drifting =
@@ -437,67 +438,84 @@ void ParticleFilter::resample_if_needed() {
   particles_.swap(scratch_);
 }
 
-void ParticleFilter::update_estimate(double t) {
-  if (multi_level_) {
-    // The reported level is the weighted mode; position statistics use only
-    // the particles on that level so a split cloud does not average floors.
-    std::fill(level_weight_.begin(), level_weight_.end(), 0.0);
-    for (const auto& p : particles_) level_weight_[static_cast<std::size_t>(p.level)] += p.weight;
-    estimate_.level =
-        static_cast<int>(std::max_element(level_weight_.begin(), level_weight_.end()) - level_weight_.begin());
-    estimate_.z = elevation(estimate_.level);
-  }
-  const int level = estimate_.level;
+ParticleFilter::Moments ParticleFilter::moments(int level) const {
   const double level_w = multi_level_ ? level_weight_[static_cast<std::size_t>(level)] : 1.0;
   const auto counts = [&](const Particle& p) { return !multi_level_ || p.level == level; };
-
-  double sx = 0.0, sy = 0.0, ss = 0.0, sc = 0.0, so = 0.0, sb = 0.0;
+  Moments m;
+  double sx = 0.0, sy = 0.0;
   for (const auto& p : particles_) {
     if (!counts(p)) continue;
     sx += p.weight * p.pos.x;
     sy += p.weight * p.pos.y;
-    ss += p.weight * std::sin(p.heading);
-    sc += p.weight * std::cos(p.heading);
-    so += p.weight * p.rssi_offset;
-    sb += p.weight * p.baro_offset;
+    m.sin_heading += p.weight * std::sin(p.heading);
+    m.cos_heading += p.weight * std::cos(p.heading);
+    m.rssi_offset += p.weight * p.rssi_offset;
+    m.baro_offset += p.weight * p.baro_offset;
   }
   if (multi_level_ && level_w > 0.0) {
     sx /= level_w;
     sy /= level_w;
-    so /= level_w;
-    sb /= level_w;
+    m.rssi_offset /= level_w;
+    m.baro_offset /= level_w;
   }
-  mean_rssi_offset_ = so;
-  if (multi_level_ && baro_ready_ && localized_ && level_w > 0.0) {
-    baro_reference_ = sb;
-    baro_reference_valid_ = true;
-  }
-  const Vec2 mean{sx, sy};
-  const Vec2 pos = map_estimate_ && localized_ ? map_estimate_->position(particles_, mean, level, multi_level_) : mean;
-  double cxx = 0.0, cxy = 0.0, cyy = 0.0;
+  m.mean = {sx, sy};
   for (const auto& p : particles_) {
     if (!counts(p)) continue;
     const double dx = p.pos.x - sx;
     const double dy = p.pos.y - sy;
-    cxx += p.weight * dx * dx;
-    cxy += p.weight * dx * dy;
-    cyy += p.weight * dy * dy;
+    m.cxx += p.weight * dx * dx;
+    m.cxy += p.weight * dx * dy;
+    m.cyy += p.weight * dy * dy;
   }
   if (multi_level_ && level_w > 0.0) {
-    cxx /= level_w;
-    cxy /= level_w;
-    cyy /= level_w;
+    m.cxx /= level_w;
+    m.cxy /= level_w;
+    m.cyy /= level_w;
   }
-  estimate_.t = t;
-  estimate_.pos = mean;
-  estimate_.heading = std::atan2(ss, sc);
-  estimate_.cov_xx = cxx;
-  estimate_.cov_xy = cxy;
-  estimate_.cov_yy = cyy;
-  estimate_.valid = localized_;
-  cloud_ = estimate_;
+  return m;
+}
+
+void ParticleFilter::update_estimate(double t) {
+  int top = 0;
+  if (multi_level_) {
+    // The most likely level is the weighted mode; position statistics use only
+    // the particles on one level so a split cloud does not average floors.
+    std::fill(level_weight_.begin(), level_weight_.end(), 0.0);
+    for (const auto& p : particles_) level_weight_[static_cast<std::size_t>(p.level)] += p.weight;
+    top = static_cast<int>(std::max_element(level_weight_.begin(), level_weight_.end()) - level_weight_.begin());
+  }
+  const auto to_estimate = [&](const Moments& m, int level) {
+    Estimate e;
+    e.t = t;
+    e.pos = m.mean;
+    e.heading = std::atan2(m.sin_heading, m.cos_heading);
+    e.cov_xx = m.cxx;
+    e.cov_xy = m.cxy;
+    e.cov_yy = m.cyy;
+    e.level = level;
+    e.z = multi_level_ ? elevation(level) : 0.0;
+    e.valid = localized_;
+    return e;
+  };
+
+  const Moments cloud = moments(top);
+  mean_rssi_offset_ = cloud.rssi_offset;
+  const double top_w = multi_level_ ? level_weight_[static_cast<std::size_t>(top)] : 1.0;
+  if (multi_level_ && baro_ready_ && localized_ && top_w > 0.0) {
+    baro_reference_ = cloud.baro_offset;
+    baro_reference_valid_ = true;
+  }
+  cloud_ = to_estimate(cloud, top);
+
+  // The estimate is not a position until radio has been applied, so neither is its level history.
+  if (!localized_) level_selector_.reset();
+  const int level = multi_level_ ? level_selector_.update(t, level_weight_) : 0;
+  const Moments shown = level == top ? cloud : moments(level);
+  estimate_ = to_estimate(shown, level);
+  const Vec2 pos =
+      map_estimate_ && localized_ ? map_estimate_->position(particles_, shown.mean, level, multi_level_) : shown.mean;
   // Second moments about the reported point, so a mode estimate keeps the spread of the whole cloud.
-  const Vec2 off = mean - pos;
+  const Vec2 off = shown.mean - pos;
   estimate_.pos = pos;
   estimate_.cov_xx += off.x * off.x;
   estimate_.cov_xy += off.x * off.y;

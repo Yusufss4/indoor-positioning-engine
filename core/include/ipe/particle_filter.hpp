@@ -11,6 +11,7 @@
 #include "ipe/beacon_integrity.hpp"
 #include "ipe/filter.hpp"
 #include "ipe/floor_classifier.hpp"
+#include "ipe/level_selector.hpp"
 #include "ipe/map_estimate.hpp"
 #include "ipe/particle.hpp"
 #include "ipe/rng.hpp"
@@ -33,6 +34,13 @@ struct ParticleFilterConfig {
   /// shop between two groups). Report the dominant group's mean instead then;
   /// the covariance still covers the whole cloud.
   bool map_consistent_estimate = true;
+  /// The reported level follows the level weights averaged with time constant `level_smoothing_s`, and
+  /// only moves once another level leads the reported one by `level_hysteresis` in that average, so a
+  /// cloud split between floors does not flicker with every packet. Both 0 report the most likely level
+  /// of every update. The filter's own decisions (integrity, recovery, barometer) always use the most
+  /// likely level.
+  double level_smoothing_s = 0.5;
+  double level_hysteresis = 0.1;
 
   bool estimate_rssi_offset = true;  ///< Track a per-device RSSI bias as a state.
   double rssi_offset_sigma = 8.0;    ///< Prior spread of the device RSSI offset [dB].
@@ -203,6 +211,14 @@ class ParticleFilter {
   void normalize_or_recover();
   void resample_if_needed();
   void update_estimate(double t);
+  /// Weighted moments of the particles on `level` (all particles in a single-level venue).
+  struct Moments {
+    Vec2 mean;
+    double sin_heading = 0.0, cos_heading = 0.0;
+    double cxx = 0.0, cxy = 0.0, cyy = 0.0;
+    double rssi_offset = 0.0, baro_offset = 0.0;
+  };
+  [[nodiscard]] Moments moments(int level) const;
 
   const Venue* venue_;
   ParticleFilterConfig cfg_;
@@ -216,7 +232,7 @@ class ParticleFilter {
   std::optional<MapConsistentEstimate> map_estimate_;  ///< Engaged when `map_consistent_estimate` is on.
   double mean_rssi_offset_ = 0.0;
   Estimate estimate_;  ///< What is reported: the cloud mean, or its dominant mode (map_consistent_estimate).
-  Estimate cloud_;     ///< Mean and covariance of the whole cloud; what the filter's own decisions use.
+  Estimate cloud_;     ///< Mean and covariance on the most likely level; what the filter's own decisions use.
 
   double w_slow_ = 0.0;
   double w_fast_ = 0.0;
@@ -247,6 +263,7 @@ class ParticleFilter {
   bool floor_prior_active_ = false;
   double last_floor_t_ = -1e300;  ///< Time of the last classified scan (floor_p_ holds its output).
   std::vector<double> level_weight_;
+  LevelSelector level_selector_;  ///< The reported level; the filter's own decisions use the most likely one.
 };
 
 }  // namespace ipe

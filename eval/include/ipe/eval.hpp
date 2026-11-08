@@ -63,10 +63,10 @@ struct Metrics {
 
   /// Smoothness of the reported track, from the estimate sampled every ReplayOptions::track_period_s
   /// (see compute_smoothness). They need no ground truth except path_ratio, so they also work on
-  /// recordings whose truth is a few waypoints. Floor changes are excluded from the horizontal figures.
+  /// recordings whose truth is a few waypoints. Every pair of fixes counts, across floors too.
   double jitter_p50_m = -1.0;   ///< Median |p(t+T) - 2 p(t) + p(t-T)|; walking at steady speed gives ~0.
   double jitter_p95_m = -1.0;   ///< 95th percentile of the same second difference.
-  double jumps_per_min = -1.0;  ///< Non-overlapping 1 s windows in which the estimate moved more than 3 m.
+  double jumps_per_min = -1.0;  ///< Non-overlapping 1 s windows that moved over 3 m or changed floor.
   int level_flips = 0;          ///< Changes of the reported level; compare with level_changes.
   /// Length of the estimated track over the length of the true one, after warm-up; -1 unless the
   /// truth is dense (median spacing <= 0.5 s), since waypoint polylines cut corners.
