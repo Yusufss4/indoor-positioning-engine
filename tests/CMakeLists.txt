@@ -16,6 +16,7 @@ add_executable(ipe_tests
   test_map_estimate.cpp
   test_particle_filter.cpp
   test_pdr.cpp
+  test_plan.cpp
   test_rng.cpp
   test_rooms.cpp
   test_rssi_model.cpp
@@ -23,7 +24,7 @@ add_executable(ipe_tests
   test_trace.cpp
   test_trace_player.cpp
   test_venue.cpp)
-target_link_libraries(ipe_tests PRIVATE ipe_eval ipe_geo GTest::gtest_main)
+target_link_libraries(ipe_tests PRIVATE ipe_eval ipe_geo ipe_plan GTest::gtest_main)
 target_compile_definitions(ipe_tests PRIVATE IPE_DATA_DIR="${PROJECT_SOURCE_DIR}/data")
 
 include(GoogleTest)

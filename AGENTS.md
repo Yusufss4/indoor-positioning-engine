@@ -16,7 +16,10 @@ truth; a replay tool and a regression suite measure accuracy.
 - `sim/` - scenario JSON to synthetic trace (IMU, BLE, barometer, ground truth).
 - `eval/` - the `pf` preset, config overrides, replay runner, metrics, regression comparison.
 - `geo/` - GeoJSON / IMDF import and export (`ipe_geo`); native tooling only, not linked by the engine.
-- `tools/` - `ipe-sim`, `ipe-replay`, `ipe-regress`, `ipe-import`.
+- `plan/` - beacon placement analysis (`ipe_plan`): coverage, Cramer-Rao bound and floor margin of a
+ beacon layout from the map and RSSI model; native tooling only. `viz/placement_study.py` checks the
+ scores against simulated CEP on thinned layouts.
+- `tools/` - `ipe-sim`, `ipe-replay`, `ipe-regress`, `ipe-import`, `ipe-plan`.
 - `tests/` - GoogleTest unit tests and the `accuracy_regression` CTest.
 - `data/venues`, `data/scenarios` - inputs. `tests/regression/baseline.json` - accepted accuracy.
 - `data/geojson`, `data/imdf` - generated from `data/venues` by `ipe-import`; a unit test fails when they

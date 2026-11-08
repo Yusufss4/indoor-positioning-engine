@@ -50,9 +50,10 @@ add_subdirectory(core)
 add_subdirectory(sim)
 add_subdirectory(eval)
 
-# Map import/export is a native tooling concern; the wasm demo reads venue JSON directly.
+# Map import/export and beacon planning are native tooling; the wasm demo reads venue JSON directly.
 if(IPE_BUILD_TOOLS OR IPE_BUILD_TESTS)
   add_subdirectory(geo)
+  add_subdirectory(plan)
 endif()
 
 if(IPE_BUILD_TOOLS)
