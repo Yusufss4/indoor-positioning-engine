@@ -25,7 +25,7 @@ truth; a replay tool and a regression suite measure accuracy.
 - `data/geojson`, `data/imdf` - generated from `data/venues` by `ipe-import`; a unit test fails when they
   are stale. `data/mappings` - GeoJSON property mapping tables.
 - `data/configs` - engine config patches for `--config` (e.g. `open_venue.json`, `msil_wifi.json`, `ipin.json`
-  = `msil_wifi.json` plus the opt-in floor model, see [docs/ipin.md](docs/ipin.md#floor-model)).
+  = `msil_wifi.json` plus the opt-in floor model and slab-loss calibration, see [docs/ipin.md](docs/ipin.md#floor-model)).
 - `datasets/msil` - fetch and convert scripts for the Microsoft Indoor Location sample. The raw data and
   the converted `out/` (readings one by one) and `out_scans/` (`--scans`, one batch per Wi-Fi scan) are
   git-ignored; `tests/regression/msil_baseline.json` gates the held-out walks of `out_scans/`.

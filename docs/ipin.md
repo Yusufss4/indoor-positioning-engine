@@ -138,13 +138,14 @@ With the default config the holdout medians are 11.6 m / 67% (Nuremberg) and 18.
 
 ## Floor model
 
-`data/configs/ipin.json` is `msil_wifi.json` plus four settings; all are off in the default config.
+`data/configs/ipin.json` is `msil_wifi.json` plus five settings; all are off in the default config.
 
 | Setting | What it does | Failure it targets |
 |---|---|---|
 | `pf.baro_jump` | Once the cloud's barometer residual has pointed at the next floor (more than half the gap) for 3 s, particles whose own residual fits that floor better move onto it inside the nearest stairs or lift within 25 m. | A walker takes the stairs while the estimate is 10–20 m from them. |
 | `pf.baro_offset_walk_m` 0.01 | The particles' barometer offset drifts 0.01 m per update instead of 0.05 m. | At 0.05 m, resampling let the offset absorb a 2.5 m descent within about 20 s, before the jump could see it. Weather drift is about 0.05 m per minute. |
 | `pf.baro_reseed_keep_reference` 0.5 | Half the new particles (recovery, ring proposals, re-seeds) take the cloud's barometer reference, not one fitted to their own floor. | A re-seed on the wrong floor fits the barometer by construction, so nothing rejects it. |
+| `pf.calibrate_floor_loss` | Once converged, every admitted reading from another floor, predicted above -85 dBm, nudges one venue-wide slab loss by 0.02 x its residual. Added after the tables below (experiment 10). | The fitted 2–4 dB per slab is one number for a whole building. |
 | `pf.floor_prior_weight` 3 | k-NN (k = 5) over the training Wi-Fi scans stored in the venue (`floor_fingerprints`) gives p(floor) per scan. It is applied as `3 · log p(level)`, and recovery injections draw their floor from it. | The radio model's 2–4 dB per slab barely separates floors; the fingerprints get the floor right for 93–96% of validation scans. |
 
 Validation walks (tune), 5 seeds; the weight was swept from 0.25 to 4 on these walks only:
@@ -197,6 +198,20 @@ The other two settings trade:
 
 The engine defaults are therefore unchanged.
 
+**Slab-loss calibration** (`pf.calibrate_floor_loss`, added to `ipin.json` later, experiment 10 in
+[experiments.md](experiments.md)). Validation walks, `ipin.json` with and without it. The engine then
+already had the floor hysteresis, the track smoother and the automatic init proposal, so the "without"
+row differs from the table above. CEP from `ipe-regress` (1 seed); floor hit and p75 from `evaluate.py`
+(3 seeds):
+
+| Config | Nuremberg CEP50 / CEP95 [m] | floor hit | IPIN p75 [m] | UMinho CEP50 / CEP95 [m] | floor hit | IPIN p75 [m] |
+|---|---:|---:|---:|---:|---:|---:|
+| without | 4.42 / 22.00 | 83% | 18.5 | 11.03 / 27.48 | 70% | 33.8 |
+| **with** | **5.26 / 19.78** | **89%** | **14.9** | **10.78 / 27.66** | **69%** | **31.3** |
+
+The competition metric improves in both buildings; the reported floor changes more often (flips 3.5 →
+5.5 and 14 → 19 per walk, for 2 real changes). The scoring walks were not replayed for this setting.
+
 ## Failure modes
 
 - **The floor follows the position.** Particles change floor only inside a connector. When the walker
@@ -234,7 +249,9 @@ in, and both are shifted to start at 0.
 - **UMinho's cut** falls between two landmarks on the same floor, so the trace gets one truth row at 0 s,
   interpolated between them. Scoring skips the first 5 s, so that row is never scored.
 - **Accuracy.** The filter starts cold at the cut. With `ipin.json` the trimmed Nuremberg walk has the
-  floor right for 88% of its landmarks (96% on the full walk), and UMinho for 40%.
+  floor right for 100% of its landmarks (88% before the slab-loss calibration), and UMinho for 30% (40%
+  before; CEP50 7.5 -> 12.5 m). These are single walks. The UMinho validation set as a whole improved
+  ([Floor model](#floor-model)), but this walk did not.
 
 ## Reproduce
 

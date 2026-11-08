@@ -27,6 +27,7 @@ ParticleFilter::ParticleFilter(const Venue& venue, ParticleFilterConfig cfg, Rss
       rng_(cfg.seed),
       integrity_(venue.beacons().size(), {cfg.integrity_threshold_db, cfg.integrity_alpha, cfg.integrity_min_samples,
                                           cfg.integrity_max_sigma_m}),
+      floor_db_(venue.floor_attenuation_db()),
       multi_level_(venue.multi_level()),
       altimeter_(baro_cfg),
       floor_classifier_(venue, {cfg.floor_prior_k, cfg.floor_prior_eps}),
@@ -46,12 +47,29 @@ ParticleFilter::ParticleFilter(const Venue& venue, ParticleFilterConfig cfg, Rss
 bool ParticleFilter::beacon_excluded(std::size_t beacon_index) const { return integrity_.excluded(beacon_index); }
 
 bool ParticleFilter::check_beacon(std::size_t beacon_index, double rssi) {
-  if (!cfg_.beacon_integrity) return true;
+  const bool calibrating = cfg_.calibrate_floor_loss && multi_level_;
+  if (!cfg_.beacon_integrity && !calibrating) return true;
   // Residuals are only meaningful once the estimate itself can be trusted.
-  if (!integrity_.can_judge(cloud_.sigma_radius())) return !integrity_.excluded(beacon_index);
+  if (!integrity_.can_judge(cloud_.sigma_radius())) return !cfg_.beacon_integrity || !integrity_.excluded(beacon_index);
   const Beacon& beacon = venue_->beacons()[beacon_index];
-  const double residual = rssi - (rssi_model_.expected_rssi(beacon, cloud_.pos, cloud_.level) + mean_rssi_offset_);
-  return integrity_.admit(beacon_index, residual);
+  const double expected = expected_rssi(beacon, cloud_.pos, cloud_.level) + mean_rssi_offset_;
+  const double residual = rssi - expected;
+  const bool admitted = !cfg_.beacon_integrity || integrity_.admit(beacon_index, residual);
+  // Selected on the prediction, not the measurement, so the selection does not depend on the noise. The
+  // cost: a slab loss that starts far too high predicts every other-floor reading below the threshold and
+  // cannot be corrected (experiment 10).
+  if (admitted && calibrating && expected >= cfg_.loss_calibration_min_rssi_dbm) {
+    calibrate_floor_loss(beacon, residual);
+  }
+  return admitted;
+}
+
+void ParticleFilter::calibrate_floor_loss(const Beacon& beacon, double residual) {
+  // The model subtracts floor_db_ per slab; a reading stronger than predicted (r > 0) means less loss.
+  const int slabs = std::abs(beacon.level - cloud_.level);
+  if (slabs == 0) return;
+  const double r = std::clamp(residual, -cfg_.loss_calibration_clip_db, cfg_.loss_calibration_clip_db);
+  floor_db_ = std::clamp(floor_db_ - cfg_.loss_calibration_rate * r / slabs, 0.0, kMaxFloorDb);
 }
 
 Vec2 ParticleFilter::sample_position(int level) {
@@ -287,7 +305,7 @@ void ParticleFilter::update_rssi(double t, std::span<const RssiReading> readings
     double ll = 0.0;
     for (const auto& r : readings) {
       const Beacon& beacon = venue_->beacons()[r.beacon_index];
-      const double expected = rssi_model_.expected_rssi(beacon, p.pos, p.level) + p.rssi_offset;
+      const double expected = expected_rssi(beacon, p.pos, p.level) + p.rssi_offset;
       ll += rssi_model_.log_likelihood(r.rssi - expected);
     }
     // Floor classifier output for this scan, as a likelihood on the particle's level. It is part of the

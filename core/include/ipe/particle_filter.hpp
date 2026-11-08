@@ -46,6 +46,18 @@ struct ParticleFilterConfig {
   double rssi_offset_sigma = 8.0;    ///< Prior spread of the device RSSI offset [dB].
   double rssi_offset_walk = 0.05;    ///< Random walk of the offset per RSSI update [dB].
 
+  /// Online calibration of the loss per slab (multi-level venues). Once the estimate has converged (the
+  /// integrity monitor's test), each admitted reading from a beacon on another level nudges one venue-wide
+  /// slab loss by `loss_calibration_rate` times its residual at the estimate (per slab, clipped to
+  /// `loss_calibration_clip_db`). One shared value, not a particle state: a per-particle loss lets a
+  /// wrong position with a matching loss explain the readings as well as the right one (experiment 10).
+  bool calibrate_floor_loss = false;
+  double loss_calibration_rate = 0.02;
+  double loss_calibration_clip_db = 15.0;
+  /// Readings predicted weaker than this are not used: receivers drop packets near their sensitivity, so
+  /// the weak readings that do arrive are biased strong and would make the loss look smaller.
+  double loss_calibration_min_rssi_dbm = -85.0;
+
   /// Beacon integrity monitor: once converged, track each beacon's mean RSSI
   /// residual at the estimate and stop using beacons that disagree for long
   /// (moved or mis-surveyed beacons). Hysteresis re-admits them.
@@ -138,6 +150,8 @@ class ParticleFilter {
   [[nodiscard]] std::uint64_t recovery_count() const { return recovery_count_; }
   [[nodiscard]] bool beacon_excluded(std::size_t beacon_index) const;
   [[nodiscard]] bool radio_seeded() const { return radio_seeded_; }
+  /// Loss per slab in use: the venue's, or the calibrated value.
+  [[nodiscard]] double floor_loss_db() const { return floor_db_; }
   /// Whether the init proposal is in use (`init_proposal`, or chosen by `init_proposal_auto_density`).
   [[nodiscard]] bool init_proposal_active() const { return cfg_.init_proposal; }
 
@@ -170,6 +184,7 @@ class ParticleFilter {
   };
 
   static constexpr int kRingTries = 4;
+  static constexpr double kMaxFloorDb = 40.0;
   static constexpr int kFootprintTries = 64;  ///< Enough for a footprint covering 10% of the bounds.
 
   [[nodiscard]] Ring ring_for(const Beacon& beacon, double rssi, double rssi_offset) const;
@@ -188,8 +203,10 @@ class ParticleFilter {
   void update_rssi(double t, std::size_t beacon_index, double rssi);
   void update_rssi(double t, std::span<const RssiReading> readings);
 
-  /// Updates the integrity monitor; returns false if the beacon should be skipped.
+  /// Updates the integrity monitor and the loss calibration; returns false if the beacon should be skipped.
   bool check_beacon(std::size_t beacon_index, double rssi);
+  /// One slab-loss calibration step from a reading's residual at the converged estimate.
+  void calibrate_floor_loss(const Beacon& beacon, double residual);
 
   void initialize_uniform();
   /// Uniform over the venue's walkable area (its footprint, else its bounds);
@@ -237,6 +254,10 @@ class ParticleFilter {
   BeaconIntegrityMonitor integrity_;
   std::optional<MapConsistentEstimate> map_estimate_;  ///< Engaged when `map_consistent_estimate` is on.
   double mean_rssi_offset_ = 0.0;
+  double floor_db_ = 0.0;  ///< Loss per slab in the radio model (the venue's value until calibrated).
+  [[nodiscard]] double expected_rssi(const Beacon& b, Vec2 pos, int level) const {
+    return rssi_model_.expected_rssi(b, pos, level, venue_->wall_attenuation_db(), floor_db_);
+  }
   Estimate estimate_;  ///< What is reported: the cloud mean, or its dominant mode (map_consistent_estimate).
   Estimate cloud_;     ///< Mean and covariance on the most likely level; what the filter's own decisions use.
 

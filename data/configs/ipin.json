@@ -9,6 +9,7 @@
     "baro_jump": true,
     "baro_reseed_keep_reference": 0.5,
     "baro_offset_walk_m": 0.01,
-    "floor_prior_weight": 3.0
+    "floor_prior_weight": 3.0,
+    "calibrate_floor_loss": true
   }
 }
