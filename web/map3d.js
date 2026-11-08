@@ -356,8 +356,10 @@ class Map3D {
                          { kind: name, level: e.level }));
     }
     const t = frame.truth;
-    dots.push(extruded(ring(this.frame, t.x, t.y, 0.3, 12), this.z(t.level), this.z(t.level, 1.8), "#222222",
-                       { kind: "truth", level: t.level }));
+    if (t.valid) {
+      dots.push(extruded(ring(this.frame, t.x, t.y, 0.3, 12), this.z(t.level), this.z(t.level, 1.8), "#222222",
+                         { kind: "truth", level: t.level }));
+    }
 
     const parts = [];
     const p = frame.particles;

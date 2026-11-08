@@ -1,0 +1,15 @@
+The venues in this folder are derived from the IPIN competition Track 3 (smartphone-based, off-site)
+datasets, licensed under Creative Commons Attribution 4.0 International (CC BY 4.0,
+https://creativecommons.org/licenses/by/4.0/). The walls were extracted from the competition's floor
+maps and corrected (datasets/ipin/maps.py, datasets/ipin/edits/); the transmitter positions and path-loss
+parameters were fitted on the training walks (datasets/ipin/convert.py).
+
+nuremberg.json (Museum Industriekultur, Nuremberg):
+  Torres-Sospedra, J.; et al. Datasets and Supporting Materials for the IPIN 2023 Competition Track 3
+  (Smartphone-based, off-site). Zenodo, 2023. https://doi.org/10.5281/zenodo.8362205
+  Torres-Sospedra, J.; et al. Datasets and Supporting Materials for the IPIN 2024 Competition Track 3
+  (Smartphone-based, off-site). Zenodo, 2024. https://doi.org/10.5281/zenodo.13931119
+
+uminho.json (University of Minho, building 11, Guimaraes):
+  Torres-Sospedra, J.; et al. Datasets and Supporting Materials for the IPIN 2022 Competition Track 3
+  (Smartphone-based, off-site). Zenodo, 2022. https://doi.org/10.5281/zenodo.7612915

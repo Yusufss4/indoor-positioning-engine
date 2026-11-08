@@ -92,6 +92,8 @@ class Demo {
     o.set("heading", t.heading);
     o.set("level", t.level);
     o.set("z", t.z);
+    // Recordings start before the surveyor's first waypoint: until then there is no truth to show.
+    o.set("valid", truth_seen_ > 0);
     set_wgs84(o, t.pos);
     return o;
   }

@@ -147,6 +147,14 @@ With the default config the holdout medians are 11.6 m / 67% (Nuremberg) and 18.
 - **Uncertainty is still too small**, as on MSIL: the 95% ellipse holds the truth for 34–42% of fixes
   (`ipe-regress` coverage95).
 
+## In the web demo
+
+The demo's menu has one walk per building under "Real recordings (IPIN competition, several floors)",
+picked by a fixed rule: the shortest validation walk with a barometer that visits every floor. Each
+floor shows its competition plan under the extracted walls, and the 3D view stacks the floors (Nuremberg's
+floor −1 at the size of its landing). `datasets/ipin/export_demo.py` writes `data/real_ipin/` (venue,
+GeoJSON export, plans, trace, `demos.json`); a unit test checks it against the venue export.
+
 ## Reproduce
 
 ```bash
@@ -156,6 +164,7 @@ datasets/ipin/fetch.sh
 .venv/bin/python datasets/ipin/evaluate.py datasets/ipin/out_scans/manifest_tune.json \
     --config data/configs/msil_wifi.json --seeds 5
 ctest --test-dir build -R ipin_regression --output-on-failure
+.venv/bin/python datasets/ipin/export_demo.py   # data/real_ipin/ for the web demo
 ```
 
 Conversion takes about 3 minutes and writes debug PNGs (walls in red, landmarks in orange, transmitters

@@ -120,12 +120,14 @@ std::string export_geojson(const Venue& v, const ExportOptions& opts) {
                                              {"origin_lon", g.origin_lon},
                                              {"rotation_deg", g.rotation_deg}}));
   for (const Level& l : v.levels()) {
-    fs.push_back(feature(polygon(g, bounds_ring(v.bounds())), {{"feature_type", "level"},
-                                                               {"level", l.ordinal},
-                                                               {"ordinal", l.ordinal},
-                                                               {"name", l.name},
-                                                               {"elevation_m", l.elevation_m},
-                                                               {"height_m", l.height_m}}));
+    // A level smaller than the building (its own footprint) is drawn at its size.
+    const std::vector<Vec2> level_outline = l.footprint.empty() ? bounds_ring(v.bounds()) : l.footprint;
+    fs.push_back(feature(polygon(g, level_outline), {{"feature_type", "level"},
+                                                     {"level", l.ordinal},
+                                                     {"ordinal", l.ordinal},
+                                                     {"name", l.name},
+                                                     {"elevation_m", l.elevation_m},
+                                                     {"height_m", l.height_m}}));
   }
   for (const Level& l : v.levels()) {
     for (const Segment& s : l.walls) {
