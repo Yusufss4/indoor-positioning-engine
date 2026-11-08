@@ -14,6 +14,7 @@ add_library(ipe_core STATIC
   src/rssi_model.cpp
   src/trace.cpp
   src/trace_player.cpp
+  src/track_smoother.cpp
   src/venue.cpp)
 add_library(ipe::core ALIAS ipe_core)
 

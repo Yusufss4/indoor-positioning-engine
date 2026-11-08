@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -11,6 +12,7 @@
 #include "ipe/pdr.hpp"
 #include "ipe/rooms.hpp"
 #include "ipe/rssi_model.hpp"
+#include "ipe/track_smoother.hpp"
 #include "ipe/venue.hpp"
 
 namespace ipe {
@@ -21,6 +23,7 @@ struct EngineConfig {
   BaroConfig baro;
   ParticleFilterConfig pf;
   RoomEventConfig rooms;
+  TrackSmootherConfig smoothing;
   double mag_heading_sigma_deg = 12.0;
 };
 
@@ -38,7 +41,12 @@ class PositioningEngine {
   void on_scan(double t, std::span<const RssiReading> readings);
   void on_pressure(double t, double hpa);
 
-  [[nodiscard]] Estimate estimate() const { return pf_.estimate(); }
+  /// What to draw: the filter's estimate through the track smoother (EngineConfig::smoothing).
+  [[nodiscard]] Estimate estimate() const {
+    return cfg_.smoothing.enabled ? smoother_.estimate(now_, pf_.estimate()) : pf_.estimate();
+  }
+  /// The particle filter's own estimate, unsmoothed.
+  [[nodiscard]] Estimate raw_estimate() const { return pf_.estimate(); }
   [[nodiscard]] const Venue& venue() const { return *venue_; }
   [[nodiscard]] const EngineConfig& config() const { return cfg_; }
   [[nodiscard]] std::uint64_t step_count() const { return steps_; }
@@ -54,6 +62,12 @@ class PositioningEngine {
   [[nodiscard]] const RoomTracker* room_tracker() const { return rooms_ ? &*rooms_ : nullptr; }
 
  private:
+  /// Feeds the filter's estimate after a non-step update to the smoother.
+  void after_update(double t) {
+    now_ = std::max(now_, t);
+    smoother_.on_update(t, pf_.estimate());
+    update_rooms(t);
+  }
   void update_rooms(double t) {
     if (rooms_ && rooms_->due(t)) rooms_->update(t, pf_.estimate(), &pf_);
   }
@@ -62,6 +76,8 @@ class PositioningEngine {
   EngineConfig cfg_;
   PdrProcessor pdr_;
   ParticleFilter pf_;
+  TrackSmoother smoother_;
+  double now_ = 0.0;  ///< Latest event time.
   std::optional<RoomTracker> rooms_;
   std::uint64_t steps_ = 0;
 };

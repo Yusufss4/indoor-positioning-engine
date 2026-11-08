@@ -256,6 +256,72 @@ Variants tried and dropped (10 seeds):
 the dot moves one step at a time and follows every radio update (jitter p95 about 1 m on
 `office_nominal`, 4 jumps per minute on MSIL and 8 on IPIN). That is the next change.
 
+## 8. A dot that shakes: smoothing what is drawn
+
+**Symptom.** The filter recomputes its estimate after every packet, step and heading update. Drawn as-is
+it shakes even when the walk is clean. On `office_nominal` the second difference of the 5 Hz track has a
+95th percentile of 1.07 m (the truth: 0.10 m), and the drawn path is 1.39 times the walked one. On real
+walks the dot jumps more than 3 m in a second 3.8 times a minute (MSIL) and 8-9 times a minute (IPIN).
+
+**Change.** `TrackSmoother` (`core/src/track_smoother.cpp`) sits between the filter and
+`PositioningEngine::estimate()`:
+- a step moves the dot by the filter's own displacement for that step, at once;
+- other updates pull it towards the filter's estimate with time constant `smoothing.tau_s`;
+- it jumps instead when the filter is more than `smoothing.snap_m` away, when the level changes, or when
+  gliding would cross a wall.
+
+The covariance is taken about the drawn point. `raw_estimate()` is the filter's own;
+`smoothing.enabled = false` is bit-identical to it (unit test `DisabledEngineReportsTheFilterEstimate`).
+
+**Settings** (means over the 12 scenarios, 10 seeds each; MSIL = 109 tune walks, median over walks):
+
+| Setting | CEP50 | CEP95 | Jitter p95 | Jumps/min | MSIL CEP50 / CEP95 | MSIL jumps/min |
+|---|---:|---:|---:|---:|---:|---:|
+| off | 0.924 | 3.433 | 1.66 | 1.56 | 6.37 / 10.19 | 3.8 |
+| tau 1 s, cap 1.5 m/s, snap 6 m, extrapolate 1 step | 0.926 | 3.606 | 1.06 | 1.39 | | |
+| tau 0.3 s, no cap, snap 10 m, extrapolate 1 step | 0.922 | 3.507 | 0.99 | 1.47 | | |
+| tau 0.3 s, no cap, snap 10 m, extrapolate 1/2 step | 0.912 | 3.481 | 0.98 | 1.48 | 6.68 / 10.28 | 3.2 |
+| **tau 0.5 s, no cap, snap 10 m, no extrapolation** | 0.930 | 3.442 | 1.02 | 1.30 | 6.67 / 10.17 | 2.5 |
+| tau 1 s, no cap, snap 20 m, extrapolate 1/2 step | | | | | 6.74 / 10.23 | 2.3 |
+
+- **Correction lag costs nothing.** With extrapolation off, tau from 0.3 to 0.5 s leaves CEP95 at
+  3.43-3.44 m.
+- **The speed cap costs the tail.** Capping corrections at 1.5 m/s holds the dot back while the filter
+  moves to new radio evidence; without the cap CEP95 is 0.08 m lower.
+- **Extrapolation overshoots.** Moving the dot at the last step's pace between steps removes the
+  one-step-at-a-time motion. The raw estimate's along-track bias differs by scenario, though: -0.13 m on
+  `office_nominal`, +0.15 m on `office_step_scale`, -0.36 m on `office_device_offset` (3 seeds each). So
+  extrapolation helps some walks and hurts others, overshoots where the walker stops or turns (CEP95
+  +0.04-0.07 m), and on MSIL adds jumps (3.2 vs 2.5 per minute).
+- **A small snap distance brings the jumps back.** 3-4 m on simulation; real Wi-Fi corrections are often
+  larger.
+
+**Result** with the kept setting (10 seeds; before is the code before the change):
+
+| Scenario | CEP50 | CEP95 | Jitter p95 [m] | Jumps/min | Path ratio |
+|---|---:|---:|---:|---:|---:|
+| office_nominal | 0.66 -> 0.66 | 1.59 -> 1.58 | 1.07 -> 0.81 | 0.2 -> 0.3 | 1.39 -> 1.19 |
+| airport_hall_sparse | 1.30 -> 1.30 | 7.25 -> 7.26 | 1.25 -> 0.85 | 1.0 -> 0.7 | 1.46 -> 1.25 |
+| kit_tour | 2.28 -> 2.31 | 11.05 -> 11.11 | 2.73 -> 1.81 | 4.1 -> 3.7 | 2.54 -> 2.18 |
+| office_floor_bleed | 0.89 -> 0.89 | 4.08 -> 3.90 | 5.19 -> 2.33 | 4.8 -> 3.8 | 3.27 -> 2.37 |
+| office_mag_disturbance | 1.09 -> 1.12 | 2.60 -> 2.65 | 1.51 -> 0.87 | 0.9 -> 0.9 | 1.72 -> 1.39 |
+| office_stairs_up_down | 0.78 -> 0.79 | 3.17 -> 3.26 | 1.35 -> 0.80 | 2.1 -> 1.7 | 1.88 -> 1.57 |
+
+The other six scenarios move by 0.03 m or less in CEP, with jitter down 20-35%. Coverage95 rises by about
+1 point everywhere, because the covariance includes the dot's offset from the filter.
+
+Real tune walks:
+- MSIL: CEP50 6.37 -> 6.67 m, within the 1 m walk-to-walk noise; CEP95 10.19 -> 10.17 m; jitter p95
+  1.78 -> 1.33 m; jumps 3.8 -> 2.5 per minute.
+- IPIN Nuremberg: CEP50/CEP95 4.45/22.75 -> 4.42/22.00 m; jumps 8.2 -> 6.7 per minute.
+- IPIN UMinho: 11.38/27.52 -> 11.03/27.48 m; jumps 9.2 -> 8.6 per minute.
+
+**Kept.** The smoother, on by default with tau 0.5 s, no cap, snap 10 m, no extrapolation.
+
+**Left.** Jitter p50 is still about the step length (0.67 m on `office_nominal`), because the dot moves
+once per step. Extrapolation would fix that if the step timing were known better; for now it is a setting
+(`smoothing.extrapolate_steps`).
+
 ## Open questions
 
 - The beacon-driven init proposal (experiment 4) fixes the airport hall but slows small walled offices.
