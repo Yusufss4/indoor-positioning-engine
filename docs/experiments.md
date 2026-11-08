@@ -122,6 +122,46 @@ the default filter is bit-identical (unit test `ProposalSettingsAreInertWhenDisa
 the init proposal for large open venues:
 `ipe-replay --config data/configs/open_venue.json ...`.
 
+## 5. Can the map predict which beacons matter? (`ipe-plan`)
+
+**Question.** A beacon-removal planner needs a cheap score that ranks layouts the way the filter's error
+does. `ipe-plan analyze` scores a layout from the map and RSSI model alone: beacons heard above -85 dBm,
+and the Cramer-Rao bound on horizontal error with the device offset as an unknown, either per point or
+pooled over the last `--window` metres of walk.
+
+**Method.** `viz/placement_study.py` thins the venue of four scenarios: every beacon dropped in turn
+(drop-one) and every k-th beacon kept (k = 2, 3, 4). Each layout is simulated with `pf`, twice with
+disjoint seeds (10 each). The target is the mean CEP of both runs; how well the two runs agree with
+each other bounds what any score can reach. Spearman correlation with CEP50, all layouts / drop-one
+only (KIT has 155 beacons, so no drop-one):
+
+| Scenario | Layouts | Two runs agree | Beacons heard | Bound p50, per point | Bound p50, 10 m window | Bound p50, 20 m window |
+|---|---|---:|---:|---:|---:|---:|
+| `office_nominal` | 22 / 12 | 0.48 / -0.20 | 0.81 / 0.40 | 0.67 / -0.18 | 0.84 / 0.50 | 0.84 / 0.54 |
+| `airport_hall_sparse` | 18 / 10 | 0.82 / 0.52 | 0.61 / -0.19 | 0.45 / -0.31 | 0.60 / -0.33 | 0.69 / 0.09 |
+| `office_floor_bleed` | 34 / 24 | 0.79 / 0.52 | 0.74 / 0.30 | 0.74 / 0.28 | 0.75 / 0.34 | 0.77 / 0.39 |
+| `kit_tour` | 10 / - | 0.78 / - | 0.72 / - | 0.70 / - | 0.85 / - | 0.83 / - |
+
+**Findings.**
+
+- Pooling along the walk is what makes the bound useful. Per point, an office with 4 of its 12 beacons
+  has no bounded fix on 86% of the walk, yet `pf` reaches CEP50 0.65 m (full layout 0.66 m), because
+  dead reckoning and walls carry it between beacons. With a 10 m window the bound ranks thinned layouts
+  at 0.60-0.85 and its scale is close to the filter's (0.61 m vs CEP50 0.66 m on `office_nominal`).
+- Drop-one decisions are not predictable from the map. On `office_nominal` two 10-seed runs do not
+  even agree which beacon matters (-0.20): the differences are seed noise. On the airport and
+  `office_floor_bleed` they agree at 0.52, and no score gets there.
+- Some beacons hurt. Dropping H1-H4 (along the first leg) lowers airport CEP50 from 1.29 m to
+  1.10-1.23 m. The simulated path-loss exponent and wall loss differ from the map, so a far beacon adds
+  bias. An information bound cannot see this: under the model a beacon never hurts.
+- The median along the walk barely moves when one beacon goes (0.58 m for most drop-one layouts of
+  `office_floor_bleed`); a root-mean-square aggregate was tried and ranked worse.
+- KIT's 10 m grid has slack, but which half stays matters: keeping 77 of 155 gives CEP50/CEP95
+  2.78/10.15 m against 2.27/11.10 m, the other 78 give 3.39/16.37 m.
+
+**Kept.** `ipe-plan` with a 10 m window as default. A removal planner can use it to reject layouts, but
+single removals have to be judged by simulation with more than 10 seeds.
+
 ## 6. Estimates that go through walls
 
 **Symptom.** In the web demo the dot slides into and through walls, mostly on the mall walks.
