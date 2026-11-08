@@ -25,8 +25,36 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 VIEW_PAD_M = 8.0
 MAX_IMAGE_PX = 2400
+# Seconds cut from the start of each demo walk. The surveyor taps the first landmark about 61 s in, so
+# before that there is no walker to show, and on the 3D overview it only becomes visible once it moves:
+# from ~82 s in UMinho, and from the second landmark (90.6 s, after the stairs) in Nuremberg, whose first
+# landmark is on the floor -1 landing.
+DEMO_START_S = {"nuremberg": 90.0, "uminho": 82.0}
 
 Image.MAX_IMAGE_PIXELS = None
+
+
+def trim_trace(lines: list[str], start: float) -> list[str]:
+    """Drops every row before `start` and shifts the rest to start at 0. If `start` falls between two
+    landmarks on the same floor, a truth row interpolated between them is added at 0, as the demo draws
+    the walker there anyway (and scoring skips the first 5 s)."""
+    header = [ln for ln in lines if ln.startswith("#")]
+    rows = [ln.split(",") for ln in lines if ln and not ln.startswith("#")]
+    gt = [r for r in rows if r[0] == "gt"]
+    out = []
+    before = [r for r in gt if float(r[1]) < start]
+    after = [r for r in gt if float(r[1]) >= start]
+    if before and after and len(before[-1]) > 5 and before[-1][5] == after[0][5]:
+        a, b = before[-1], after[0]
+        u = (start - float(a[1])) / (float(b[1]) - float(a[1]))
+        x = float(a[2]) + u * (float(b[2]) - float(a[2]))
+        y = float(a[3]) + u * (float(b[3]) - float(a[3]))
+        out.append(f"gt,0.000,{x:.3f},{y:.3f},{a[4]},{a[5]},{a[6]}")
+    for r in rows:
+        t = float(r[1])
+        if t >= start:
+            out.append(",".join([r[0], f"{t - start:.3f}"] + r[2:]))
+    return header + out
 
 
 def main():
@@ -66,29 +94,39 @@ def main():
             img.save(site_dir / name, optimize=True)
             images[str(o)] = f"{site}/{name}"
         src = args.out_dir / t["trace"]
-        shutil.copy(src, site_dir / src.name)
+        start = DEMO_START_S.get(site, 0.0)
+        trimmed = trim_trace(src.read_text().splitlines(), start)
+        (site_dir / src.name).write_text("\n".join(trimmed) + "\n")
+        duration = t["duration_s"] - start
+        interpolated = sum(1 for ln in trimmed if ln.startswith("gt,0.000,")) and not any(
+            ln.startswith("gt,") and abs(float(ln.split(",")[1]) - start) < 5e-4
+            for ln in src.read_text().splitlines())
 
         venue = json.loads((site_dir / "venue.json").read_text())
         bounds = venue["bounds"]
-        pts = [tuple(map(float, ln.split(",")[2:4])) for ln in src.read_text().splitlines() if ln.startswith("gt,")]
+        pts = [tuple(map(float, ln.split(",")[2:4])) for ln in trimmed if ln.startswith("gt,")]
         xs, ys = [p[0] for p in pts], [p[1] for p in pts]
         view = [max(bounds[0], min(xs) - VIEW_PAD_M), max(bounds[1], min(ys) - VIEW_PAD_M),
                 min(bounds[2], max(xs) + VIEW_PAD_M), min(bounds[3], max(ys) + VIEW_PAD_M)]
         title = cfg["description"].split(" (")[0]
         demos.append({
             "id": f"ipin_{site}",
-            "title": f"{title}, {t['duration_s'] / 60:.0f} min walk, {len(ordinals)} floors",
+            "title": f"{title}, {duration / 60:.0f} min walk, {len(ordinals)} floors",
             "venue": f"{site}/venue.json",
             "geojson": f"{site}/venue.geojson",
             "images": images,
             "trace": f"{site}/{src.name}",
             "config": "../configs/ipin.json",
             "view": [round(v, 1) for v in view],
-            "duration_s": round(t["duration_s"], 1),
-            "waypoints": len(pts),
+            "duration_s": round(duration, 1),
+            "waypoints": len(pts) - (1 if interpolated else 0),
             "description": (
                 f"{title}: an IPIN competition validation walk ({t['phone']}, IMU + Wi-Fi + barometer) over floors "
-                f"{', '.join(map(str, ordinals))}, taking the stairs. Squares are the landmarks the surveyor tapped, "
+                f"{', '.join(map(str, ordinals))}, taking the stairs. The first {start:.0f} s of the recording are cut, "
+                "most of it before the surveyor's first landmark"
+                + (", and the square at 0 s is interpolated between the two landmarks around the cut. " if interpolated
+                   else ". ")
+                + "Squares are the landmarks the surveyor tapped, "
                 "the only ground truth; the floor menu follows the walker. Walls were extracted from the "
                 "competition's floor plans and the Wi-Fi access points (purple) located from the training walks. "
                 "This walk is from the set the settings were chosen on; the held-out scoring walks are in "
@@ -96,12 +134,13 @@ def main():
                 "model (barometer jump to the nearest stairs, kept barometer reference, Wi-Fi fingerprint floor "
                 "prior)."),
         })
-        print(f"{site}: {src.name} ({t['duration_s']:.0f} s, {len(pts)} landmarks, {t['phone']})")
+        print(f"{site}: {src.name} ({duration:.0f} s from {start:.0f} s, {len(pts)} landmarks, {t['phone']})")
 
     index = {
         "menu": "Real recordings (IPIN competition, several floors)",
         "source": "IPIN competition Track 3 datasets, CC BY 4.0 (see LICENSE)",
-        "selection": "per site, the shortest validation walk with a barometer that visits every floor",
+        "selection": ("per site, the shortest validation walk with a barometer that visits every floor, without its "
+                      "first seconds (DEMO_START_S)"),
         "default": demos[0]["id"],
         "demos": demos,
     }
