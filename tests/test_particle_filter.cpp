@@ -572,3 +572,22 @@ TEST(ParticleFilter, FloorPriorPullsTheCloudToTheClassifiedLevel) {
   EXPECT_LT(share[0], 0.01);
   EXPECT_GT(share[1], 1000.0 * share[0]);
 }
+
+TEST(ParticleFilter, InitProposalTurnsOnForSparseClouds) {
+  // two_room_venue: 200 m^2. The two-level venue counts both floors: 400 m^2.
+  const Venue v = test::two_room_venue();
+  const Venue two = test::two_level_venue();
+  auto cfg = test_config();
+  cfg.init_proposal_auto_density = 0.6;
+  cfg.num_particles = 100;  // 0.5 per m^2
+  EXPECT_TRUE(ParticleFilter(v, cfg, {}).init_proposal_active());
+  cfg.num_particles = 200;  // 1.0 per m^2 here, 0.5 per m^2 over both floors
+  EXPECT_FALSE(ParticleFilter(v, cfg, {}).init_proposal_active());
+  EXPECT_TRUE(ParticleFilter(two, cfg, {}).init_proposal_active());
+  cfg.init_proposal_auto_density = 0.0;
+  cfg.num_particles = 10;
+  EXPECT_FALSE(ParticleFilter(v, cfg, {}).init_proposal_active());
+  cfg.init_proposal = true;  // set explicitly, on whatever the density
+  cfg.num_particles = 5000;
+  EXPECT_TRUE(ParticleFilter(v, cfg, {}).init_proposal_active());
+}

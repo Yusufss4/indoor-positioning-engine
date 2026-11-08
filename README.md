@@ -20,7 +20,7 @@ WebAssembly build that runs the same engine in the browser with a 2D and a 3D (M
 | **Floors** | Venues with levels, stairwells, lifts and escalators; 3D radio distance with slab loss; barometric altitude with low-pass filtering; floor accuracy and floor-switch latency metrics |
 | **Room events** | Named rooms on every shipped map (hand-drawn, from OpenStreetMap, from the mall unit polygons); debounced Enter/Exit events from particle mass in each room, with hysteresis and dwell; scored against ground truth (precision, recall, latency, room accuracy); event log and room highlight in the web demo |
 | **Simulator** | Pure-pursuit walker through a floor plan, up stairs and in lifts; synthesises 50 Hz IMU, BLE with fading, shadowing, wall and slab loss, path-loss mismatch, device offsets, packet loss, magnetic anomalies, dead and moved beacons, and a phone barometer with weather drift, device bias and door spikes |
-| **Replay + metrics** | Mean, RMSE, CEP50, CEP95, availability, time to first fix, convergence time, floor accuracy, floor-switch latency, room-event precision/recall/latency, compute per update |
+| **Replay + metrics** | Mean, RMSE, CEP50, CEP95, availability, time to first fix, convergence time, floor accuracy, floor-switch latency, room-event precision/recall/latency, smoothness of the drawn track (jitter, jumps per minute, floor flips, path ratio), compute per update |
 | **Regression suite** | 12 scenarios x N seeds compared against a stored baseline in CI, plus 109 real phone walks when the dataset is present |
 | **Map interop** | `ipe-import`: GeoJSON (any platform, through a property mapping table) and an IMDF subset in and out, with WGS84 georeferencing |
 | **WebAssembly** | Emscripten/embind build of the unchanged core with a 2D canvas and a 3D MapLibre view, deployed to GitHub Pages |
@@ -33,13 +33,13 @@ sensor update (IMU and BLE averaged) on a desktop CPU. Full table: [docs/results
 
 | Scenario | What it stresses | CEP50 / CEP95 [m] |
 |---|---|---|
-| office_nominal | reference walk | 0.66 / 1.59 |
-| office_nlos_heavy | walls lose 7 dB, map says 3.5 | 0.65 / 1.87 |
-| office_device_offset | phone reads 9 dB low | 0.75 / 2.05 |
-| office_mag_disturbance | magnetic anomalies, gyro bias | 1.09 / 2.60 |
-| office_field_issue | 2 dead beacons, 1 installed 16 m off | 0.72 / 1.98 |
-| office_step_scale | walker's step 17% shorter than modelled | 0.73 / 1.87 |
-| airport_hall_sparse | 80 x 40 m hall, beacons 20 m apart, 35% loss | 1.30 / 7.25 |
+| office_nominal | reference walk | 0.66 / 1.58 |
+| office_nlos_heavy | walls lose 7 dB, map says 3.5 | 0.65 / 1.88 |
+| office_device_offset | phone reads 9 dB low | 0.76 / 2.08 |
+| office_mag_disturbance | magnetic anomalies, gyro bias | 1.13 / 2.65 |
+| office_field_issue | 2 dead beacons, 1 installed 16 m off | 0.71 / 1.98 |
+| office_step_scale | walker's step 17% shorter than modelled | 0.74 / 1.88 |
+| airport_hall_sparse | 80 x 40 m hall, beacons 20 m apart, 35% loss | 1.08 / 5.71 |
 
 ![CEP95 per scenario](docs/img/benchmark_cep95.png)
 
@@ -51,10 +51,10 @@ between the walker reaching the new floor and the estimate following (10 seeds e
 
 | Scenario | What it stresses | CEP50 / CEP95 [m] | Floor ok / switch |
 |---|---|---|---|
-| office_stairs_up_down | stairs up, tour, stairs down | 0.78 / 3.21 | 99.5% / 0.4 s |
-| office_elevator | lift rides: no steps, only pressure changes | 0.60 / 1.76 | 99.5% / 0.4 s |
-| office_floor_bleed | slab loses 4 dB (map says 15): beacons below look close | 0.89 / 4.01 | 96.3% / 1.0 s |
-| baro_drift_long | weather trend -6 hPa/h, phone barometer 2.5 hPa off | 0.63 / 1.99 | 99.5% / 0.4 s |
+| office_stairs_up_down | stairs up, tour, stairs down | 0.79 / 3.26 | 98.9% / 0.8 s |
+| office_elevator | lift rides: no steps, only pressure changes | 0.60 / 1.72 | 99.0% / 0.8 s |
+| office_floor_bleed | slab loses 4 dB (map says 15): beacons below look close | 0.89 / 3.90 | 96.6% / 2.5 s |
+| baro_drift_long | weather trend -6 hPa/h, phone barometer 2.5 hPa off | 0.63 / 1.99 | 99.1% / 0.8 s |
 
 The barometer offset each particle carries is what keeps it right under weather drift: a 6 hPa/h trend is
 50 m of apparent altitude per hour, and the filter still reports the right floor 99.5% of the time. On the
@@ -82,13 +82,14 @@ not work and the ablation of that cost, is in [docs/experiments.md](docs/experim
 
 ### Beacon-driven start for open halls
 
-In the airport hall, the filter took ~70 s to converge from a uniform start over 3200 m^2. An opt-in
-proposal seeds the cloud from a range ring around the closest-looking beacon, with importance weights
-so the posterior is unchanged. It cuts convergence to 41 s and CEP95 from 7.3 to 5.4 m (20 seeds),
-and helps the two-floor walks. In the small walled offices it slows convergence by a few seconds, so
-it is not on by default. [`data/configs/open_venue.json`](data/configs/open_venue.json) enables it; the
-numbers, the ablation and the variants that failed are experiment 4 in
-[docs/experiments.md](docs/experiments.md).
+In the airport hall, the filter took ~70 s to converge from a uniform start over 3200 m^2. A proposal
+seeds the cloud from a range ring around the closest-looking beacon, with importance weights so the
+posterior is unchanged. It cuts convergence to 41 s and CEP95 from 7.3 to 5.4 m (20 seeds). In the small
+walled offices, where 1500 particles already cover the floor densely, it slows convergence by a few
+seconds. So the filter turns it on by itself when the cloud is sparse, under 0.6 particles per m^2 of
+walkable area (`pf.init_proposal_auto_density`): the airport hall and the KIT building, not the offices
+(experiments 4 and 9 in [docs/experiments.md](docs/experiments.md)).
+[`data/configs/open_venue.json`](data/configs/open_venue.json) turns it on everywhere.
 
 ### Real phone traces
 
@@ -135,13 +136,13 @@ plan, checked by `ipe-sim` for wall crossings), and the phone is simulated. Mean
 
 | Particle filter | CEP50 / CEP95 [m] | Converged |
 |---|---|---|
-| Default config | 2.28 / 11.02 | 9/10 |
-| [Open-venue config](data/configs/open_venue.json) (beacon-driven start) | **0.71** / **3.44** | 10/10 |
+| Before the automatic beacon-driven start (experiment 9) | 2.28 / 11.02 | 9/10 |
+| Default config (beacon-driven start, chosen by particle density) | **0.72** / **3.52** | 10/10 |
 
 The L-shaped building covers 38% of its bounding box. The building outline is the venue's
 [`footprint`](docs/formats.md#venue-datavenuesjson), so the particle filter starts, recovers and keeps
-particles only inside it. With the open-venue config every run converges (CEP50 0.5-1.0 m, CEP95
-1.6-6.9 m). Before the footprint, particles were drawn anywhere in the bounds. Then 3 of 10 runs locked
+particles only inside it. With the beacon-driven start every run converges (CEP50 0.5-1.1 m, CEP95
+1.7-7.0 m). Before the footprint, particles were drawn anywhere in the bounds. Then 3 of 10 runs locked
 onto a spot up to 61 m away, outside the building, and the outline walls kept them there: CEP50 2.68 m and
 CEP95 14.60 m, and the default PF reached 2.94 / 29.16 m. The synthetic venues fill their bounds and have
 no footprint, so their results are bit-identical. The web demo plays this walk with the open-venue config.

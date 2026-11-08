@@ -69,6 +69,10 @@ struct ParticleFilterConfig {
   /// mixture of a range ring around that beacon and the uniform prior, with
   /// importance weights so the result is still the exact posterior.
   bool init_proposal = false;
+  /// With `init_proposal` off, turn it on anyway when the cloud is sparse: fewer than this many particles
+  /// per m^2 of walkable area (all levels together). A uniform start samples a small walled office well,
+  /// but not a hall or a mall floor. 0 never turns it on.
+  double init_proposal_auto_density = 0.6;
   double init_proposal_fraction = 0.8;  ///< Share of particles drawn from the ring.
   double init_window_s = 1.0;           ///< Packets collected before seeding; the closest-looking beacon wins.
   /// Recovery injections are drawn from the ring of a recent packet instead
@@ -134,6 +138,8 @@ class ParticleFilter {
   [[nodiscard]] std::uint64_t recovery_count() const { return recovery_count_; }
   [[nodiscard]] bool beacon_excluded(std::size_t beacon_index) const;
   [[nodiscard]] bool radio_seeded() const { return radio_seeded_; }
+  /// Whether the init proposal is in use (`init_proposal`, or chosen by `init_proposal_auto_density`).
+  [[nodiscard]] bool init_proposal_active() const { return cfg_.init_proposal; }
 
   /// Replaces the cloud with draws from the init proposal for one packet and
   /// importance-weights them back to the prior. The packet's likelihood is not

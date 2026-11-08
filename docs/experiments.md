@@ -322,11 +322,53 @@ Real tune walks:
 once per step. Extrapolation would fix that if the step timing were known better; for now it is a setting
 (`smoothing.extrapolate_steps`).
 
+## 9. Choosing the beacon-driven start automatically
+
+**Question.** Experiment 4 left the init proposal opt-in. It fixes large venues and slows small walled
+offices. Can the filter tell the two apart by itself?
+
+**Change.** `pf.init_proposal_auto_density`: with `init_proposal` off, the proposal is used when the
+cloud has fewer than this many particles per m^2 of walkable area, all levels together. The reasoning in
+experiment 4 was that 1500 particles over a 40 x 24 m office (1.56 per m^2) already sample a uniform
+start well. The shipped venues:
+- 1.56 per m^2: the single-floor offices;
+- 0.78: the two-floor offices;
+- 0.47: the airport hall;
+- 0.09: KIT, 7 levels;
+- well below 0.5: the malls and the IPIN buildings at 1500 particles.
+
+**Results** (10 seeds; the other scenarios are identical at both thresholds because they stay above them):
+
+| Scenario | off | 0.6 per m^2 | 1.0 per m^2 |
+|---|---:|---:|---:|
+| airport_hall_sparse, CEP50 / CEP95, converged | 1.30 / 7.26, 70.5 s | **1.08 / 5.71, 47.9 s** | same as 0.6 |
+| kit_tour | 2.31 / 11.11, 9/10 runs, floor 93.9% | **0.72 / 3.52, 10/10, floor 98.9%** | same as 0.6 |
+| baro_drift_long | 0.63 / 1.99 | (off) | 0.61 / 1.70 |
+| office_stairs_up_down | 0.79 / 3.26 | (off) | 0.71 / 2.41 |
+| office_elevator | 0.60 / 1.72 | (off) | 0.74 / 2.76 |
+| office_floor_bleed | 0.89 / 3.90 | (off) | 0.99 / 5.25 |
+
+At 1.0 the two-floor offices split, as they did in experiment 4. At 0.6 only the two large venues change,
+and both gain a lot. KIT gets the same numbers as `open_venue.json`.
+
+Real tune walks with the default config (no `--config`, 1500 particles; median CEP50 / CEP95 [m]):
+
+| Data | off | 0.6 per m^2 |
+|---|---:|---:|
+| MSIL, 109 walks | 20.38 / 28.45 | 9.61 / 12.50 |
+| IPIN Nuremberg, 4 walks | 6.91 / 23.09 | 5.74 / 24.13 (mean CEP95 21.3 -> 30.7) |
+| IPIN UMinho, 23 walks | 17.89 / 36.66 | 13.82 / 22.44 |
+
+`msil_wifi.json` and `ipin.json` already set `init_proposal`, so the real-data gates do not change.
+
+**Kept.** 0.6 particles per m^2 by default. With two venue types above the threshold and two below it,
+this is still a coarse rule: a venue between 0.6 and 1.0 (a large two-floor office, for example) gets
+the uniform start, which experiment 4 found mixed there.
+
 ## Open questions
 
-- The beacon-driven init proposal (experiment 4) fixes the airport hall but slows small walled offices.
-  Choosing it automatically, for example from particle density per level or from the ring's share of
-  the venue, needs more than two venue types to tune on without overfitting. A wall-aware ring
-  (rejection sampling against the full likelihood) is the other candidate.
+- The beacon-driven init proposal is now chosen by particle density (experiment 9), but venues between
+  0.6 and 1 particle per m^2 are where it is mixed. A wall-aware ring (rejection sampling against the
+  full likelihood) might remove the office cost and let it be on everywhere.
 - `office_nlos_heavy`: the wall-aware model assumes 3.5 dB per wall while the truth is 7 dB; estimating
   wall loss online (per venue) is a natural next state to add.
