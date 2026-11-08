@@ -82,6 +82,29 @@ TEST(Venue, FootprintLimitsTheWalkableArea) {
   EXPECT_DOUBLE_EQ(plain.walkable_area(), 200.0);
 }
 
+TEST(Venue, LevelFootprintLimitsOneLevel) {
+  // A 20 x 10 m ground floor and a 4 x 10 m landing at its east end.
+  const Venue v = parse_venue(R"({"bounds": [0, 0, 20, 10], "beacons": [],
+                                  "levels": [{"ordinal": 0},
+                                             {"ordinal": 1, "footprint": [[16, 0], [20, 0], [20, 10], [16, 10], [16, 0]]}]})");
+  EXPECT_TRUE(v.has_level_footprints());
+  ASSERT_EQ(v.level(1).footprint.size(), 4u);  // closing point dropped
+  EXPECT_TRUE(v.inside({5, 5}, 0));
+  EXPECT_FALSE(v.inside({5, 5}, 1));
+  EXPECT_TRUE(v.inside({18, 5}, 1));
+  EXPECT_TRUE(v.inside({5, 5}));  // without a level: the venue footprint only
+  EXPECT_DOUBLE_EQ(v.walkable_area(0), 200.0);
+  EXPECT_DOUBLE_EQ(v.walkable_area(1), 40.0);
+  const Bounds box = v.sample_box(1);
+  EXPECT_DOUBLE_EQ(box.min_x, 16.0);
+  EXPECT_DOUBLE_EQ(box.max_x, 20.0);
+  EXPECT_FALSE(test::two_level_venue().has_level_footprints());
+
+  EXPECT_THROW(parse_venue(R"({"bounds": [0, 0, 10, 10], "beacons": [],
+                               "levels": [{"ordinal": 0, "footprint": [[0, 0], [5, 5]]}]})"),
+               std::runtime_error);
+}
+
 TEST(Venue, FootprintCoveringTheBoundsIsDropped) {
   const Venue v = test::with_footprint(test::two_room_venue(), {{0, 0}, {20, 0}, {20, 9.95}, {0, 10}});
   EXPECT_TRUE(v.footprint().empty());
@@ -238,6 +261,23 @@ TEST(Venue, EveryCommittedVenueHasRoomsInsideItsBounds) {
       EXPECT_LE(r.box.max_x, b.max_x + 0.1) << r.id;
       EXPECT_LE(r.box.max_y, b.max_y + 0.1) << r.id;
     }
+  }
+}
+
+TEST(Venue, RealDataVenuesLoad) {
+  // Venues converted from public datasets (datasets/ipin, datasets/uji_ble).
+  const Venue nuremberg = load_venue_file(test::data_path("ipin/nuremberg.json"));
+  EXPECT_EQ(nuremberg.level_count(), 3);
+  EXPECT_TRUE(nuremberg.has_level_footprints());  // floor -1 is only a stair landing
+  EXPECT_FALSE(nuremberg.connectors().empty());
+  const Venue uminho = load_venue_file(test::data_path("ipin/uminho.json"));
+  EXPECT_EQ(uminho.level_count(), 3);
+  EXPECT_FALSE(uminho.connectors().empty());
+  for (const char* name : {"lib", "geo_m4", "geo_m12", "geo_m20"}) {
+    SCOPED_TRACE(name);
+    const Venue v = load_venue_file(test::data_path(std::string("uji_ble/") + name + ".json"));
+    EXPECT_GE(v.beacons().size(), 22u);
+    EXPECT_FALSE(v.walls().empty());
   }
 }
 

@@ -46,14 +46,26 @@ bool ParticleFilter::check_beacon(std::size_t beacon_index, double rssi) {
   return integrity_.admit(beacon_index, residual);
 }
 
-Vec2 ParticleFilter::sample_position() {
-  // Rejection sampling over the bounds; without a footprint the first draw is always accepted.
-  const auto& b = venue_->bounds();
+Vec2 ParticleFilter::sample_position(int level) {
+  // Rejection sampling over the bounds (or the level footprint's box); without
+  // a footprint the first draw is always accepted.
+  const Bounds b = level >= 0 ? venue_->sample_box(level) : venue_->bounds();
   Vec2 pos{rng_.uniform(b.min_x, b.max_x), rng_.uniform(b.min_y, b.max_y)};
-  for (int i = 1; i < kFootprintTries && !venue_->inside(pos); ++i) {
+  for (int i = 1; i < kFootprintTries && !venue_->inside(pos, level); ++i) {
     pos = {rng_.uniform(b.min_x, b.max_x), rng_.uniform(b.min_y, b.max_y)};
   }
   return pos;
+}
+
+int ParticleFilter::sample_level_by_area() {
+  double total = 0.0;
+  for (int l = 0; l < venue_->level_count(); ++l) total += venue_->walkable_area(l);
+  double u = rng_.uniform() * total;
+  for (int l = 0; l < venue_->level_count(); ++l) {
+    u -= venue_->walkable_area(l);
+    if (u < 0.0) return l;
+  }
+  return venue_->level_count() - 1;
 }
 
 Particle ParticleFilter::sample_uniform_particle() {
@@ -62,8 +74,15 @@ Particle ParticleFilter::sample_uniform_particle() {
   p.heading = rng_.uniform(-std::numbers::pi, std::numbers::pi);
   p.step_scale = std::max(0.5, rng_.normal(1.0, cfg_.step_scale_sigma));
   p.rssi_offset = cfg_.estimate_rssi_offset ? rng_.normal(0.0, cfg_.rssi_offset_sigma) : 0.0;
-  if (multi_level_) {
+  if (multi_level_ && venue_->has_level_footprints()) {
+    // Levels of different size: uniform over all walkable area, so a small
+    // landing gets few particles.
+    p.level = sample_level_by_area();
+    p.pos = sample_position(p.level);
+  } else if (multi_level_) {
     p.level = std::min(static_cast<int>(rng_.uniform() * venue_->level_count()), venue_->level_count() - 1);
+  }
+  if (multi_level_) {
     // Absolute altitude is unknown, so a fresh hypothesis is made consistent with the current reading.
     if (baro_ready_) {
       p.baro_offset = altimeter_.altitude() - elevation(p.level) + rng_.normal(0.0, cfg_.baro_offset_sigma_m);
@@ -103,7 +122,7 @@ void ParticleFilter::on_step(const StepEvent& step) {
     const double len = std::max(0.0, step.length * p.step_scale + rng_.normal(0.0, cfg_.step_length_sigma));
     const Vec2 next = p.pos + Vec2{std::cos(p.heading), std::sin(p.heading)} * len;
 
-    if (!venue_->inside(next) || venue_->crosses_wall(p.pos, next, p.level)) {
+    if (!venue_->inside(next, p.level) || venue_->crosses_wall(p.pos, next, p.level)) {
       p.weight = 0.0;
       continue;
     }
@@ -287,7 +306,12 @@ void ParticleFilter::normalize_or_recover() {
       Particle fresh = sample_uniform_particle();
       if (cloud_.valid) {
         Vec2 pos = cloud_.pos + Vec2{rng_.normal(0.0, 3.0), rng_.normal(0.0, 3.0)};
-        if (venue_->inside(pos)) fresh.pos = pos;
+        const int level = multi_level_ ? cloud_.level : 0;
+        if (venue_->inside(pos, level)) {
+          fresh.pos = pos;
+        } else if (multi_level_ && venue_->has_level_footprints()) {
+          fresh.pos = sample_position(level);
+        }
         fresh.heading = wrap_angle(cloud_.heading + rng_.normal(0.0, 0.5));
         if (multi_level_) {
           fresh.level = cloud_.level;
@@ -335,7 +359,7 @@ void ParticleFilter::resample_if_needed() {
       p = sample_recovery_particle();
     } else {
       const Vec2 jittered = p.pos + Vec2{rng_.normal(0.0, cfg_.roughening_m), rng_.normal(0.0, cfg_.roughening_m)};
-      if (venue_->inside(jittered) && !venue_->crosses_wall(p.pos, jittered, p.level)) p.pos = jittered;
+      if (venue_->inside(jittered, p.level) && !venue_->crosses_wall(p.pos, jittered, p.level)) p.pos = jittered;
     }
     p.weight = step;
   }

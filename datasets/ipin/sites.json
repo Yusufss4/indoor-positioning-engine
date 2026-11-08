@@ -1,0 +1,34 @@
+{
+  "nuremberg": {
+    "description": "Museum Industriekultur, Nuremberg (IPIN 2023 and 2024 Track 3)",
+    "packages": ["2024", "2023"],
+    "kind": "raster",
+    "maps": {
+      "-2": "02 Supplementary Materials/01 - Calibration Floormaps/Map_Floor_-02.png",
+      "-1": "02 Supplementary Materials/01 - Calibration Floormaps/Map_Floor_-01.png",
+      "0": "02 Supplementary Materials/01 - Calibration Floormaps/Map_Floor_0GF.png"
+    },
+    "calib": "02 Supplementary Materials/03 - Files for Matlab Tools/Calibration Maps/calib_mapa_Nuremberg.cal",
+    "references": "02 Supplementary Materials/01 - Calibration Floormaps/references.csv",
+    "beacons": "02 Supplementary Materials/02 - BLE Locations/BLE_Locations.csv",
+    "marker_px": [800, 2500],
+    "doi": ["10.5281/zenodo.8362205", "10.5281/zenodo.13931119"]
+  },
+  "uminho": {
+    "description": "University of Minho, building 11 (Electrical Engineering), Guimaraes (IPIN 2022 Track 3)",
+    "packages": ["2022"],
+    "kind": "pdf",
+    "maps": {
+      "0": "02 Supplementary Files/01 - Calibration Floormaps/UMINHO_B11_EE_Floor00_B.png",
+      "1": "02 Supplementary Files/01 - Calibration Floormaps/UMINHO_B11_EE_Floor01_B.png",
+      "2": "02 Supplementary Files/01 - Calibration Floormaps/UMINHO_B11_EE_Floor02_B.png"
+    },
+    "calib": "02 Supplementary Files/01 - Calibration Floormaps/Maps_calibration.cal",
+    "references": "02 Supplementary Files/02 - Files for MatLab Tools/Calibration Maps/calibration_points.csv",
+    "marker_px": [3, 12],
+    "min_segment_m": 0.2,
+    "ble": false,
+    "walked_doors": {"width_m": 1.5, "min_walks": 3},
+    "doi": ["10.5281/zenodo.7612915"]
+  }
+}

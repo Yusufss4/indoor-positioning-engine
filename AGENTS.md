@@ -35,6 +35,16 @@ truth; a replay tool and a regression suite measure accuracy.
   in `data/osm/`, ODbL) and an A* walk planner that writes scenarios (`plan_walk.py`). They produce
   `data/venues/kit_informatikbau.json` and `data/scenarios/kit_tour.json`; the commands are in
   [docs/formats.md](docs/formats.md#openstreetmap-datasetsosm).
+- `datasets/ipin` - IPIN competition Track 3 packages (2022 UMinho, 2023/2024 Nuremberg, CC BY) to venues and
+  traces ([docs/ipin.md](docs/ipin.md)). Walls are extracted from the floor plans (`maps.py`) and corrected
+  in `edits/<site>.json` (stairs, lifts, footprints). The venues are committed in `data/ipin/`; raw data and
+  `out_scans/` are git-ignored. `tests/regression/ipin_baseline.json` gates the scoring walks
+  (`ipin_regression`, label `realdata`). Settings are chosen on `manifest_tune.json` (validation walks)
+  only. `evaluate.py` adds floor hit rate and the competition metric.
+- `datasets/uji_ble` - UJI BLE fingerprints (CC BY): RSSI model study, venues in `data/uji_ble/` and
+  standing-still traces ([docs/uji_ble.md](docs/uji_ble.md)).
+- `datasets/common` - helpers shared by the real-data converters (transmitter fit, wall geometry, georef,
+  trace writer). MSIL output must stay byte-identical when they change.
 - `viz/` - Python plotting; `web/` - Emscripten bindings and the browser demo.
 
 ## Build and test

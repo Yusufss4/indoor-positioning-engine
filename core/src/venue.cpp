@@ -61,6 +61,10 @@ Venue::Venue(std::string name, Bounds bounds, std::vector<Level> levels, std::ve
   if (footprint_.size() < 3 || polygon_area(footprint_) >= 0.99 * bounds_.width() * bounds_.height()) {
     footprint_.clear();
   }
+  for (auto& l : levels_) {
+    if (l.footprint.size() > 3 && distance(l.footprint.front(), l.footprint.back()) < 1e-9) l.footprint.pop_back();
+    if (!l.footprint.empty()) has_level_footprints_ = true;
+  }
   for (auto& r : rooms_) {
     if (r.area.size() > 3 && distance(r.area.front(), r.area.back()) < 1e-9) r.area.pop_back();
     if (r.area.empty()) continue;
@@ -87,6 +91,11 @@ void Venue::validate() const {
   const auto valid_level = [&](int l) { return l >= 0 && l < level_count(); };
   for (const auto& b : beacons_) {
     if (!valid_level(b.level)) throw std::runtime_error("venue: beacon " + b.id + " on unknown level");
+  }
+  for (const auto& l : levels_) {
+    if (!l.footprint.empty() && (l.footprint.size() < 3 || polygon_area(l.footprint) < 1e-6)) {
+      throw std::runtime_error("venue: level " + l.name + " footprint needs a polygon area");
+    }
   }
   for (const auto& c : connectors_) {
     if (c.area.size() < 3) throw std::runtime_error("venue: connector " + c.id + " needs a polygon area");
@@ -118,6 +127,19 @@ std::optional<int> Venue::level_index(int ordinal) const {
     if (levels_[static_cast<std::size_t>(i)].ordinal == ordinal) return i;
   }
   return std::nullopt;
+}
+
+Bounds Venue::sample_box(int level) const {
+  const Polygon& fp = levels_[static_cast<std::size_t>(level)].footprint;
+  if (fp.empty()) return bounds_;
+  Bounds box{fp.front().x, fp.front().y, fp.front().x, fp.front().y};
+  for (const Vec2& p : fp) {
+    box.min_x = std::min(box.min_x, p.x);
+    box.min_y = std::min(box.min_y, p.y);
+    box.max_x = std::max(box.max_x, p.x);
+    box.max_y = std::max(box.max_y, p.y);
+  }
+  return box;
 }
 
 int Venue::nearest_level(double z) const {
@@ -300,6 +322,10 @@ Venue parse_venue(std::string_view json_text) {
       level.height_m = jl.value("height_m", 4.0);
       level.elevation_m = jl.value("elevation_m", level.ordinal * level.height_m);
       level.walls = parse_walls(jl.value("walls", json::array()));
+      for (const auto& p : jl.value("footprint", json::array())) {
+        if (!p.is_array() || p.size() != 2) throw std::runtime_error("venue: level footprint points must be [x, y]");
+        level.footprint.push_back({p[0].get<double>(), p[1].get<double>()});
+      }
       levels.push_back(std::move(level));
     }
     std::sort(levels.begin(), levels.end(), [](const Level& a, const Level& c) { return a.ordinal < c.ordinal; });

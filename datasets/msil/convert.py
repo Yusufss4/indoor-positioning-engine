@@ -21,16 +21,23 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import sys
 import zlib
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
-from scipy.optimize import least_squares
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parent))
+
+from common.geom import (crossing_params, crossings, cut_gaps, dedupe_segments,  # noqa: E402
+                         forward_heading_from_quat, point_in_rings, ring_segments, rotation_matrices, wrap)
+from common.geom import fit_heading_offset as _fit_heading_offset  # noqa: E402
+from common.radiomap import Transmitter, fit_samples, merge_virtual_aps, physical_ap  # noqa: E402
+from common.trace import write_manifests  # noqa: E402
+
 MAG_FIELD_UT = 45.0
-MIN_DISTANCE_M = 0.5  # same clamp as RssiModelConfig::min_distance
 
 
 # --------------------------------------------------------------------------------------------
@@ -47,33 +54,6 @@ class PathData:
     wifi: list = field(default_factory=list)  # (t_seen, bssid, rssi, t_scan)
     ble: list = field(default_factory=list)  # (t, id, rssi)
     waypoints: np.ndarray = field(default_factory=lambda: np.zeros((0, 3)))  # t, x, y
-
-
-def physical_ap(bssid: str) -> str:
-    """One radio often advertises several SSIDs under BSSIDs that differ only in the first octet
-    (locally administered addresses). Their readings are the same measurement, not independent
-    evidence, so they are merged into one transmitter keyed by the last five octets."""
-    return bssid[3:] if len(bssid) == 17 else bssid
-
-
-def merge_virtual_aps(wifi: list, window_s: float = 0.05) -> list:
-    """Keeps one reading (the strongest) per physical access point within `window_s`, tagged with
-    the scan of the group's first reading."""
-    by_ap: dict[str, list] = {}
-    for t, ap, rssi, t_scan in wifi:
-        by_ap.setdefault(ap, []).append((t, rssi, t_scan))
-    out = []
-    for ap, readings in by_ap.items():
-        readings.sort()
-        group_t, best, group_scan = readings[0]
-        for t, rssi, t_scan in readings[1:]:
-            if t - group_t < window_s:
-                best = max(best, rssi)
-                continue
-            out.append((group_t, ap, best, group_scan))
-            group_t, best, group_scan = t, rssi, t_scan
-        out.append((group_t, ap, best, group_scan))
-    return sorted(out)
 
 
 def _xyz(cols, start):
@@ -129,31 +109,10 @@ def parse_path(path: Path) -> PathData:
     return pd
 
 
-def rotation_matrices(q: np.ndarray) -> np.ndarray:
-    """Android rotation vector (x, y, z, w) -> phone-to-world matrices (world = east, north, up)."""
-    x, y, z, w = q[:, 0], q[:, 1], q[:, 2], q[:, 3]
-    r = np.empty((len(q), 3, 3))
-    r[:, 0, 0] = 1 - 2 * y * y - 2 * z * z
-    r[:, 0, 1] = 2 * x * y - 2 * z * w
-    r[:, 0, 2] = 2 * x * z + 2 * y * w
-    r[:, 1, 0] = 2 * x * y + 2 * z * w
-    r[:, 1, 1] = 1 - 2 * x * x - 2 * z * z
-    r[:, 1, 2] = 2 * y * z - 2 * x * w
-    r[:, 2, 0] = 2 * x * z - 2 * y * w
-    r[:, 2, 1] = 2 * y * z + 2 * x * w
-    r[:, 2, 2] = 1 - 2 * x * x - 2 * y * y
-    return r
-
-
 def forward_heading(pd: PathData) -> np.ndarray:
     """Heading of the phone's top edge (+y; walking direction when held flat in portrait),
     counter-clockwise from magnetic east."""
-    r = rotation_matrices(pd.rotvec)
-    return np.arctan2(r[:, 1, 1], r[:, 0, 1])
-
-
-def wrap(a):
-    return (a + np.pi) % (2 * np.pi) - np.pi
+    return forward_heading_from_quat(pd.rotvec)
 
 
 def interp_waypoints(pd: PathData, t: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -306,86 +265,6 @@ def room_list(floor: Floor) -> list[dict]:
     return rooms
 
 
-def ring_segments(rings) -> np.ndarray:
-    segs = []
-    for ring in rings:
-        for a, b in zip(ring[:-1], ring[1:]):
-            if np.hypot(*(b - a)) > 1e-3:
-                segs.append([a[0], a[1], b[0], b[1]])
-    return np.array(segs) if segs else np.zeros((0, 4))
-
-
-def dedupe_segments(segs: np.ndarray, tol: float = 0.05, max_angle_deg: float = 1.0) -> np.ndarray:
-    """Merges collinear segments that overlap or touch (within `tol` metres). Neighbouring shops
-    share edges, and a shared edge listed twice would count twice in the radio model's wall
-    attenuation."""
-    if len(segs) == 0:
-        return segs
-    cos_max = math.cos(math.radians(max_angle_deg))
-    origins, dirs, intervals = [], [], []
-    o_arr = np.zeros((len(segs), 2))
-    d_arr = np.zeros((len(segs), 2))
-    for a0, a1, b0, b1 in segs:
-        a, b = np.array([a0, a1]), np.array([b0, b1])
-        length = float(np.hypot(*(b - a)))
-        if length < tol:
-            continue
-        d = (b - a) / length
-        n = len(origins)
-        match = -1
-        if n:
-            parallel = np.abs(d_arr[:n] @ d) >= cos_max
-            rel_a, rel_b = a - o_arr[:n], b - o_arr[:n]
-            off_a = np.abs(rel_a[:, 0] * d_arr[:n, 1] - rel_a[:, 1] * d_arr[:n, 0])
-            off_b = np.abs(rel_b[:, 0] * d_arr[:n, 1] - rel_b[:, 1] * d_arr[:n, 0])
-            hits = np.flatnonzero(parallel & (off_a < tol) & (off_b < tol))
-            if len(hits):
-                match = int(hits[0])
-        if match < 0:
-            origins.append(a)
-            dirs.append(d)
-            o_arr[n], d_arr[n] = a, d
-            intervals.append([])
-            match = n
-        ta, tb = float((a - origins[match]) @ dirs[match]), float((b - origins[match]) @ dirs[match])
-        intervals[match].append((min(ta, tb), max(ta, tb)))
-    out = []
-    for o, d, ivs in zip(origins, dirs, intervals):
-        ivs.sort()
-        lo, hi = ivs[0]
-        for s, e in ivs[1:]:
-            if s <= hi + tol:
-                hi = max(hi, e)
-                continue
-            out.append([*(o + lo * d), *(o + hi * d)])
-            lo, hi = s, e
-        out.append([*(o + lo * d), *(o + hi * d)])
-    return np.array(out)
-
-
-def _orient(u, v, w):
-    return (v[..., 0] - u[..., 0]) * (w[..., 1] - u[..., 1]) - (v[..., 1] - u[..., 1]) * (w[..., 0] - u[..., 0])
-
-
-def crossing_params(p, q, walls: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Indices of the wall segments properly intersected by segment p-q, and where along each
-    wall (0 at its first endpoint, 1 at its second) the intersection lies."""
-    if len(walls) == 0:
-        return np.zeros(0, dtype=int), np.zeros(0)
-    a, b = walls[:, :2], walls[:, 2:]
-    p = np.asarray(p)[None, :]
-    q = np.asarray(q)[None, :]
-    d1, d2 = _orient(a, b, p), _orient(a, b, q)
-    d3, d4 = _orient(p, q, a), _orient(p, q, b)
-    idx = np.flatnonzero((d1 * d2 < 0) & (d3 * d4 < 0))
-    return idx, d3[idx] / (d3[idx] - d4[idx])
-
-
-def crossings(p, q, walls: np.ndarray) -> int:
-    """Number of wall segments properly intersected by segment p-q."""
-    return len(crossing_params(p, q, walls)[0])
-
-
 def cut_doors(walls: np.ndarray, paths: list[PathData], width: float, min_piece: float = 0.1) -> tuple[np.ndarray, int]:
     """Opens a gap `width` metres wide, centred on the crossing, wherever a straight line between
     consecutive surveyor waypoints crosses a wall. The plans have no doors; a walk through a wall
@@ -396,42 +275,7 @@ def cut_doors(walls: np.ndarray, paths: list[PathData], width: float, min_piece:
             idx, u = crossing_params(a[1:], b[1:], walls)
             for i, ui in zip(idx, u):
                 cuts.setdefault(int(i), []).append(float(ui))
-    out, centres = [], []
-    for i, w in enumerate(walls):
-        if i not in cuts:
-            out.append(w)
-            continue
-        a, b = w[:2], w[2:]
-        length = float(np.hypot(*(b - a)))
-        holes = sorted((u * length - width / 2, u * length + width / 2) for u in cuts[i])
-        merged = [list(holes[0])]
-        for s, e in holes[1:]:
-            if s <= merged[-1][1]:
-                merged[-1][1] = max(merged[-1][1], e)
-            else:
-                merged.append([s, e])
-        centres += [[*(a + (b - a) * ((s + e) / 2 / length))] for s, e in merged]
-        pos = 0.0
-        for s, e in merged + [[length, length]]:
-            if s - pos >= min_piece:
-                p0, p1 = a + (b - a) * (pos / length), a + (b - a) * (min(s, length) / length)
-                out.append([*p0, *p1])
-            pos = max(pos, e)
-    return (np.array(out) if out else np.zeros((0, 4))), centres
-
-
-def point_in_rings(pt, rings) -> bool:
-    """Even-odd rule over all rings (outer rings and holes)."""
-    x, y = pt
-    inside = False
-    for ring in rings:
-        xs, ys = ring[:, 0], ring[:, 1]
-        x0, y0, x1, y1 = xs[:-1], ys[:-1], xs[1:], ys[1:]
-        cond = (y0 > y) != (y1 > y)
-        with np.errstate(divide="ignore", invalid="ignore"):
-            xint = x0 + (y - y0) * (x1 - x0) / (y1 - y0)
-        inside ^= bool(np.sum(cond & (x < xint)) % 2)
-    return inside
+    return cut_gaps(walls, cuts, width, min_piece)
 
 
 # --------------------------------------------------------------------------------------------
@@ -439,61 +283,8 @@ def point_in_rings(pt, rings) -> bool:
 
 
 def fit_heading_offset(paths: list[PathData], min_len=4.0) -> tuple[float, float, int]:
-    """Angle to add to the phone's magnetic heading to get the map heading: length-weighted circular
-    mean over straight waypoint segments, with the circular spread as a sanity check."""
-    diffs, weights = [], []
-    for pd in paths:
-        if len(pd.imu_t) == 0 or len(pd.waypoints) < 2:
-            continue
-        psi = forward_heading(pd)
-        for (t0, x0, y0), (t1, x1, y1) in zip(pd.waypoints[:-1], pd.waypoints[1:]):
-            length = math.hypot(x1 - x0, y1 - y0)
-            sel = (pd.imu_t >= t0) & (pd.imu_t <= t1)
-            if length < min_len or sel.sum() < 20:
-                continue
-            mean_psi = math.atan2(np.sin(psi[sel]).mean(), np.cos(psi[sel]).mean())
-            diffs.append(math.atan2(y1 - y0, x1 - x0) - mean_psi)
-            weights.append(length)
-    if not diffs:
-        return 0.0, float("nan"), 0
-    d, w = np.array(diffs), np.array(weights)
-    s, c = np.sum(w * np.sin(d)), np.sum(w * np.cos(d))
-    resultant = math.hypot(s, c) / w.sum()
-    spread = math.sqrt(max(-2.0 * math.log(max(resultant, 1e-12)), 0.0))
-    return math.atan2(s, c), spread, len(diffs)
-
-
-@dataclass
-class Transmitter:
-    id: str
-    x: float
-    y: float
-    tx_power: float
-    path_loss_exp: float
-    samples: int
-    rms_db: float
-
-
-def fit_transmitter(tid, xy: np.ndarray, rssi: np.ndarray, floor: Floor, max_rms: float) -> Transmitter | None:
-    order = np.argsort(-rssi)[:5]
-    x0 = [xy[order, 0].mean(), xy[order, 1].mean(), rssi.max() + 6.0, 2.5]
-
-    def residual(p):
-        d = np.maximum(np.hypot(xy[:, 0] - p[0], xy[:, 1] - p[1]), MIN_DISTANCE_M)
-        return p[2] - 10.0 * p[3] * np.log10(d) - rssi
-
-    margin = 10.0
-    lo = [-margin, -margin, -110.0, 1.2]
-    hi = [floor.width + margin, floor.height + margin, -10.0, 6.0]
-    x0 = np.clip(x0, np.array(lo) + 1e-6, np.array(hi) - 1e-6)
-    sol = least_squares(residual, x0, bounds=(lo, hi), loss="soft_l1", f_scale=4.0)
-    bx, by, p0, n = sol.x
-    rms = float(np.sqrt(np.mean(residual(sol.x) ** 2)))
-    inside = 0.0 <= bx <= floor.width and 0.0 <= by <= floor.height
-    at_bound = n <= 1.21 or n >= 5.99
-    if rms > max_rms or not inside or at_bound:
-        return None
-    return Transmitter(tid, float(bx), float(by), float(p0), float(n), len(rssi), rms)
+    """Angle to add to the phone's magnetic heading to get the map heading (see common.geom)."""
+    return _fit_heading_offset(((pd.imu_t, forward_heading(pd), pd.waypoints) for pd in paths if len(pd.imu_t)), min_len)
 
 
 def fit_radio_map(train: list[PathData], floor: Floor, args) -> list[Transmitter]:
@@ -510,18 +301,7 @@ def fit_radio_map(train: list[PathData], floor: Floor, args) -> list[Transmitter
             for (_, tid, rssi, *_), p, ok in zip(stream, xy, mask):
                 if ok:
                     samples.setdefault(prefix + tid, []).append((p[0], p[1], rssi))
-    out = []
-    for tid, rows in sorted(samples.items()):
-        arr = np.array(rows)
-        if len(arr) < args.min_samples:
-            continue
-        # A transmitter heard from a single spot cannot be located.
-        if np.hypot(arr[:, 0].std(), arr[:, 1].std()) < args.min_spread:
-            continue
-        tx = fit_transmitter(tid, arr[:, :2], arr[:, 2], floor, args.max_rms)
-        if tx:
-            out.append(tx)
-    return out
+    return fit_samples(samples, (0.0, 0.0, floor.width, floor.height), args.min_samples, args.min_spread, args.max_rms)
 
 
 # --------------------------------------------------------------------------------------------
@@ -666,16 +446,6 @@ def convert_floor(site: str, floor_name: str, floor_dir: Path, paths: list[PathD
         entries.append({"name": f"{name}_{pd.path_id}", "group": name, "venue": str(venue_path.relative_to(out)), "trace": str(trace_path.relative_to(out)), **stats})
     report["test_traces"] = len(entries)
     return entries, report
-
-
-def write_manifests(out: Path, entries: list[dict]):
-    """manifest.json lists every test trace. Settings must be chosen on manifest_tune.json and
-    reported on manifest_holdout.json, a disjoint half (by trace-name hash)."""
-    out.mkdir(parents=True, exist_ok=True)
-    tune = [e for e in entries if zlib.crc32(e["name"].encode()) % 2 == 0]
-    holdout = [e for e in entries if zlib.crc32(e["name"].encode()) % 2 == 1]
-    for name, subset in [("manifest", entries), ("manifest_tune", tune), ("manifest_holdout", holdout)]:
-        (out / f"{name}.json").write_text(json.dumps({"traces": subset}, indent=1))
 
 
 def main():

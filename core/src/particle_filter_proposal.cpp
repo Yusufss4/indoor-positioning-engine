@@ -108,6 +108,8 @@ void ParticleFilter::seed_from_beacon(std::size_t beacon_index, double rssi) {
   // offset prior cancels against the prior's.
   const double area = venue_->walkable_area();
   const double levels = multi_level_ ? static_cast<double>(venue_->level_count()) : 1.0;
+  double total_area = 0.0;
+  for (int l = 0; l < venue_->level_count(); ++l) total_area += venue_->walkable_area(l);
   const double z = attempts > 0 ? static_cast<double>(accepted) / static_cast<double>(attempts) : 1.0;
   const double miss_all = std::pow(1.0 - z, kRingTries);
   const double ring_scale = z > 0.0 ? (1.0 - miss_all) / z : static_cast<double>(kRingTries);
@@ -116,7 +118,15 @@ void ParticleFilter::seed_from_beacon(std::size_t beacon_index, double rssi) {
     const Ring ring = ring_for(beacon, rssi, p.rssi_offset);
     const double ring_pos =
         area * ring_scale * ring_density(distance(p.pos, beacon.pos), ring.log10_mean, ring.log10_sigma) + miss_all;
-    p.weight = 1.0 / ((1.0 - f) + f * levels * ring_level_prob(beacon.level, p.level) * ring_pos);
+    if (venue_->has_level_footprints()) {
+      // The prior is uniform over the walkable area of all levels together
+      // (levels are drawn by area), and zero off a level's own footprint.
+      p.weight = venue_->inside(p.pos, p.level)
+                     ? 1.0 / ((1.0 - f) + f * total_area * ring_level_prob(beacon.level, p.level) * ring_pos / area)
+                     : 0.0;
+    } else {
+      p.weight = 1.0 / ((1.0 - f) + f * levels * ring_level_prob(beacon.level, p.level) * ring_pos);
+    }
     sum += p.weight;
   }
   for (auto& p : particles_) p.weight /= sum;

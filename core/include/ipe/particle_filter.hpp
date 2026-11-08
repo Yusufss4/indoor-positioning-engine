@@ -157,8 +157,11 @@ class ParticleFilter {
   bool check_beacon(std::size_t beacon_index, double rssi);
 
   void initialize_uniform();
-  /// Uniform over the venue's walkable area (its footprint, else its bounds).
-  Vec2 sample_position();
+  /// Uniform over the venue's walkable area (its footprint, else its bounds);
+  /// with `level` >= 0, over that level's footprint if it has one.
+  Vec2 sample_position(int level = -1);
+  /// A level index with probability proportional to its walkable area.
+  int sample_level_by_area();
   Particle sample_uniform_particle();
   /// Moves a particle standing in a connector to an adjacent level with probability `prob`.
   void maybe_change_level(Particle& p, double prob);

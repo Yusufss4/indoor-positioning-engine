@@ -1,0 +1,54 @@
+{
+  "results": {
+    "all": {
+      "pf": {
+        "availability": 1.0,
+        "cep50_m": 6.995,
+        "cep95_m": 35.204,
+        "convergence_s": 440.917,
+        "coverage95": 0.348,
+        "mean_m": 11.039,
+        "median_cep50_m": 6.248,
+        "median_cep95_m": 29.576,
+        "median_coverage95": 0.348,
+        "median_mean_m": 9.792,
+        "traces": 6,
+        "unconverged_runs": 0
+      }
+    },
+    "nuremberg_holdout": {
+      "pf": {
+        "availability": 1.0,
+        "cep50_m": 5.233,
+        "cep95_m": 33.04,
+        "convergence_s": 554.625,
+        "coverage95": 0.31,
+        "mean_m": 9.526,
+        "median_cep50_m": 5.01,
+        "median_cep95_m": 29.576,
+        "median_coverage95": 0.34,
+        "median_mean_m": 8.656,
+        "traces": 4,
+        "unconverged_runs": 0
+      }
+    },
+    "uminho_holdout": {
+      "pf": {
+        "availability": 1.0,
+        "cep50_m": 10.519,
+        "cep95_m": 39.533,
+        "convergence_s": 213.5,
+        "coverage95": 0.425,
+        "mean_m": 14.065,
+        "median_cep50_m": 10.519,
+        "median_cep95_m": 39.533,
+        "median_coverage95": 0.425,
+        "median_mean_m": 14.065,
+        "traces": 2,
+        "unconverged_runs": 0
+      }
+    }
+  },
+  "seeds": 1,
+  "warmup_s": 5.0
+}

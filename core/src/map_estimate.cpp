@@ -38,7 +38,7 @@ Vec2 MapConsistentEstimate::position(std::span<const Particle> particles, Vec2 m
     }
   }
   if (!nearest) return mean;
-  if (venue_->inside(mean) && !venue_->crosses_wall(nearest->pos, mean, level)) return mean;
+  if (venue_->inside(mean, multi_level ? level : -1) && !venue_->crosses_wall(nearest->pos, mean, level)) return mean;
 
   // Dominant mode: the heaviest 3x3 block of a coarse weight histogram.
   for (const auto& p : particles) {
@@ -98,7 +98,7 @@ Vec2 MapConsistentEstimate::position(std::span<const Particle> particles, Vec2 m
   }
   if (w_mode <= 0.0) return anchor->pos;
   mode = mode * (1.0 / w_mode);
-  if (venue_->inside(mode) && !venue_->crosses_wall(anchor->pos, mode, level)) return mode;
+  if (venue_->inside(mode, multi_level ? level : -1) && !venue_->crosses_wall(anchor->pos, mode, level)) return mode;
   return anchor->pos;
 }
 
