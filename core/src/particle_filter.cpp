@@ -28,7 +28,9 @@ ParticleFilter::ParticleFilter(const Venue& venue, ParticleFilterConfig cfg, Rss
       integrity_(venue.beacons().size(), {cfg.integrity_threshold_db, cfg.integrity_alpha, cfg.integrity_min_samples,
                                           cfg.integrity_max_sigma_m}),
       multi_level_(venue.multi_level()),
-      altimeter_(baro_cfg) {
+      altimeter_(baro_cfg),
+      floor_classifier_(venue, {cfg.floor_prior_k, cfg.floor_prior_eps}) {
+  floor_p_.assign(static_cast<std::size_t>(std::max(venue.level_count(), 1)), 1.0);
   cfg_.num_particles = std::max(cfg_.num_particles, 1);
   level_weight_.resize(static_cast<std::size_t>(std::max(venue.level_count(), 1)));
   if (cfg_.map_consistent_estimate) map_estimate_.emplace(venue, static_cast<std::size_t>(cfg_.num_particles));
@@ -85,7 +87,7 @@ Particle ParticleFilter::sample_uniform_particle() {
   if (multi_level_) {
     // Absolute altitude is unknown, so a fresh hypothesis is made consistent with the current reading.
     if (baro_ready_) {
-      p.baro_offset = altimeter_.altitude() - elevation(p.level) + rng_.normal(0.0, cfg_.baro_offset_sigma_m);
+      p.baro_offset = fresh_baro_offset(p.level);
     }
   }
   return p;
@@ -100,6 +102,67 @@ void ParticleFilter::maybe_change_level(Particle& p, double prob) {
   const bool has_down = it != c->levels.begin();
   const bool up = has_up && (!has_down || rng_.bernoulli(0.5));
   p.level = up ? *(it + 1) : *(it - 1);
+}
+
+double ParticleFilter::fresh_baro_offset(int level, bool jitter) {
+  const double noise = jitter ? rng_.normal(0.0, cfg_.baro_offset_sigma_m) : 0.0;
+  if (baro_reference_valid_ && cfg_.baro_reseed_keep_reference > 0.0 &&
+      rng_.bernoulli(cfg_.baro_reseed_keep_reference)) {
+    return baro_reference_ + noise;
+  }
+  return altimeter_.altitude() - elevation(level) + noise;
+}
+
+void ParticleFilter::update_baro_drift(double t, double alt) {
+  double sum_w = 0.0, sum_r = 0.0;
+  for (const auto& p : particles_) {
+    if (p.weight <= 0.0) continue;
+    sum_w += p.weight;
+    sum_r += p.weight * (alt - p.baro_offset - elevation(p.level));
+  }
+  const double r = sum_w > 0.0 ? sum_r / sum_w : 0.0;
+  const int level = estimate_.level;
+  const int dir = r > 0.0 ? 1 : -1;
+  const int next = level + dir;
+  const bool drifting =
+      next >= 0 && next < venue_->level_count() && std::abs(r) > 0.5 * std::abs(elevation(next) - elevation(level));
+  if (!drifting) {
+    baro_drift_dir_ = 0;
+    baro_jump_armed_ = false;
+    return;
+  }
+  if (dir != baro_drift_dir_) {
+    baro_drift_dir_ = dir;
+    baro_drift_since_ = t;
+  }
+  baro_jump_armed_ = t - baro_drift_since_ >= cfg_.baro_jump_hold_s;
+}
+
+void ParticleFilter::maybe_baro_jump(Particle& p, double alt) {
+  const double r = alt - p.baro_offset - elevation(p.level);
+  const int to = p.level + (r > 0.0 ? 1 : -1);
+  if (to < 0 || to >= venue_->level_count()) return;
+  // Only when the particle's own residual fits the other level better.
+  if (std::abs(r - (elevation(to) - elevation(p.level))) >= std::abs(r)) return;
+  if (!rng_.bernoulli(cfg_.baro_jump_prob)) return;
+  const Connector* c = venue_->nearest_connector(p.pos, p.level, to, cfg_.baro_jump_radius_m);
+  if (!c || c->area.empty()) return;
+  // A point of the connector that is walkable on the new level: rejection-sample its bounding box.
+  Bounds box{c->area[0].x, c->area[0].y, c->area[0].x, c->area[0].y};
+  for (const Vec2 v : c->area) {
+    box.min_x = std::min(box.min_x, v.x);
+    box.min_y = std::min(box.min_y, v.y);
+    box.max_x = std::max(box.max_x, v.x);
+    box.max_y = std::max(box.max_y, v.y);
+  }
+  for (int i = 0; i < kFootprintTries; ++i) {
+    const Vec2 q{rng_.uniform(box.min_x, box.max_x), rng_.uniform(box.min_y, box.max_y)};
+    if (c->contains(q) && venue_->inside(q, to)) {
+      p.pos = q;
+      p.level = to;
+      return;
+    }
+  }
 }
 
 void ParticleFilter::initialize_uniform() {
@@ -194,7 +257,10 @@ void ParticleFilter::on_rssi_scan(double t, std::span<const RssiReading> reading
     seed_from_beacon(beacon, rssi);
     flush_pending();
   }
+  floor_prior_active_ = multi_level_ && cfg_.floor_prior_weight > 0.0 && floor_classifier_.classify(scan_, floor_p_);
+  if (floor_prior_active_) last_floor_t_ = t;
   update_rssi(t, scan_);
+  floor_prior_active_ = false;
 }
 
 void ParticleFilter::update_rssi(double t, std::size_t beacon_index, double rssi) {
@@ -218,6 +284,9 @@ void ParticleFilter::update_rssi(double t, std::span<const RssiReading> readings
       const double expected = rssi_model_.expected_rssi(beacon, p.pos, p.level) + p.rssi_offset;
       ll += rssi_model_.log_likelihood(r.rssi - expected);
     }
+    // Floor classifier output for this scan, as a likelihood on the particle's level. It is part of the
+    // recovery statistic, so a cloud on a floor the classifier rejects draws injections.
+    if (floor_prior_active_) ll += cfg_.floor_prior_weight * std::log(floor_p_[static_cast<std::size_t>(p.level)]);
     loglik_[i] = ll;
     max_ll = std::max(max_ll, loglik_[i]);
   }
@@ -252,9 +321,11 @@ void ParticleFilter::on_pressure(double t, double hpa) {
 
   // Prediction: lift rides produce no steps, so connector transitions are
   // also proposed here; the offset random walk absorbs weather drift.
+  if (cfg_.baro_jump) update_baro_drift(t, alt);
   for (auto& p : particles_) {
     if (p.weight <= 0.0) continue;
     maybe_change_level(p, cfg_.level_change_prob_baro);
+    if (baro_jump_armed_) maybe_baro_jump(p, alt);
     p.baro_offset += rng_.normal(0.0, cfg_.baro_offset_walk_m);
   }
 
@@ -315,7 +386,7 @@ void ParticleFilter::normalize_or_recover() {
         fresh.heading = wrap_angle(cloud_.heading + rng_.normal(0.0, 0.5));
         if (multi_level_) {
           fresh.level = cloud_.level;
-          if (baro_ready_) fresh.baro_offset = altimeter_.altitude() - elevation(fresh.level);
+          if (baro_ready_) fresh.baro_offset = fresh_baro_offset(fresh.level, false);
         }
       }
       p = fresh;
@@ -380,7 +451,7 @@ void ParticleFilter::update_estimate(double t) {
   const double level_w = multi_level_ ? level_weight_[static_cast<std::size_t>(level)] : 1.0;
   const auto counts = [&](const Particle& p) { return !multi_level_ || p.level == level; };
 
-  double sx = 0.0, sy = 0.0, ss = 0.0, sc = 0.0, so = 0.0;
+  double sx = 0.0, sy = 0.0, ss = 0.0, sc = 0.0, so = 0.0, sb = 0.0;
   for (const auto& p : particles_) {
     if (!counts(p)) continue;
     sx += p.weight * p.pos.x;
@@ -388,13 +459,19 @@ void ParticleFilter::update_estimate(double t) {
     ss += p.weight * std::sin(p.heading);
     sc += p.weight * std::cos(p.heading);
     so += p.weight * p.rssi_offset;
+    sb += p.weight * p.baro_offset;
   }
   if (multi_level_ && level_w > 0.0) {
     sx /= level_w;
     sy /= level_w;
     so /= level_w;
+    sb /= level_w;
   }
   mean_rssi_offset_ = so;
+  if (multi_level_ && baro_ready_ && localized_ && level_w > 0.0) {
+    baro_reference_ = sb;
+    baro_reference_valid_ = true;
+  }
   const Vec2 mean{sx, sy};
   const Vec2 pos = map_estimate_ && localized_ ? map_estimate_->position(particles_, mean, level, multi_level_) : mean;
   double cxx = 0.0, cxy = 0.0, cyy = 0.0;

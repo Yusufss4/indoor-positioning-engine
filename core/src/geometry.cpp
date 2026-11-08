@@ -1,6 +1,7 @@
 #include "ipe/geometry.hpp"
 
 #include <algorithm>
+#include <limits>
 
 namespace ipe {
 namespace {
@@ -50,6 +51,21 @@ double polygon_area(const Polygon& poly) {
   const std::size_t n = poly.size();
   for (std::size_t i = 0, j = n - 1; i < n; j = i++) twice += cross(poly[j], poly[i]);
   return 0.5 * std::abs(twice);
+}
+
+double polygon_distance(Vec2 p, const Polygon& poly) {
+  if (poly.empty()) return std::numeric_limits<double>::infinity();
+  if (point_in_polygon(p, poly)) return 0.0;
+  double best = std::numeric_limits<double>::infinity();
+  const std::size_t n = poly.size();
+  for (std::size_t i = 0, j = n - 1; i < n; j = i++) {
+    const Vec2 a = poly[j];
+    const Vec2 ab = poly[i] - a;
+    const double len2 = dot(ab, ab);
+    const double u = len2 > 0.0 ? std::clamp(dot(p - a, ab) / len2, 0.0, 1.0) : 0.0;
+    best = std::min(best, distance(p, a + ab * u));
+  }
+  return best;
 }
 
 }  // namespace ipe

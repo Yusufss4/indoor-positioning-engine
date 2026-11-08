@@ -71,4 +71,7 @@ bool point_in_polygon(Vec2 p, const Polygon& poly);
 /// Unsigned area of a simple polygon (shoelace formula).
 double polygon_area(const Polygon& poly);
 
+/// Distance from `p` to the polygon: 0 inside, else to the nearest edge.
+double polygon_distance(Vec2 p, const Polygon& poly);
+
 }  // namespace ipe

@@ -82,7 +82,7 @@ def main():
             "geojson": f"{site}/venue.geojson",
             "images": images,
             "trace": f"{site}/{src.name}",
-            "config": "../configs/msil_wifi.json",
+            "config": "../configs/ipin.json",
             "view": [round(v, 1) for v in view],
             "duration_s": round(t["duration_s"], 1),
             "waypoints": len(pts),
@@ -92,7 +92,9 @@ def main():
                 "the only ground truth; the floor menu follows the walker. Walls were extracted from the "
                 "competition's floor plans and the Wi-Fi access points (purple) located from the training walks. "
                 "This walk is from the set the settings were chosen on; the held-out scoring walks are in "
-                "docs/ipin.md. The particle filter uses data/configs/msil_wifi.json."),
+                "docs/ipin.md. The particle filter uses data/configs/ipin.json: the Wi-Fi settings plus the floor "
+                "model (barometer jump to the nearest stairs, kept barometer reference, Wi-Fi fingerprint floor "
+                "prior)."),
         })
         print(f"{site}: {src.name} ({t['duration_s']:.0f} s, {len(pts)} landmarks, {t['phone']})")
 

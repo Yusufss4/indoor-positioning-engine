@@ -61,6 +61,11 @@ Instead of top-level `walls`, a multi-floor venue has `levels`, and may add `con
   and new particles pick their level in proportion to each level's walkable area, so a small landing gets
   few of them. Without level footprints every level gets the same share, as before.
 - A file has either top-level `walls` (one floor, ordinal 0) or `levels`, not both.
+- `floor_fingerprints` (optional) are radio scans with a known floor, for the particle filter's k-NN floor
+  prior (`pf.floor_prior_weight`):
+  `{"ids": ["w:...", ...], "scans": [[ordinal, id index, dBm, id index, dBm, ...], ...]}`. Each scan
+  names its beacons by index into `ids`. Ids that are not venue beacons are dropped. The IPIN converter
+  writes one per training Wi-Fi scan (`convert.py --fingerprints`).
 
 ### Rooms
 

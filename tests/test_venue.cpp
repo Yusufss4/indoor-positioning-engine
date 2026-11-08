@@ -296,3 +296,23 @@ TEST(Venue, RejectsInvalidLevelReferences) {
     "connectors": [{"id": "s", "kind": "stairs", "levels": [0], "area": [[0,0],[1,0],[1,1]]}]})"),
                std::runtime_error);
 }
+
+TEST(Venue, ParsesFloorFingerprints) {
+  const Venue v = parse_venue(R"({
+    "bounds": [0, 0, 10, 10],
+    "levels": [{"ordinal": 0, "name": "G", "walls": []}, {"ordinal": 1, "name": "F1", "walls": []}],
+    "beacons": [{"id": "a", "x": 1, "y": 1, "level": 0}, {"id": "b", "x": 9, "y": 9, "level": 1}],
+    "floor_fingerprints": {"ids": ["b", "gone", "a"], "scans": [[1, 0, -50, 1, -70, 2, -80], [0, 2, -40]]}
+  })");
+  const auto& fp = v.floor_fingerprints();
+  ASSERT_EQ(fp.size(), 2u);
+  EXPECT_EQ(fp.level[0], 1);
+  EXPECT_EQ(fp.level[1], 0);
+  ASSERT_EQ(fp.begin, (std::vector<std::uint32_t>{0, 2, 3}));  // "gone" is not a venue beacon
+  EXPECT_EQ(fp.beacon, (std::vector<std::uint32_t>{1, 0, 0}));
+  EXPECT_EQ(fp.rssi, (std::vector<float>{-50.0F, -80.0F, -40.0F}));
+  EXPECT_TRUE(parse_venue(R"({"bounds": [0, 0, 1, 1], "beacons": []})").floor_fingerprints().empty());
+  EXPECT_THROW(parse_venue(R"({"bounds": [0, 0, 1, 1], "beacons": [],
+                               "floor_fingerprints": {"ids": [], "scans": [[0, 1]]}})"),
+               std::exception);
+}

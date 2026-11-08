@@ -461,3 +461,114 @@ TEST(ParticleFilter, IntegrityMonitorExcludesBiasedBeacon) {
   for (std::size_t i = 1; i < v.beacons().size(); ++i) EXPECT_FALSE(pf.beacon_excluded(i));
   EXPECT_LT(distance(pf.estimate().pos, {5.0, 5.0}), 1.5);
 }
+
+namespace {
+
+double weight_on_level(const ParticleFilter& pf, int level) {
+  double w = 0.0;
+  for (const auto& p : pf.particles()) {
+    if (p.level == level) w += p.weight;
+  }
+  return w;
+}
+
+/// Holds the pressure, then rises `rise_m` and falls back after `hold_s`.
+void feed_blip(ParticleFilter& pf, double t0, double rise_m, double hold_s) {
+  const double alt0 = pressure_to_altitude(1000.0);
+  for (int k = 0; k <= 100; ++k) {
+    const double t = t0 + 0.2 * k;
+    const bool up = t >= t0 + 5.0 && t < t0 + 5.0 + hold_s;
+    pf.on_pressure(t, altitude_to_pressure(alt0 + (up ? rise_m : 0.0)));
+  }
+}
+
+}  // namespace
+
+TEST(ParticleFilter, BaroJumpTakesTheNearestStairsFromMetresAway) {
+  // As BarometerCannotChangeFloorOutsideConnectors, but with the jump on: the lift is ~6 m away.
+  const Venue v = test::two_level_venue();
+  auto cfg = test_config();
+  cfg.baro_jump = true;
+  ParticleFilter pf(v, cfg, {});
+  feed_rssi_on_level(pf, v, {14.0, 5.0}, 0, 60);
+  ASSERT_EQ(pf.estimate().level, 0);
+  feed_rise(pf, 20.0, 4.0);
+  EXPECT_EQ(pf.estimate().level, 1);
+  EXPECT_GT(weight_on_level(pf, 1), 0.9);
+}
+
+TEST(ParticleFilter, BaroJumpNeedsAConnectorWithinTheRadius) {
+  const Venue v = test::two_level_venue();
+  auto cfg = test_config();
+  cfg.baro_jump = true;
+  cfg.baro_jump_radius_m = 2.0;
+  ParticleFilter pf(v, cfg, {});
+  feed_rssi_on_level(pf, v, {14.0, 5.0}, 0, 60);
+  feed_rise(pf, 20.0, 4.0);
+  EXPECT_LT(weight_on_level(pf, 1), 0.05);
+}
+
+TEST(ParticleFilter, BaroJumpIgnoresAShortExcursion) {
+  const Venue v = test::two_level_venue();
+  auto cfg = test_config();
+  cfg.baro_jump = true;
+  ParticleFilter pf(v, cfg, {});
+  feed_rssi_on_level(pf, v, {14.0, 5.0}, 0, 60);
+  feed_blip(pf, 20.0, 4.0, 1.0);
+  EXPECT_EQ(pf.estimate().level, 0);
+  EXPECT_LT(weight_on_level(pf, 1), 0.05);
+}
+
+TEST(ParticleFilter, ReseedKeepsTheBarometerReference) {
+  // Settled on level 0 with the barometer running, then re-seeded around a level 1 beacon: with the
+  // reference kept, the next pressure reading rejects the level 1 particles; without, they fit it.
+  const Venue v = test::two_level_venue();
+  const std::size_t a1 = 4;
+  ASSERT_EQ(v.beacons()[a1].level, 1);
+  for (const double keep : {0.0, 1.0}) {
+    auto cfg = test_config();
+    cfg.baro_reseed_keep_reference = keep;
+    ParticleFilter pf(v, cfg, {});
+    pf.on_pressure(0.0, 1000.0);
+    feed_rssi_on_level(pf, v, {14.0, 5.0}, 0, 60);
+    pf.on_pressure(20.0, 1000.0);
+    ASSERT_EQ(pf.estimate().level, 0);
+    pf.seed_from_beacon(a1, -60.0);
+    const double before = weight_on_level(pf, 1);
+    ASSERT_GT(before, 0.3);
+    pf.on_pressure(21.0, 1000.0);
+    if (keep > 0.0) {
+      EXPECT_LT(weight_on_level(pf, 1), 0.05);
+    } else {
+      EXPECT_NEAR(weight_on_level(pf, 1), before, 0.1);
+    }
+  }
+}
+
+TEST(ParticleFilter, FloorPriorPullsTheCloudToTheClassifiedLevel) {
+  // The fingerprints say a beacon-A0 reading of -70 dBm is heard on level 1, while the radio model
+  // (15 dB per slab) is sure of level 0, A0's own floor: the prior moves weight to level 1 by orders of
+  // magnitude, one factor of p(1) / p(0) = 19 per scan.
+  Venue v = test::two_level_venue();
+  FloorFingerprints fp;
+  fp.begin.push_back(0);
+  for (int i = 0; i < 6; ++i) {
+    fp.level.push_back(1);
+    fp.beacon.push_back(0);
+    fp.rssi.push_back(-70.0F);
+    fp.begin.push_back(static_cast<std::uint32_t>(fp.beacon.size()));
+  }
+  v.set_floor_fingerprints(fp);
+
+  const std::vector<RssiReading> scan = {{0, -70.0}};
+  double share[2] = {0.0, 0.0};
+  for (const int on : {0, 1}) {
+    auto cfg = test_config();
+    cfg.floor_prior_weight = on ? 1.0 : 0.0;
+    ParticleFilter pf(v, cfg, {});
+    for (int k = 0; k < 5; ++k) pf.on_rssi_scan(2.0 * k, scan);
+    share[on] = weight_on_level(pf, 1);
+  }
+  EXPECT_LT(share[0], 0.01);
+  EXPECT_GT(share[1], 1000.0 * share[0]);
+}

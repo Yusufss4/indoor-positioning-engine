@@ -78,7 +78,7 @@ Particle ParticleFilter::sample_ring_particle(const Beacon& beacon, double rssi,
       }
     }
     if (baro_ready_) {
-      p.baro_offset = altimeter_.altitude() - elevation(p.level) + rng_.normal(0.0, cfg_.baro_offset_sigma_m);
+      p.baro_offset = fresh_baro_offset(p.level);
     }
   }
   return p;
@@ -153,7 +153,21 @@ Particle ParticleFilter::sample_recovery_particle() {
   const auto pick = std::min(static_cast<std::size_t>(rng_.uniform() * static_cast<double>(n)), n - 1);
   const Packet& packet = history_[fresh[pick]];
   RingDraw draw;
-  return sample_ring_particle(venue_->beacons()[packet.beacon], packet.rssi, draw);
+  Particle p = sample_ring_particle(venue_->beacons()[packet.beacon], packet.rssi, draw);
+  if (multi_level_ && cfg_.floor_prior_weight > 0.0 && now_ - last_floor_t_ <= cfg_.floor_prior_max_age_s) {
+    // The floor classifier knows the level better than the beacon's own floor does.
+    double u = rng_.uniform();
+    int level = 0;
+    for (; level + 1 < venue_->level_count(); ++level) {
+      u -= floor_p_[static_cast<std::size_t>(level)];
+      if (u < 0.0) break;
+    }
+    if (level != p.level && venue_->inside(p.pos, level)) {
+      p.level = level;
+      if (baro_ready_) p.baro_offset = fresh_baro_offset(level);
+    }
+  }
+  return p;
 }
 
 double ParticleFilter::apparent_range(std::size_t beacon_index, double rssi) const {

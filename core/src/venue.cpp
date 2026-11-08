@@ -162,6 +162,20 @@ const Connector* Venue::connector_at(Vec2 p, int level) const {
   return nullptr;
 }
 
+const Connector* Venue::nearest_connector(Vec2 p, int from, int to, double max_distance) const {
+  const Connector* best = nullptr;
+  double best_d = max_distance;
+  for (const auto& c : connectors_) {
+    if (!c.serves(from) || !c.serves(to)) continue;
+    const double d = polygon_distance(p, c.area);
+    if (d <= best_d) {
+      best = &c;
+      best_d = d;
+    }
+  }
+  return best;
+}
+
 std::span<const std::size_t> Venue::room_candidates(Vec2 p, int level) const {
   if (level < 0 || level >= static_cast<int>(room_grids_.size())) return {};
   const RoomGrid& grid = room_grids_[static_cast<std::size_t>(level)];
@@ -392,9 +406,40 @@ Venue parse_venue(std::string_view json_text) {
   }
   if (!footprint.empty() && footprint.size() < 3) throw std::runtime_error("venue: footprint needs 3 or more points");
 
-  return Venue(j.value("name", std::string("unnamed")), bounds, std::move(levels), std::move(beacons),
-               std::move(connectors), j.value("wall_attenuation_db", 3.0), j.value("floor_attenuation_db", 15.0),
-               georef, std::move(footprint), std::move(rooms));
+  // {"ids": [beacon id, ...], "scans": [[ordinal, id index, dBm, id index, dBm, ...], ...]}; ids that are not
+  // venue beacons are dropped.
+  FloorFingerprints fingerprints;
+  if (j.contains("floor_fingerprints")) {
+    const auto& jf = j.at("floor_fingerprints");
+    std::vector<std::int64_t> beacon_of;
+    for (const auto& id : jf.at("ids")) {
+      const auto name = id.get<std::string>();
+      const auto it =
+          std::find_if(beacons.begin(), beacons.end(), [&](const Beacon& beacon) { return beacon.id == name; });
+      beacon_of.push_back(it == beacons.end() ? -1 : static_cast<std::int64_t>(it - beacons.begin()));
+    }
+    fingerprints.begin.push_back(0);
+    for (const auto& scan : jf.at("scans")) {
+      if (!scan.is_array() || scan.empty() || scan.size() % 2 != 1) {
+        throw std::runtime_error("venue: a floor fingerprint is [ordinal, id index, dBm, ...]");
+      }
+      fingerprints.level.push_back(index_of(scan[0].get<int>(), "floor fingerprint"));
+      for (std::size_t k = 1; k + 1 < scan.size(); k += 2) {
+        const auto id = scan[k].get<std::size_t>();
+        if (id >= beacon_of.size()) throw std::runtime_error("venue: floor fingerprint id index out of range");
+        if (beacon_of[id] < 0) continue;
+        fingerprints.beacon.push_back(static_cast<std::uint32_t>(beacon_of[id]));
+        fingerprints.rssi.push_back(scan[k + 1].get<float>());
+      }
+      fingerprints.begin.push_back(static_cast<std::uint32_t>(fingerprints.beacon.size()));
+    }
+  }
+
+  Venue venue(j.value("name", std::string("unnamed")), bounds, std::move(levels), std::move(beacons),
+              std::move(connectors), j.value("wall_attenuation_db", 3.0), j.value("floor_attenuation_db", 15.0), georef,
+              std::move(footprint), std::move(rooms));
+  venue.set_floor_fingerprints(std::move(fingerprints));
+  return venue;
 }
 
 Venue load_venue_file(const std::string& path) {

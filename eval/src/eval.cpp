@@ -26,7 +26,9 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
     resample_ess_ratio, roughening_m, recovery, recovery_alpha_slow, recovery_alpha_fast, recovery_max_fraction,
     init_proposal, init_proposal_fraction, init_window_s, recovery_proposal, proposal_history, proposal_max_age_s,
     proposal_level_jump, level_change_prob_step, level_change_prob_baro, baro_update_interval_s, baro_sigma_m,
-    baro_outlier_prob, baro_offset_sigma_m, baro_offset_walk_m)
+    baro_outlier_prob, baro_offset_sigma_m, baro_offset_walk_m, baro_jump, baro_jump_radius_m, baro_jump_hold_s,
+    baro_jump_prob, baro_reseed_keep_reference, floor_prior_weight, floor_prior_k, floor_prior_eps,
+    floor_prior_max_age_s)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(RoomEventConfig, enter_prob, exit_prob, enter_dwell_s, exit_dwell_s,
                                                 update_period_s)
 
