@@ -140,6 +140,8 @@ no extra arithmetic, and the results are bit-identical to the single-floor engin
 `floor_accuracy` is the share of fixes on the correct floor. CEP50/CEP95 only count fixes on the correct
 floor, because a horizontal error measured against a point on another floor is meaningless.
 `floor_switch_latency_s` is the time from a true level change until the estimate reports the new floor.
+`level_flips` counts how often the reported floor changes, so a flickering floor shows up even when
+`floor_accuracy` is high ([formats.md](formats.md#replay-outputs)).
 
 ## Room enter and exit events
 

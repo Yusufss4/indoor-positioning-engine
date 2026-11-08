@@ -22,6 +22,7 @@ options:
   --set JSON             inline JSON merge patch, e.g. '{"pf":{"num_particles":500}}'
   --warmup SECONDS       exclude the first seconds from error stats (default 5)
   --out FILE             per-truth-sample estimates CSV
+  --track FILE           the estimate every 0.2 s of trace time, CSV (what the smoothness metrics use)
   --events FILE          room enter/exit events CSV, estimated and true (venues with rooms)
   --metrics FILE         write metrics JSON to a file as well
   --particles FILE       particle snapshots CSV
@@ -73,6 +74,7 @@ int main(int argc, char** argv) {
 
     const auto result = ipe::eval::replay(venue, trace, cfg, opts);
     if (args.has("out")) ipe::eval::write_estimates_csv(args.get("out"), result);
+    if (args.has("track")) ipe::eval::write_track_csv(args.get("track"), result);
     if (args.has("particles")) ipe::eval::write_particles_csv(args.get("particles"), result);
     if (args.has("events")) ipe::eval::write_room_events_csv(args.get("events"), venue, result);
 

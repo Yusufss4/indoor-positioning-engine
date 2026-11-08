@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdio>
 #include <fstream>
+#include <limits>
 #include <optional>
 #include <stdexcept>
 
@@ -188,6 +189,54 @@ Metrics compute_metrics(const std::vector<EstimateRecord>& records, double warmu
   return m;
 }
 
+void compute_smoothness(Metrics& m, const std::vector<TrackSample>& track, double period_s,
+                        const std::vector<EstimateRecord>& records, double t_from) {
+  if (period_s <= 0.0) return;
+  std::size_t first = 0;
+  while (first < track.size() && track[first].t < t_from) ++first;
+  const auto usable = [&](std::size_t i, std::size_t j) {
+    return track[i].valid && track[j].valid && track[i].level == track[j].level;
+  };
+
+  std::vector<double> second_diff;
+  double est_path = 0.0, t_begin = std::numeric_limits<double>::infinity(), t_end = -t_begin;
+  for (std::size_t i = first; i + 1 < track.size(); ++i) {
+    if (track[i].valid && track[i + 1].valid && track[i].level != track[i + 1].level) ++m.level_flips;
+    if (!usable(i, i + 1)) continue;
+    est_path += distance(track[i].pos, track[i + 1].pos);
+    t_begin = std::min(t_begin, track[i].t);
+    t_end = std::max(t_end, track[i + 1].t);
+    if (i > first && usable(i - 1, i)) {
+      const Vec2 d = track[i + 1].pos - track[i].pos * 2.0 + track[i - 1].pos;
+      second_diff.push_back(std::sqrt(d.norm2()));
+    }
+  }
+  if (!second_diff.empty()) {
+    m.jitter_p50_m = percentile(second_diff, 0.5);
+    m.jitter_p95_m = percentile(second_diff, 0.95);
+  }
+
+  constexpr double kJumpWindowS = 1.0, kJumpM = 3.0;
+  const auto stride = std::max<std::size_t>(1, static_cast<std::size_t>(std::lround(kJumpWindowS / period_s)));
+  int windows = 0, jumps = 0;
+  for (std::size_t i = first; i + stride < track.size(); i += stride) {
+    if (!usable(i, i + stride)) continue;
+    ++windows;
+    if (distance(track[i].pos, track[i + stride].pos) > kJumpM) ++jumps;
+  }
+  if (windows > 0) m.jumps_per_min = jumps / (windows * kJumpWindowS / 60.0);
+
+  // Truth path over the span the estimate was scored on, only where the truth is dense enough to follow turns.
+  std::vector<double> gaps;
+  double truth_path = 0.0;
+  for (std::size_t i = 1; i < records.size(); ++i) {
+    gaps.push_back(records[i].t - records[i - 1].t);
+    if (records[i - 1].t >= t_begin && records[i].t <= t_end)
+      truth_path += distance(records[i - 1].truth, records[i].truth);
+  }
+  if (!gaps.empty() && percentile(gaps, 0.5) <= 0.5 && truth_path > 1.0) m.path_ratio = est_path / truth_path;
+}
+
 void score_room_events(Metrics& m, const std::vector<RoomEvent>& estimated, const std::vector<RoomEvent>& truth,
                        double t_from, double window_s) {
   std::vector<bool> used(estimated.size(), false);
@@ -233,7 +282,17 @@ ReplayResult replay(const Venue& venue, const Trace& trace, const EngineConfig& 
   if (!venue.rooms().empty()) truth_rooms.emplace(venue, truth_room_config());
   std::vector<std::size_t> truth_in, est_in;
   std::size_t truth_seen = 0;
+  const double track_t0 = trace.truth.empty() ? 0.0 : trace.truth.front().t;
+  std::size_t track_ticks = 0;
   while (!player.finished()) {
+    if (opts.track_period_s > 0.0) {
+      // The estimate as it stands after every event up to and including the tick.
+      for (double tick = track_t0 + static_cast<double>(track_ticks) * opts.track_period_s; tick < player.next_time();
+           tick = track_t0 + static_cast<double>(++track_ticks) * opts.track_period_s) {
+        const Estimate e = engine.estimate();
+        result.track.push_back({tick, e.pos, e.level, e.valid});
+      }
+    }
     const auto start = clock::now();
     if (player.step(engine) != TracePlayer::Event::Truth) {
       busy += clock::now() - start;
@@ -289,6 +348,10 @@ ReplayResult replay(const Venue& venue, const Trace& trace, const EngineConfig& 
   }
 
   result.metrics = compute_metrics(result.records, opts.warmup_s);
+  if (!result.records.empty()) {
+    compute_smoothness(result.metrics, result.track, opts.track_period_s, result.records,
+                       result.records.front().t + opts.warmup_s);
+  }
   if (truth_rooms && !trace.truth.empty()) {
     for (const auto& e : engine.take_room_events()) result.room_events.push_back(e);
     result.truth_room_events = truth_rooms->take_events();
@@ -322,7 +385,12 @@ std::string metrics_to_json(const Metrics& m, int indent) {
                             {"room_event_precision", m.room_event_precision},
                             {"room_event_recall", m.room_event_recall},
                             {"room_event_latency_median_s", m.room_event_latency_median_s},
-                            {"room_accuracy", m.room_accuracy}};
+                            {"room_accuracy", m.room_accuracy},
+                            {"jitter_p50_m", m.jitter_p50_m},
+                            {"jitter_p95_m", m.jitter_p95_m},
+                            {"jumps_per_min", m.jumps_per_min},
+                            {"level_flips", m.level_flips},
+                            {"path_ratio", m.path_ratio}};
   return j.dump(indent);
 }
 
@@ -334,6 +402,16 @@ void write_estimates_csv(const std::string& path, const ReplayResult& result) {
     std::fprintf(f, "%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%d,%d,%d,%.6g,%.6g,%.6g\n", r.t, r.truth.x, r.truth.y,
                  r.estimate.x, r.estimate.y, r.sigma_m, r.error_m, r.has_fix ? 1 : 0, r.truth_level, r.est_level,
                  r.cov_xx, r.cov_xy, r.cov_yy);
+  }
+  std::fclose(f);
+}
+
+void write_track_csv(const std::string& path, const ReplayResult& result) {
+  std::FILE* f = std::fopen(path.c_str(), "w");
+  if (!f) throw std::runtime_error("cannot write " + path);
+  std::fprintf(f, "t,x,y,level,valid\n");
+  for (const auto& s : result.track) {
+    std::fprintf(f, "%.3f,%.3f,%.3f,%d,%d\n", s.t, s.pos.x, s.pos.y, s.level, s.valid ? 1 : 0);
   }
   std::fclose(f);
 }

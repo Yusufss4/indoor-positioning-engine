@@ -60,6 +60,17 @@ struct Metrics {
   double room_event_recall = -1.0;            ///< Share of true events detected.
   double room_event_latency_median_s = -1.0;  ///< Estimated minus true event time, matched events.
   double room_accuracy = -1.0;                ///< Share of evaluated samples with the true set of rooms.
+
+  /// Smoothness of the reported track, from the estimate sampled every ReplayOptions::track_period_s
+  /// (see compute_smoothness). They need no ground truth except path_ratio, so they also work on
+  /// recordings whose truth is a few waypoints. Floor changes are excluded from the horizontal figures.
+  double jitter_p50_m = -1.0;   ///< Median |p(t+T) - 2 p(t) + p(t-T)|; walking at steady speed gives ~0.
+  double jitter_p95_m = -1.0;   ///< 95th percentile of the same second difference.
+  double jumps_per_min = -1.0;  ///< Non-overlapping 1 s windows in which the estimate moved more than 3 m.
+  int level_flips = 0;          ///< Changes of the reported level; compare with level_changes.
+  /// Length of the estimated track over the length of the true one, after warm-up; -1 unless the
+  /// truth is dense (median spacing <= 0.5 s), since waypoint polylines cut corners.
+  double path_ratio = -1.0;
 };
 
 struct EstimateRecord {
@@ -78,6 +89,14 @@ struct EstimateRecord {
   int rooms_match = -1;
 };
 
+/// The engine's estimate at one tick of the replay's track clock.
+struct TrackSample {
+  double t = 0.0;
+  Vec2 pos;
+  int level = 0;
+  bool valid = false;
+};
+
 struct ParticleSnapshot {
   double t = 0.0;
   std::vector<std::array<float, 4>> particles;  ///< x, y, weight, level
@@ -87,11 +106,15 @@ struct ReplayOptions {
   double warmup_s = 5.0;            ///< Samples before this are excluded from error statistics.
   int particle_snapshot_every = 0;  ///< Every N truth samples; 0 disables.
   std::size_t particle_snapshot_max = 300;
+  double track_period_s = 0.2;  ///< Spacing of ReplayResult::track; 0 disables it and the smoothness metrics.
 };
 
 struct ReplayResult {
   std::vector<EstimateRecord> records;
   std::vector<ParticleSnapshot> snapshots;
+  /// The estimate every `track_period_s` of trace time, from the first truth sample on: what a client
+  /// polling the engine would draw.
+  std::vector<TrackSample> track;
   std::vector<RoomEvent> room_events;        ///< From the engine.
   std::vector<RoomEvent> truth_room_events;  ///< From the ground-truth positions.
   Metrics metrics;
@@ -103,6 +126,10 @@ struct ReplayResult {
 ReplayResult replay(const Venue& venue, const Trace& trace, const EngineConfig& cfg, const ReplayOptions& opts = {});
 
 Metrics compute_metrics(const std::vector<EstimateRecord>& records, double warmup_s);
+/// Fills the smoothness fields of `m` from an evenly spaced track (spacing `period_s`). Samples before
+/// `t_from` are skipped; `records` (truth) are only used for path_ratio.
+void compute_smoothness(Metrics& m, const std::vector<TrackSample>& track, double period_s,
+                        const std::vector<EstimateRecord>& records, double t_from);
 double percentile(std::vector<double> values, double p);
 
 /// Fills the room_event_* fields. A true event is detected by the earliest
@@ -115,6 +142,8 @@ void score_room_events(Metrics& m, const std::vector<RoomEvent>& estimated, cons
 std::string metrics_to_json(const Metrics& m, int indent = 2);
 void write_estimates_csv(const std::string& path, const ReplayResult& result);
 void write_particles_csv(const std::string& path, const ReplayResult& result);
+/// t,x,y,level,valid: the replay's evenly spaced estimate track.
+void write_track_csv(const std::string& path, const ReplayResult& result);
 /// t,source,room_id,room_name,type,probability with source "estimate" or "truth", sorted by time.
 void write_room_events_csv(const std::string& path, const Venue& venue, const ReplayResult& result);
 

@@ -23,6 +23,14 @@ struct BenchmarkCase {
   double floor_accuracy = 1.0;
   double floor_switch_latency_s = -1.0;
   double coverage95 = -1.0;  ///< Mean over runs; -1 when no fix has a covariance.
+  /// Smoothness (see Metrics): mean over seeds, or median over walks for recorded traces; -1 when no run
+  /// has the figure.
+  double jitter_p50_m = -1.0;
+  double jitter_p95_m = -1.0;
+  double jumps_per_min = -1.0;
+  double level_flips = 0.0;
+  double level_changes = 0.0;  ///< True level changes, averaged like level_flips.
+  double path_ratio = -1.0;
   /// Recorded traces: `runs` are different walks rather than seeds, so the
   /// medians over traces are reported next to the means.
   bool recorded = false;
