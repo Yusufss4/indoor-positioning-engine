@@ -107,9 +107,9 @@ TEST(Eval, SmoothnessCountsJitterJumpsAndFlips) {
   EXPECT_DOUBLE_EQ(m.jitter_p50_m, 0.0);  // the wobbles are rare
   EXPECT_DOUBLE_EQ(m.jitter_p95_m, 0.0);
   EXPECT_EQ(m.level_flips, 2);
-  // 1 s windows start every 5 samples: 59 of them, minus two touching the level flip and two touching
-  // the gap. The excursion jumps out (window 95-100) and back (105-110).
-  EXPECT_DOUBLE_EQ(m.jumps_per_min, 2.0 / (55.0 / 60.0));
+  // 1 s windows start every 5 samples: 59 of them, minus the two touching the gap. The excursion jumps
+  // out (window 95-100) and back (105-110), the level flips up (195-200) and down (205-210).
+  EXPECT_DOUBLE_EQ(m.jumps_per_min, 4.0 / (57.0 / 60.0));
   EXPECT_DOUBLE_EQ(m.path_ratio, -1.0);
 }
 

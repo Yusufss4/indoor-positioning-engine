@@ -14,6 +14,7 @@ add_executable(ipe_tests
   test_geometry.cpp
   test_georef.cpp
   test_import.cpp
+  test_level_selector.cpp
   test_map_estimate.cpp
   test_particle_filter.cpp
   test_pdr.cpp

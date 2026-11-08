@@ -22,14 +22,14 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(RssiModelConfig, sigma_db, outli
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(BaroConfig, lowpass_tau_s, sea_level_hpa)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
     ParticleFilterConfig, num_particles, seed, step_length_sigma, step_scale_sigma, step_scale_walk, heading_sigma_deg,
-    heading_outlier_prob, map_consistent_estimate, estimate_rssi_offset, rssi_offset_sigma, rssi_offset_walk,
-    beacon_integrity, integrity_threshold_db, integrity_alpha, integrity_min_samples, integrity_max_sigma_m,
-    resample_ess_ratio, roughening_m, recovery, recovery_alpha_slow, recovery_alpha_fast, recovery_max_fraction,
-    init_proposal, init_proposal_fraction, init_window_s, recovery_proposal, proposal_history, proposal_max_age_s,
-    proposal_level_jump, level_change_prob_step, level_change_prob_baro, baro_update_interval_s, baro_sigma_m,
-    baro_outlier_prob, baro_offset_sigma_m, baro_offset_walk_m, baro_jump, baro_jump_radius_m, baro_jump_hold_s,
-    baro_jump_prob, baro_reseed_keep_reference, floor_prior_weight, floor_prior_k, floor_prior_eps,
-    floor_prior_max_age_s)
+    heading_outlier_prob, map_consistent_estimate, level_smoothing_s, level_hysteresis, estimate_rssi_offset,
+    rssi_offset_sigma, rssi_offset_walk, beacon_integrity, integrity_threshold_db, integrity_alpha,
+    integrity_min_samples, integrity_max_sigma_m, resample_ess_ratio, roughening_m, recovery, recovery_alpha_slow,
+    recovery_alpha_fast, recovery_max_fraction, init_proposal, init_proposal_fraction, init_window_s, recovery_proposal,
+    proposal_history, proposal_max_age_s, proposal_level_jump, level_change_prob_step, level_change_prob_baro,
+    baro_update_interval_s, baro_sigma_m, baro_outlier_prob, baro_offset_sigma_m, baro_offset_walk_m, baro_jump,
+    baro_jump_radius_m, baro_jump_hold_s, baro_jump_prob, baro_reseed_keep_reference, floor_prior_weight, floor_prior_k,
+    floor_prior_eps, floor_prior_max_age_s)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(RoomEventConfig, enter_prob, exit_prob, enter_dwell_s, exit_dwell_s,
                                                 update_period_s)
 
@@ -194,15 +194,15 @@ void compute_smoothness(Metrics& m, const std::vector<TrackSample>& track, doubl
   if (period_s <= 0.0) return;
   std::size_t first = 0;
   while (first < track.size() && track[first].t < t_from) ++first;
-  const auto usable = [&](std::size_t i, std::size_t j) {
-    return track[i].valid && track[j].valid && track[i].level == track[j].level;
-  };
+  // Every pair of fixes counts, across floors too: a floor flip that moves the dot is as visible as a
+  // horizontal jump, and leaving those pairs out would reward a filter for flickering.
+  const auto usable = [&](std::size_t i, std::size_t j) { return track[i].valid && track[j].valid; };
 
   std::vector<double> second_diff;
   double est_path = 0.0, t_begin = std::numeric_limits<double>::infinity(), t_end = -t_begin;
   for (std::size_t i = first; i + 1 < track.size(); ++i) {
-    if (track[i].valid && track[i + 1].valid && track[i].level != track[i + 1].level) ++m.level_flips;
     if (!usable(i, i + 1)) continue;
+    if (track[i].level != track[i + 1].level) ++m.level_flips;
     est_path += distance(track[i].pos, track[i + 1].pos);
     t_begin = std::min(t_begin, track[i].t);
     t_end = std::max(t_end, track[i + 1].t);
@@ -222,7 +222,7 @@ void compute_smoothness(Metrics& m, const std::vector<TrackSample>& track, doubl
   for (std::size_t i = first; i + stride < track.size(); i += stride) {
     if (!usable(i, i + stride)) continue;
     ++windows;
-    if (distance(track[i].pos, track[i + stride].pos) > kJumpM) ++jumps;
+    if (distance(track[i].pos, track[i + stride].pos) > kJumpM || track[i].level != track[i + stride].level) ++jumps;
   }
   if (windows > 0) m.jumps_per_min = jumps / (windows * kJumpWindowS / 60.0);
 

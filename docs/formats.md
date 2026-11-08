@@ -203,13 +203,14 @@ are -1 when there is no scored fix with a covariance. They are reported, not gat
 `ipe-regress` adds `coverage95` (and `median_coverage95` for recorded traces) to its JSON and tables.
 
 The smoothness metrics describe the `--track` stream after the warm-up, so they need no ground truth and
-work on recordings whose truth is a few waypoints. Consecutive samples on different floors, or with no
-fix, are left out of the horizontal figures.
+work on recordings whose truth is a few waypoints. Pairs of samples without a fix are left out; pairs on
+different floors count, with the horizontal distance, because a floor flip moves the dot as visibly as a
+horizontal jump.
 - `jitter_p50_m` and `jitter_p95_m` are percentiles of the second difference
   |p(t+0.2) - 2 p(t) + p(t-0.2)|. Walking at a steady speed gives about 0. A dot that moves one step at a
   time scores about the step length, and so does one that shakes.
-- `jumps_per_min` counts non-overlapping 1 s windows in which the estimate moved more than 3 m, faster
-  than anyone walks.
+- `jumps_per_min` counts non-overlapping 1 s windows in which the estimate moved more than 3 m (faster
+  than anyone walks) or changed floor. A true floor change therefore counts once.
 - `level_flips` counts changes of the reported floor; `level_changes` counts the true ones.
 - `path_ratio` is the length of the estimated track over the length of the true one. It is only reported
   when the truth is dense (median spacing <= 0.5 s), otherwise -1.

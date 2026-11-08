@@ -27,6 +27,7 @@ use it, so they see identical inputs.
 | Beacon-driven init/recovery proposals | `core/src/particle_filter_proposal.cpp` |
 | Beacon integrity monitor | `core/src/beacon_integrity.cpp` |
 | Estimate kept on the map (dominant group of a split cloud) | `core/src/map_estimate.cpp` |
+| Reported level (averaged level weights with hysteresis) | `core/src/level_selector.cpp` |
 | Config JSON, presets, replay, metrics | `eval/src/eval.cpp` |
 
 **Adding a sensor.** Add a stream to `Trace` (and its CSV reader/writer in `core/src/trace.cpp`), a
@@ -120,9 +121,15 @@ floor of level 0 at the start of the walk. It absorbs weather, device bias and t
 - **RSSI likelihood** uses the particle's level for 3D distance, slab loss and the walls it counts.
 - **Initialisation and recovery** sample levels as well as positions; recovery re-seeds around the last
   estimate on its level.
-- **Estimate.** The level is the weighted mode over particles. Position and covariance are computed from
-  the particles on that level only, so a minority hypothesis upstairs does not drag the mean into the
-  wrong room.
+- **Estimate.** The level weights are averaged over 0.5 s (`pf.level_smoothing_s`), and the reported
+  level moves to another one only when that one leads by 0.1 in the average (`pf.level_hysteresis`), or at
+  once when no particle is left on the reported level. A cloud split between floors then does not flicker
+  with every packet (`office_floor_bleed`: 20 reported floor changes per walk for 2 real ones, 3.8 with
+  it), and a real floor change shows about 0.4 s later. Position and covariance are computed from the
+  particles on the reported level only, so a minority hypothesis upstairs does not drag the mean into
+  the wrong room. The filter's own decisions (integrity monitor, recovery, barometer jump and reference)
+  use the most likely level of the current update, so the hysteresis changes what is reported, not how
+  the filter evolves (experiment 7).
 - **Estimate on the map** (`map_consistent_estimate`, on by default). Particles never cross walls, but the
   weighted mean of a cloud split across a wall (corridor and shop, two corridors) can fall on the wall,
   in an empty shop or behind a wall from every particle. If the mean is outside the walkable area or a

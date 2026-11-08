@@ -5,6 +5,7 @@ add_library(ipe_core STATIC
   src/floor_classifier.cpp
   src/geometry.cpp
   src/georef.cpp
+  src/level_selector.cpp
   src/map_estimate.cpp
   src/particle_filter.cpp
   src/particle_filter_proposal.cpp
