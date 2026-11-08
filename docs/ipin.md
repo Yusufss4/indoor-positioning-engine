@@ -184,8 +184,9 @@ The tune gains carry over only in part:
   is about unchanged, and CEP95 gets worse on two of them.
 
 Six walks are too few to call that a regression or a gain. So `ipin.json` stays opt-in, and
-`ipin_regression` keeps gating `msil_wifi.json`. The web demo uses `ipin.json`; its Nuremberg walk is a
-validation walk, where floor accuracy goes from 63% to 96%.
+`ipin_regression` keeps gating `msil_wifi.json`. The web demo uses `ipin.json`. Its Nuremberg walk is a
+validation walk; on the full recording, floor accuracy goes from 63% to 96%. The demo cuts the first
+90 s ([In the web demo](#in-the-web-demo)).
 
 On the synthetic scenarios (10 seeds), the jump changes nothing: their walkers always reach the stairs.
 The other two settings trade:
@@ -225,6 +226,15 @@ floor shows its competition plan under the extracted walls, and the 3D view stac
 floor −1 at the size of its landing). `datasets/ipin/export_demo.py` writes `data/real_ipin/` (venue,
 GeoJSON export, plans, trace, `demos.json`); a unit test checks it against the venue export. The demo
 replays with `data/configs/ipin.json`.
+
+The demo traces are cut (`DEMO_START_S` in `export_demo.py`): Nuremberg starts 90 s in and UMinho 82 s
+in, and both are shifted to start at 0.
+- **Why.** The first landmark is tapped about 61 s in, and the walker only becomes visible on the 3D
+  overview once it moves.
+- **UMinho's cut** falls between two landmarks on the same floor, so the trace gets one truth row at 0 s,
+  interpolated between them. Scoring skips the first 5 s, so that row is never scored.
+- **Accuracy.** The filter starts cold at the cut. With `ipin.json` the trimmed Nuremberg walk has the
+  floor right for 88% of its landmarks (96% on the full walk), and UMinho for 40%.
 
 ## Reproduce
 
