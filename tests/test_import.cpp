@@ -259,6 +259,35 @@ TEST(Import, WebDemoRecordingsAreConsistent) {
   EXPECT_GE(traces, 1);
 }
 
+TEST(Import, MoreWebDemoRecordingsAreConsistent) {
+  // Regenerate with: datasets/ipin/export_demo.py, datasets/uji_ble/export_demo.py
+  int traces = 0;
+  for (const char* dir : {"real_ipin", "real_uji"}) {
+    for (const auto& site : fs::directory_iterator(test::data_path(dir))) {
+      if (!site.is_directory()) continue;
+      SCOPED_TRACE(site.path().string());
+      const Venue v = load_venue_file((site.path() / "venue.json").string());
+      // IPIN venues are georeferenced (3D view); UJI zones have local coordinates only.
+      if (fs::exists(site.path() / "venue.geojson")) {
+        EXPECT_EQ(geo::export_geojson(v), slurp((site.path() / "venue.geojson").string()));
+        for (const Level& l : v.levels()) {
+          EXPECT_TRUE(fs::exists(site.path() / ("floor_" + std::to_string(l.ordinal) + ".png"))) << l.ordinal;
+        }
+      }
+      for (const auto& file : fs::directory_iterator(site.path())) {
+        if (file.path().extension() != ".csv") continue;
+        const Trace t = read_trace_file(file.path().string());
+        EXPECT_FALSE(t.truth.empty());
+        EXPECT_FALSE(t.imu.empty());
+        for (const auto& b : t.ble) ASSERT_TRUE(v.beacon_index(b.beacon_id).has_value()) << b.beacon_id;
+        for (const auto& g : t.truth) EXPECT_LT(g.level, v.level_count());
+        ++traces;
+      }
+    }
+  }
+  EXPECT_GE(traces, 6);
+}
+
 /// A platform-style export: rooms instead of walls, a door, per-floor stair
 /// footprints with unrelated ids, string level numbers, no georef.
 TEST(Import, MappingDrivenImportOfRoomsAndDoors) {

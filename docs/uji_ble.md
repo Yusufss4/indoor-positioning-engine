@@ -130,6 +130,13 @@ A5 fingerprint, and the Cramér-Rao bound with the replay CEP50 (Spearman over p
   the bound does not model. That per-point bounds do not rank agrees with
   [experiments.md](experiments.md) §5, where pooling along a walk is what made the bound useful.
 
+## In the web demo
+
+"Real recordings (UJI BLE, standing still)" has one held-out session per venue (library; lab at −4,
+−12 and −20 dBm): the A5 session with the most scans. The map is the mapped shelves and pillars and the
+surveyed beacons. There is no 3D view and no plan image: the database gives local coordinates only.
+`datasets/uji_ble/export_demo.py` writes `data/real_uji/`.
+
 ## Caveats
 
 - Standing still only: no steps, no heading, no walls in the way of walking. This tests the radio

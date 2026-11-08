@@ -1,0 +1,52 @@
+{
+ "menu": "Real recordings (IPIN competition, several floors)",
+ "source": "IPIN competition Track 3 datasets, CC BY 4.0 (see LICENSE)",
+ "selection": "per site, the shortest validation walk with a barometer that visits every floor",
+ "default": "ipin_nuremberg",
+ "demos": [
+  {
+   "id": "ipin_nuremberg",
+   "title": "Museum Industriekultur, Nuremberg, 8 min walk, 3 floors",
+   "venue": "nuremberg/venue.json",
+   "geojson": "nuremberg/venue.geojson",
+   "images": {
+    "-2": "nuremberg/floor_-2.png",
+    "-1": "nuremberg/floor_-1.png",
+    "0": "nuremberg/floor_0.png"
+   },
+   "trace": "nuremberg/IPIN2024_T3_TestingTrial04.csv",
+   "config": "../configs/msil_wifi.json",
+   "view": [
+    5.5,
+    11.3,
+    128.9,
+    60.9
+   ],
+   "duration_s": 502.2,
+   "waypoints": 28,
+   "description": "Museum Industriekultur, Nuremberg: an IPIN competition validation walk (SM-G930F, IMU + Wi-Fi + barometer) over floors -2, -1, 0, taking the stairs. Squares are the landmarks the surveyor tapped, the only ground truth; the floor menu follows the walker. Walls were extracted from the competition's floor plans and the Wi-Fi access points (purple) located from the training walks. This walk is from the set the settings were chosen on; the held-out scoring walks are in docs/ipin.md. The particle filter uses data/configs/msil_wifi.json."
+  },
+  {
+   "id": "ipin_uminho",
+   "title": "University of Minho, building 11, 7 min walk, 3 floors",
+   "venue": "uminho/venue.json",
+   "geojson": "uminho/venue.geojson",
+   "images": {
+    "0": "uminho/floor_0.png",
+    "1": "uminho/floor_1.png",
+    "2": "uminho/floor_2.png"
+   },
+   "trace": "uminho/IPIN2022_T3_TestingTrial01_User03.csv",
+   "config": "../configs/msil_wifi.json",
+   "view": [
+    1.2,
+    11.0,
+    118.7,
+    52.4
+   ],
+   "duration_s": 423.5,
+   "waypoints": 11,
+   "description": "University of Minho, building 11: an IPIN competition validation walk (Nexus 5, IMU + Wi-Fi + barometer) over floors 0, 1, 2, taking the stairs. Squares are the landmarks the surveyor tapped, the only ground truth; the floor menu follows the walker. Walls were extracted from the competition's floor plans and the Wi-Fi access points (purple) located from the training walks. This walk is from the set the settings were chosen on; the held-out scoring walks are in docs/ipin.md. The particle filter uses data/configs/msil_wifi.json."
+  }
+ ]
+}

@@ -44,10 +44,10 @@ let view = "3d";
 let map3d = null;
 let map3dReady = null; // promise of map3d.init(), shared by overlapping show3d() calls
 let show3dRequest = 0;
-let realDemos = new Map(); // id -> entry of data/real/demos.json
+let realDemos = new Map(); // id -> entry of a recordings index (data/real*/demos.json), with its base URL
 let real = null; // entry being replayed, null for simulated scenarios
-let background = null; // floor plan image of a recording
-let waypoints = []; // [t, x, y] surveyor waypoints of a recording
+let backgrounds = null; // floor plan image of a recording per level index (null: none)
+let waypoints = []; // [t, x, y, level] surveyor waypoints of a recording
 let zoom = { k: 1, x: 0, y: 0 }; // 2D view: canvas px = k * fitted px + (x, y)
 let roomLog = []; // room enter/exit events recorded so far, oldest first
 let selected = null; // clicked map item {kind, id}, shown in the info card
@@ -55,7 +55,12 @@ let infoRefresh = 0;
 let lastFix = {}; // last valid estimate per filter, to break its trail where it jumps a wall
 let roomLogKey = null; // what the rooms panel currently shows
 
-const REAL_BASE = new URL("data/real/", window.location.href);
+/// Recording indexes, in menu order. Each lists venues, traces and floor plans relative to its folder.
+const RECORDING_SOURCES = [
+  { dir: "data/real/", label: "Real recordings (Microsoft Indoor Location)" },
+  { dir: "data/real_ipin/", label: "Real recordings (IPIN competition, several floors)" },
+  { dir: "data/real_uji/", label: "Real recordings (UJI BLE, standing still)" },
+];
 
 async function loadJson(url) {
   const res = await fetch(url);
@@ -72,25 +77,32 @@ function loadImage(url) {
   });
 }
 
-/// Adds the recordings listed in data/real/demos.json to the scenario menu (if the file exists).
+/// Adds the recordings of every index in RECORDING_SOURCES that exists to the scenario menu.
 async function loadRealDemos() {
-  let index;
-  try {
-    index = JSON.parse(await loadJson(new URL("demos.json", REAL_BASE)));
-  } catch {
-    return;
+  for (const src of RECORDING_SOURCES) {
+    const base = new URL(src.dir, window.location.href);
+    let index;
+    try {
+      index = JSON.parse(await loadJson(new URL("demos.json", base)));
+    } catch {
+      continue;
+    }
+    const group = document.createElement("optgroup");
+    group.label = index.menu || src.label;
+    for (const d of index.demos) {
+      realDemos.set(d.id, { ...d, base });
+      group.append(new Option(d.title, `real:${d.id}`));
+    }
+    el("scenario").append(group);
   }
-  const group = document.createElement("optgroup");
-  group.label = "Real recordings (Microsoft Indoor Location)";
-  for (const d of index.demos) {
-    realDemos.set(d.id, d);
-    group.append(new Option(d.title, `real:${d.id}`));
-  }
-  el("scenario").append(group);
 }
 
+/// Ground-truth rows as [t, x, y, level index]; single-floor traces have no level column.
 function parseWaypoints(traceText) {
-  return traceText.split("\n").filter((l) => l.startsWith("gt,")).map((l) => l.split(",").slice(1, 4).map(Number));
+  return traceText.split("\n").filter((l) => l.startsWith("gt,")).map((l) => {
+    const f = l.split(",");
+    return [Number(f[1]), Number(f[2]), Number(f[3]), f.length > 5 ? Number(f[5]) : 0];
+  });
 }
 
 /// Venue JSON in either layout (top-level walls, or levels) -> one shape.
@@ -120,7 +132,7 @@ async function startSimulated(name) {
   const configText = scenario.demo_config ? await loadJson(new URL(scenario.demo_config, scenarioUrl)) : "";
   venue = normalizeVenue(JSON.parse(venueText));
   geojsonUrl = new URL(venueUrl.href.replace(/\/venues\/([^/]+)\.json$/, "/geojson/$1.geojson"));
-  background = null;
+  backgrounds = null;
   waypoints = [];
   // The real-building tour explains itself on the map; the synthetic scenarios name the effect they inject.
   el("description").textContent = scenario.demo_config ? "" : scenario.description || "";
@@ -129,15 +141,18 @@ async function startSimulated(name) {
 }
 
 async function startRecording(entry) {
-  const at = (path) => new URL(path, REAL_BASE);
-  const [venueText, traceText, configText, image] = await Promise.all([
-    loadJson(at(entry.venue)), loadJson(at(entry.trace)), loadJson(at(entry.config)), loadImage(at(entry.image)),
+  const at = (path) => new URL(path, entry.base);
+  const [venueText, traceText, configText] = await Promise.all([
+    loadJson(at(entry.venue)), loadJson(at(entry.trace)), entry.config ? loadJson(at(entry.config)) : "",
   ]);
   venue = normalizeVenue(JSON.parse(venueText));
-  geojsonUrl = at(entry.geojson);
-  background = image;
+  // One plan per floor (`images`, by ordinal), one for a single floor (`image`), or none.
+  const byOrdinal = entry.images || (entry.image ? { [venue.levels[0].ordinal]: entry.image } : {});
+  const images = await Promise.all(venue.levels.map((l) => (byOrdinal[l.ordinal] ? loadImage(at(byOrdinal[l.ordinal])) : null)));
+  backgrounds = images.some(Boolean) ? images : null;
+  geojsonUrl = entry.geojson ? at(entry.geojson) : null;
   waypoints = parseWaypoints(traceText);
-  el("description").textContent =
+  el("description").textContent = entry.description ||
     `${entry.title} with a real Android phone (IMU + Wi-Fi), held out from fitting and tuning. Squares are ` +
     `the surveyor's waypoints, the only ground truth; the black path is interpolated between them, and the ` +
     `live error is measured against it. Purple dots are Wi-Fi access points located from other walks. The ` +
@@ -147,6 +162,9 @@ async function startRecording(entry) {
 }
 
 async function start() {
+  // Drop the old frames first: tick() must not draw them over the new venue while it loads.
+  recorded = [];
+  el("view3d-status").textContent = "";
   const name = el("scenario").value;
   real = name.startsWith("real:") ? realDemos.get(name.slice(5)) : null;
   if (real) await startRecording(real);
@@ -240,7 +258,7 @@ function shownLevel(fr) {
 }
 
 function transform() {
-  const [x0, y0, x1, y1] = real ? real.view : venue.bounds;
+  const [x0, y0, x1, y1] = real && real.view ? real.view : venue.bounds;
   const pad = 20;
   const s = Math.min((canvas.width - 2 * pad) / (x1 - x0), (canvas.height - 2 * pad) / (y1 - y0));
   const ox = pad + ((canvas.width - 2 * pad) - s * (x1 - x0)) / 2;
@@ -441,6 +459,7 @@ function draw(level, idx) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   drawGrid(T);
 
+  const background = backgrounds && backgrounds[level];
   if (background) {
     const [bx0, by0, bx1, by1] = venue.bounds;
     ctx.globalAlpha = 0.3;
@@ -514,11 +533,11 @@ function draw(level, idx) {
   }
 
   const trails = el("show-trails").checked;
-  if (trails) drawPath(idx, (h) => h.truth, T, COLORS.truth, 2, level);
+  if (trails) drawPath(idx, (h) => (h.truth.valid ? h.truth : null), T, COLORS.truth, 2, level);
   ctx.fillStyle = COLORS.truth;
-  for (const [t, x, y] of waypoints) {
+  for (const [t, x, y, l] of waypoints) {
     if (t > now) break;
-    ctx.fillRect(T.toX(x) - 4, T.toY(y) - 4, 8, 8);
+    if (l === level) ctx.fillRect(T.toX(x) - 4, T.toY(y) - 4, 8, 8);
   }
   for (const f of visibleFilters()) {
     const fix = (h) => (h.t > TRAIL_START_S && h.est[f].valid ? h.est[f] : null);
@@ -536,7 +555,7 @@ function draw(level, idx) {
     dot(e.x, e.y, T, COLORS[f], 6, true, !here);
   }
   const t = fr.truth;
-  dot(t.x, t.y, T, COLORS.truth, 6, true, t.level !== level);
+  if (t.valid) dot(t.x, t.y, T, COLORS.truth, 6, true, t.level !== level);
 }
 
 function visibleFilters() {
@@ -546,7 +565,7 @@ function visibleFilters() {
 function updateStats(fr) {
   const t = fr.truth;
   const multi = venue.levels.length > 1;
-  const levelText = multi ? `   floor: ${venue.levels[t.level].name}` : "";
+  const levelText = multi && t.valid ? `   floor: ${venue.levels[t.level].name}` : "";
   el("clock").textContent = `t = ${fr.t.toFixed(1)} / ${demo.duration().toFixed(0)} s   steps: ${fr.steps}` +
     `${levelText}${computing() ? "   computing..." : ""}`;
   const fmt = (v) => (v < 0 ? "-" : `${v.toFixed(2)} m`);
@@ -586,7 +605,7 @@ function currentFrame(fr, level, idx) {
     estimates: filters.map((f) => ({ name: f, color: COLORS[f], e: fr.est[f] })),
     trailKey: trails ? `${idx}|${filters}` : "off",
     trails: () => !trails ? [] : [
-      { color: COLORS.truth, width: 0.4, runs: trailRuns(idx, (h) => h.truth) },
+      { color: COLORS.truth, width: 0.4, runs: trailRuns(idx, (h) => (h.truth.valid ? h.truth : null)) },
       ...filters.map((f) => ({
         color: COLORS[f], width: 0.3,
         runs: trailRuns(idx, (h) => (h.t > TRAIL_START_S && h.est[f].valid ? h.est[f] : null)),
@@ -662,6 +681,11 @@ function seek(t) {
 async function show3d() {
   const status = el("view3d-status");
   const request = ++show3dRequest;
+  if (!geojsonUrl) {
+    status.textContent = "3D view unavailable: this recording has local coordinates only (no georeference).";
+    setView("2d");
+    return;
+  }
   try {
     status.textContent = "loading 3D view...";
     if (!map3dReady) {
@@ -817,7 +841,7 @@ function pick2d(px, py) {
   const level = shownLevel(fr);
   const T = transform();
   const near = (x, y, r) => Math.hypot(T.toX(x) - px, T.toY(y) - py) <= r;
-  if (fr.truth.level === level && near(fr.truth.x, fr.truth.y, 9)) return { kind: "truth" };
+  if (fr.truth.valid && fr.truth.level === level && near(fr.truth.x, fr.truth.y, 9)) return { kind: "truth" };
   for (const f of visibleFilters()) {
     const e = fr.est[f];
     if (e.valid && e.level === level && near(e.x, e.y, 9)) return { kind: f };
@@ -923,7 +947,7 @@ function renderInfo(idx) {
   if (kind === "beacon") {
     const b = venue.beacons.find((x) => x.id === id);
     if (!b) return closeInfo();
-    title = `${real ? "Access point" : "Beacon"} ${b.id}`;
+    title = `${b.id.startsWith("w:") ? "Access point" : "Beacon"} ${b.id}`;
     rows = beaconRows(b, idx);
   } else if (kind === "room") {
     const i = venue.rooms.findIndex((r) => r.id === id);

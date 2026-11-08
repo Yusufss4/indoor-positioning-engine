@@ -43,6 +43,8 @@ truth; a replay tool and a regression suite measure accuracy.
   only. `evaluate.py` adds floor hit rate and the competition metric.
 - `datasets/uji_ble` - UJI BLE fingerprints (CC BY): RSSI model study, venues in `data/uji_ble/` and
   standing-still traces ([docs/uji_ble.md](docs/uji_ble.md)).
+- `data/real_ipin`, `data/real_uji` - web demo recordings written by `export_demo.py` in those folders
+  (`data/real` is MSIL's and is rewritten by its own script). The demo reads every `demos.json`.
 - `datasets/common` - helpers shared by the real-data converters (transmitter fit, wall geometry, georef,
   trace writer). MSIL output must stay byte-identical when they change.
 - `viz/` - Python plotting; `web/` - Emscripten bindings and the browser demo.
