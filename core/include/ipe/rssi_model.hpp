@@ -21,7 +21,11 @@ class RssiModel {
   RssiModel(const Venue& venue, RssiModelConfig cfg = {}) : venue_(&venue), cfg_(cfg) {}
 
   /// Expected RSSI from beacon `b` for a receiver at `p` on level index `level`.
-  [[nodiscard]] double expected_rssi(const Beacon& b, Vec2 p, int level = 0) const;
+  [[nodiscard]] double expected_rssi(const Beacon& b, Vec2 p, int level = 0) const {
+    return expected_rssi(b, p, level, venue_->wall_attenuation_db(), venue_->floor_attenuation_db());
+  }
+  /// As above with the per-wall and per-slab losses given instead of the venue's (estimated online).
+  [[nodiscard]] double expected_rssi(const Beacon& b, Vec2 p, int level, double wall_db, double floor_db) const;
   [[nodiscard]] double expected_rssi_free_space(const Beacon& b, double d) const;
   [[nodiscard]] double log_likelihood(double residual_db) const;
 

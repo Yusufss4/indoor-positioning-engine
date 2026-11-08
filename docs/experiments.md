@@ -365,10 +365,79 @@ Real tune walks with the default config (no `--config`, 1500 particles; median C
 this is still a coarse rule: a venue between 0.6 and 1.0 (a large two-floor office, for example) gets
 the uniform start, which experiment 4 found mixed there.
 
+## 10. Learning the loss per wall and per slab online
+
+**Question.** The radio model takes one loss per wall and one per slab from the map.
+- `office_nlos_heavy`: walls lose 7 dB, the map says 3.5.
+- `office_floor_bleed`: the slab loses 4 dB, the map says 15.
+- The IPIN buildings: the fitted slab loss is 2–4 dB for the whole building.
+
+Can the filter learn the real values as it goes?
+
+**Per-particle state (dropped).** A `wall_db`/`floor_db` per particle, with a prior around the map's value
+and a random walk, like the device offset. 10 seeds, means over the 12 scenarios:
+
+| Variant | CEP50 | CEP95 |
+|---|---:|---:|
+| off | 0.780 | 2.680 |
+| wall loss, prior 2 dB | 0.775 | 3.425 |
+| wall loss, prior 1 dB, slower walk | 0.776 | 2.868 |
+| slab loss, prior 2 dB, walk 0.01 dB | 0.752 | 2.681 |
+
+The wall loss raised CEP95 even on `office_nlos_heavy` (1.88 → 4.04 m). The slab loss fixed
+`office_floor_bleed` (20 seeds: 0.94/4.08 → 0.64/1.91 m) but ruined `office_elevator` (0.62/1.91 →
+0.79/4.33 m, convergence 2 → 17 s on every seed). The cause is identifiability: with a loss per particle, a
+group at the wrong position with a matching loss explains the other floor's beacons as well as the right
+one, so half the venue's beacons stop locating the walker.
+
+A side lesson: the first version of the slab state drew random numbers in single-floor venues too, where
+the slab is never used. That alone moved `airport_hall_sparse` CEP95 by 0.5 m and `office_device_offset` by
+0.6 m. Differences of that size between 10-seed runs are seed noise, not effects.
+
+**Venue-wide calibration.** One shared loss, calibrated from residuals at the converged estimate, the way
+the integrity monitor judges beacons. Once the cloud's sigma is under 3 m, each admitted reading nudges the
+loss by 0.02 x its residual per slab or wall, with residuals clipped to 15 dB.
+- **Slab loss, ungated:** it settled at 11–12 dB on walks whose true slab loses 14 dB. Receivers drop
+  packets below their sensitivity, so the weak other-floor readings that arrive are biased strong.
+- **Gated on the prediction:** only readings predicted above -85 dBm are used, so the selection does not
+  depend on the noise.
+- **Gated on the prediction or the measurement:** this would let a loss that starts far too high recover.
+  It did worse on the real walks (below).
+- **Wall loss calibration:** unstable at every setting (mean CEP95 3.0–5.9 m). Dropped.
+
+Slab calibration, gated on the prediction, against off (10 seeds; single-floor scenarios are
+bit-identical):
+
+| Scenario | off | calibrated |
+|---|---:|---:|
+| office_floor_bleed | 0.89 / 3.90, floor 96.6% | **0.68 / 2.08, floor 97.8%** |
+| office_stairs_up_down | 0.79 / 3.26 | 0.77 / 3.41 |
+| kit_tour | 0.72 / 3.52 | 0.68 / 3.35 |
+| baro_drift_long | 0.63 / 1.99 | 0.65 / 2.86 |
+| office_elevator | 0.60 / 1.72 | 0.63 / 2.29 |
+
+The calibration helps where the map's slab loss is badly wrong and costs a little where it is about
+right, so it stays off by default.
+
+On the IPIN validation walks (`ipin.json`):
+
+| Config | Nuremberg IPIN p75 [m] | floor hit | UMinho IPIN p75 [m] | floor hit |
+|---|---:|---:|---:|---:|
+| without | 18.5 | 83% | 33.8 | 70% |
+| gated on the prediction | **14.9** | **89%** | **31.3** | 69% |
+| gated on prediction or measurement | 16.1 | 85% | 36.2 | 70% |
+
+**Kept.** `pf.calibrate_floor_loss`, gated on the prediction. Off by default, on in `ipin.json`.
+
+**Limit.** A map loss far above the truth predicts every other-floor reading below -85 dBm, so nothing
+corrects it. The unit test opens the gate to check the estimator itself.
+
 ## Open questions
 
 - The beacon-driven init proposal is now chosen by particle density (experiment 9), but venues between
   0.6 and 1 particle per m^2 are where it is mixed. A wall-aware ring (rejection sampling against the
   full likelihood) might remove the office cost and let it be on everywhere.
-- `office_nlos_heavy`: the wall-aware model assumes 3.5 dB per wall while the truth is 7 dB; estimating
-  wall loss online (per venue) is a natural next state to add.
+- `office_nlos_heavy`: the wall-aware model assumes 3.5 dB per wall while the truth is 7 dB. Learning the
+  wall loss online failed both as a particle state and as a venue-wide calibration (experiment 10); the
+  device offset and the wall loss trade off too easily. Per-wall-type losses from the map are the
+  alternative.

@@ -591,3 +591,36 @@ TEST(ParticleFilter, InitProposalTurnsOnForSparseClouds) {
   cfg.num_particles = 5000;
   EXPECT_TRUE(ParticleFilter(v, cfg, {}).init_proposal_active());
 }
+
+TEST(ParticleFilter, CalibratesTheSlabLossFromReadings) {
+  // The map says 15 dB per slab; the building loses 5. A walker standing on level 0.
+  const Venue v = test::two_level_venue();
+  const RssiModel model(v);
+  const Vec2 pos{14.0, 5.0};
+  double error_without = 0.0;
+  for (const bool calibrate : {false, true}) {
+    auto cfg = test_config();
+    cfg.calibrate_floor_loss = calibrate;
+    // At 15 dB the upstairs beacons are predicted below -85 dBm here; open the gate to test the estimator.
+    cfg.loss_calibration_min_rssi_dbm = -120.0;
+    ParticleFilter pf(v, cfg, {});
+    double t = 0.0;
+    for (int r = 0; r < 300; ++r) {
+      for (std::size_t i = 0; i < v.beacons().size(); ++i) {
+        const Beacon& b = v.beacons()[i];
+        pf.on_rssi(t, i, model.expected_rssi(b, pos, 0, v.wall_attenuation_db(), 5.0));
+        t += 0.05;
+      }
+    }
+    EXPECT_EQ(pf.estimate().level, 0);
+    const double error = distance(pf.estimate().pos, pos);
+    if (calibrate) {
+      EXPECT_NEAR(pf.floor_loss_db(), 5.0, 1.5);
+      EXPECT_LT(error, 1.0);
+      EXPECT_LT(error, error_without);  // the upstairs beacons no longer pull the estimate away
+    } else {
+      EXPECT_EQ(pf.floor_loss_db(), v.floor_attenuation_db());
+      error_without = error;
+    }
+  }
+}

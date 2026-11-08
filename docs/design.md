@@ -226,7 +226,8 @@ Emscripten) and MSVC. A golden-value test pins the generator.
   landing), but atriums and ramps between half-levels are not modelled; radio through an atrium is wrongly
   given slab loss, and sloped outdoor ground reads as a floor change on the barometer
   ([ipin.md](ipin.md#failure-modes)).
-- One loss per slab for the whole venue and one floor per transmitter separate floors poorly on real Wi-Fi:
+- One loss per slab for the whole venue (`pf.calibrate_floor_loss` can learn it online, opt-in, see
+  experiment 10) and one floor per transmitter separate floors poorly on real Wi-Fi:
   on the IPIN buildings a nearest-neighbour fingerprint finds the floor for 93-95% of scans, while the
   fitted slab loss is 2-4 dB ([ipin.md](ipin.md#failure-modes)). A venue can carry those fingerprints
   (`floor_fingerprints`). `pf.floor_prior_weight` then applies a k-NN floor vote per scan
