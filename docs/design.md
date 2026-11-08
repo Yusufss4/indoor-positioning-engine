@@ -28,6 +28,7 @@ use it, so they see identical inputs.
 | Beacon integrity monitor | `core/src/beacon_integrity.cpp` |
 | Estimate kept on the map (dominant group of a split cloud) | `core/src/map_estimate.cpp` |
 | Reported level (averaged level weights with hysteresis) | `core/src/level_selector.cpp` |
+| Drawn position: filter estimate smoothed between updates | `core/src/track_smoother.cpp` |
 | Config JSON, presets, replay, metrics | `eval/src/eval.cpp` |
 
 **Adding a sensor.** Add a stream to `Trace` (and its CSV reader/writer in `core/src/trace.cpp`), a
@@ -84,6 +85,25 @@ State per particle: position, heading, step-length scale, device RSSI offset.
   scan is bit-identical to `on_rssi`.
 - **Wall queries** use a uniform grid over wall segments, with a linear scan for long radio paths where
   the grid would visit most cells anyway. A property test checks the grid against brute force.
+
+### What is drawn
+
+`PositioningEngine::estimate()` passes the filter's estimate through `TrackSmoother`
+(`EngineConfig::smoothing`); `raw_estimate()` is the filter's own. The filter recomputes its estimate after
+every packet, step and heading update, so drawn as-is it shakes (jitter p95 about 1 m on `office_nominal`)
+and on real Wi-Fi jumps several times a minute. The smoother:
+
+- moves the dot by the filter's own displacement for each step, immediately, so it does not lag the walker;
+- pulls it towards the filter's estimate after every other update with a 0.5 s time constant
+  (`smoothing.tau_s`), so radio noise is not drawn as motion;
+- jumps to the filter's estimate when that is more than 10 m away (`smoothing.snap_m`), when the reported
+  level changes, and whenever gliding would cross a wall or leave the walkable area, so it never slides
+  through a wall;
+- reports the filter's covariance taken about the drawn point, so `coverage95` stays honest.
+
+Room events use the particles, not the drawn point, so they are unaffected. `smoothing.enabled = false`
+gives the filter's estimate bit for bit. `smoothing.extrapolate_steps` (off) keeps the dot moving at the
+last step's pace between steps; it overshoots where the walker stops or turns (experiment 8).
 
 ## Floors
 

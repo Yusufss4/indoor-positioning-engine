@@ -30,12 +30,19 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
     baro_update_interval_s, baro_sigma_m, baro_outlier_prob, baro_offset_sigma_m, baro_offset_walk_m, baro_jump,
     baro_jump_radius_m, baro_jump_hold_s, baro_jump_prob, baro_reseed_keep_reference, floor_prior_weight, floor_prior_k,
     floor_prior_eps, floor_prior_max_age_s)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(TrackSmootherConfig, enabled, tau_s, max_correction_mps, snap_m,
+                                                extrapolate_steps, max_step_interval_s)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(RoomEventConfig, enter_prob, exit_prob, enter_dwell_s, exit_dwell_s,
                                                 update_period_s)
 
 void to_json(nlohmann::json& j, const EngineConfig& c) {
-  j = nlohmann::json{{"pdr", c.pdr}, {"rssi", c.rssi},   {"baro", c.baro},
-                     {"pf", c.pf},   {"rooms", c.rooms}, {"mag_heading_sigma_deg", c.mag_heading_sigma_deg}};
+  j = nlohmann::json{{"pdr", c.pdr},
+                     {"rssi", c.rssi},
+                     {"baro", c.baro},
+                     {"pf", c.pf},
+                     {"rooms", c.rooms},
+                     {"smoothing", c.smoothing},
+                     {"mag_heading_sigma_deg", c.mag_heading_sigma_deg}};
 }
 
 void from_json(const nlohmann::json& j, EngineConfig& c) {
@@ -44,6 +51,7 @@ void from_json(const nlohmann::json& j, EngineConfig& c) {
   if (j.contains("baro")) j.at("baro").get_to(c.baro);
   j.at("pf").get_to(c.pf);
   if (j.contains("rooms")) j.at("rooms").get_to(c.rooms);
+  if (j.contains("smoothing")) j.at("smoothing").get_to(c.smoothing);
   j.at("mag_heading_sigma_deg").get_to(c.mag_heading_sigma_deg);
 }
 
