@@ -245,6 +245,11 @@ mall's radio environment is dominated by open atria and glass shop fronts.
   seconds before the scan completes. The walker has moved by then; the engine has no notion of
   measurement age. Scan traces apply the whole scan at its newest reading, which on these walks was
   better than applying each reading at its own `last_seen` (tune half: 7.4 / 11.2 vs 8.1 / 12.7 m).
+  Measured on 80 raw walks after the converter's de-duplication (198k readings), a reading is older than
+  its scan's newest one by 0.68 s at the median, 1.33 s at p75 and 5.3 s at p90. At walking speed the
+  median is under a metre against a 7 m CEP50, so compensating for age per reading (carrying it through
+  the trace format) was not attempted. The IPIN logs give every reading of a scan the same sensor
+  timestamp, so there it cannot be measured.
 - **Doors.** The shop outlines would be useful walls if the doors were known. IMDF `opening` features
   carry exactly that; this GeoJSON does not. Doorways inferred from training walks make the particle
   filter worse, not better ([above](#shop-walls-with-doorways)).
