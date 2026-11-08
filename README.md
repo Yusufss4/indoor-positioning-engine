@@ -113,7 +113,9 @@ Two more public datasets test what MSIL cannot:
   barometer data and stairs, with walls extracted from the competition's floor plans. On the
   competition's scoring walks the filter reaches a median CEP50 of 7.6 m (Nuremberg) and 13.5 m
   (UMinho), with the floor right 76% and 64% of the time. The floor is the weak point: the radio model
-  barely separates floors, although a Wi-Fi fingerprint finds the floor for 93–95% of scans.
+  barely separates floors, although a Wi-Fi fingerprint finds the floor for 93–95% of scans. An opt-in
+  floor model (`data/configs/ipin.json`) raises the floor hit to 86% / 70% on the validation walks, less on
+  the scoring walks ([docs/ipin.md](docs/ipin.md#floor-model)).
 - **UJI BLE** ([docs/uji_ble.md](docs/uji_ble.md), [`datasets/uji_ble/`](datasets/uji_ble/)): surveyed
   beacons and standing-still fingerprints. They confirm the 5 dB RSSI spread, measure about 1 dB per
   shelf edge rather than 3 dB per wall, and give 1.4–1.9 m CEP50 from BLE alone.

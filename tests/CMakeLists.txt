@@ -10,6 +10,7 @@ add_executable(ipe_tests
   test_baro.cpp
   test_beacon_integrity.cpp
   test_eval.cpp
+  test_floor_classifier.cpp
   test_geometry.cpp
   test_georef.cpp
   test_import.cpp

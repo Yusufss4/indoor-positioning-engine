@@ -268,6 +268,33 @@ def radio_samples(train: list[tuple[Walk, np.ndarray]], wifi: bool, ble: bool = 
     return samples
 
 
+def floor_fingerprints(train: list[tuple[Walk, np.ndarray]], known: set[str]) -> dict:
+    """One fingerprint per training Wi-Fi scan: the scan's floor is the landmarks' when it falls between
+    two landmarks on the same floor; other scans are dropped. Only the venue's own access points are
+    kept, as integer dBm. Written compactly (docs/formats.md): {"ids": [id, ...], "scans": [[ordinal,
+    id index, dBm, ...], ...]}."""
+    out = []
+    for w, gt in train:
+        by_scan: dict[float, list] = {}
+        for t, mac, rssi, scan in w.wifi:
+            if "w:" + mac in known and t >= 0:
+                by_scan.setdefault(scan, []).append((t, mac, rssi))
+        if not by_scan:
+            continue
+        scans = sorted(by_scan.items())
+        t = np.array([max(rd[0] for rd in readings) for _, readings in scans])
+        _, lv, ok = interp_same_level(gt, t)
+        for (_, readings), o, good in zip(scans, lv, ok):
+            if good:
+                rssi = {}
+                for _, mac, r in readings:
+                    rssi["w:" + mac] = max(rssi.get("w:" + mac, -200), int(round(r)))
+                out.append((int(o), sorted(rssi.items())))
+    ids = sorted({k for _, rssi in out for k, _ in rssi})
+    index = {k: i for i, k in enumerate(ids)}
+    return {"ids": ids, "scans": [[o] + [v for k, r in rssi for v in (index[k], r)] for o, rssi in out]}
+
+
 def fit_radio_map(samples: dict[str, list], box, elev: dict, known: dict[str, tuple[float, float, int]], args):
     """Each transmitter is placed on the floor where it is heard strongest (median of its five
     strongest readings) and fitted on that floor's samples. The other floors' samples then give the
@@ -504,6 +531,10 @@ def convert_site(site: str, cfg: dict, args) -> tuple[list, list, list, dict]:
     }
     if footprint:
         venue["footprint"] = footprint
+    if args.wifi and args.fingerprints:
+        venue["floor_fingerprints"] = floor_fingerprints(gts["train"], {t.id for t in txs})
+        report["floor_fingerprints"] = len(venue["floor_fingerprints"]["scans"])
+        print(f"  floor fingerprints: {report['floor_fingerprints']} training scans")
     site_out = args.out / site
     site_out.mkdir(parents=True, exist_ok=True)
     venue_path = site_out / "venue.json"
@@ -560,6 +591,8 @@ def main():
     ap.add_argument("--max-rms", type=float, default=8.0, help="dB; transmitters fitting worse are dropped")
     ap.add_argument("--wall-attenuation-db", type=float, default=3.0)
     ap.add_argument("--debug", action="store_true", help="write per-floor wall/landmark PNGs to <out>/debug")
+    ap.add_argument("--fingerprints", action="store_true",
+                    help="with --wifi, store the training scans as floor fingerprints in the venue")
     ap.add_argument("--data", type=Path, help="also write each site's venue here as <site>.json (data/ipin)")
     args = ap.parse_args()
     if args.scans and not args.wifi:

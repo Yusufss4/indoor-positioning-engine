@@ -2,6 +2,7 @@ add_library(ipe_core STATIC
   src/baro.cpp
   src/beacon_integrity.cpp
   src/engine.cpp
+  src/floor_classifier.cpp
   src/geometry.cpp
   src/georef.cpp
   src/map_estimate.cpp

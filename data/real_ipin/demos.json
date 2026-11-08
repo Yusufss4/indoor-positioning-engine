@@ -15,7 +15,7 @@
     "0": "nuremberg/floor_0.png"
    },
    "trace": "nuremberg/IPIN2024_T3_TestingTrial04.csv",
-   "config": "../configs/msil_wifi.json",
+   "config": "../configs/ipin.json",
    "view": [
     5.5,
     11.3,
@@ -24,7 +24,7 @@
    ],
    "duration_s": 502.2,
    "waypoints": 28,
-   "description": "Museum Industriekultur, Nuremberg: an IPIN competition validation walk (SM-G930F, IMU + Wi-Fi + barometer) over floors -2, -1, 0, taking the stairs. Squares are the landmarks the surveyor tapped, the only ground truth; the floor menu follows the walker. Walls were extracted from the competition's floor plans and the Wi-Fi access points (purple) located from the training walks. This walk is from the set the settings were chosen on; the held-out scoring walks are in docs/ipin.md. The particle filter uses data/configs/msil_wifi.json."
+   "description": "Museum Industriekultur, Nuremberg: an IPIN competition validation walk (SM-G930F, IMU + Wi-Fi + barometer) over floors -2, -1, 0, taking the stairs. Squares are the landmarks the surveyor tapped, the only ground truth; the floor menu follows the walker. Walls were extracted from the competition's floor plans and the Wi-Fi access points (purple) located from the training walks. This walk is from the set the settings were chosen on; the held-out scoring walks are in docs/ipin.md. The particle filter uses data/configs/ipin.json: the Wi-Fi settings plus the floor model (barometer jump to the nearest stairs, kept barometer reference, Wi-Fi fingerprint floor prior)."
   },
   {
    "id": "ipin_uminho",
@@ -37,7 +37,7 @@
     "2": "uminho/floor_2.png"
    },
    "trace": "uminho/IPIN2022_T3_TestingTrial01_User03.csv",
-   "config": "../configs/msil_wifi.json",
+   "config": "../configs/ipin.json",
    "view": [
     1.2,
     11.0,
@@ -46,7 +46,7 @@
    ],
    "duration_s": 423.5,
    "waypoints": 11,
-   "description": "University of Minho, building 11: an IPIN competition validation walk (Nexus 5, IMU + Wi-Fi + barometer) over floors 0, 1, 2, taking the stairs. Squares are the landmarks the surveyor tapped, the only ground truth; the floor menu follows the walker. Walls were extracted from the competition's floor plans and the Wi-Fi access points (purple) located from the training walks. This walk is from the set the settings were chosen on; the held-out scoring walks are in docs/ipin.md. The particle filter uses data/configs/msil_wifi.json."
+   "description": "University of Minho, building 11: an IPIN competition validation walk (Nexus 5, IMU + Wi-Fi + barometer) over floors 0, 1, 2, taking the stairs. Squares are the landmarks the surveyor tapped, the only ground truth; the floor menu follows the walker. Walls were extracted from the competition's floor plans and the Wi-Fi access points (purple) located from the training walks. This walk is from the set the settings were chosen on; the held-out scoring walks are in docs/ipin.md. The particle filter uses data/configs/ipin.json: the Wi-Fi settings plus the floor model (barometer jump to the nearest stairs, kept barometer reference, Wi-Fi fingerprint floor prior)."
   }
  ]
 }

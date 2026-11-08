@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <span>
 #include <vector>
@@ -9,6 +10,7 @@
 #include "ipe/baro.hpp"
 #include "ipe/beacon_integrity.hpp"
 #include "ipe/filter.hpp"
+#include "ipe/floor_classifier.hpp"
 #include "ipe/map_estimate.hpp"
 #include "ipe/particle.hpp"
 #include "ipe/rng.hpp"
@@ -76,6 +78,25 @@ struct ParticleFilterConfig {
   double baro_outlier_prob = 0.05;
   double baro_offset_sigma_m = 0.3;  ///< Spread of a new particle's altitude offset.
   double baro_offset_walk_m = 0.05;  ///< Random walk of the offset per barometer update (weather drift).
+  /// Barometer-driven floor change: once the cloud's altitude residual has pointed at an adjacent level
+  /// (more than half the gap) for `baro_jump_hold_s`, particles whose own residual fits that level better
+  /// move onto it at the nearest connector within `baro_jump_radius_m`, with `baro_jump_prob` per update.
+  /// Covers stairs taken while the position estimate is still metres away from them.
+  bool baro_jump = false;
+  double baro_jump_radius_m = 25.0;
+  double baro_jump_hold_s = 3.0;
+  double baro_jump_prob = 0.1;
+  /// Share of new particles (recovery, ring proposals, re-seeds) that take the cloud's altitude reference
+  /// instead of one made to fit their own level, so the barometer can reject a re-seed on the wrong floor.
+  /// 0 keeps every new particle consistent with the current reading.
+  double baro_reseed_keep_reference = 0.0;
+  /// Floor prior from a k-NN classifier over the venue's floor fingerprints, applied per Wi-Fi scan as
+  /// `floor_prior_weight * log p(level)`. 0 (or a venue without fingerprints) turns it off.
+  double floor_prior_weight = 0.0;
+  int floor_prior_k = 5;
+  double floor_prior_eps = 0.1;
+  /// Recovery injections take their level from the last classified scan if it is at most this old.
+  double floor_prior_max_age_s = 5.0;
 };
 
 /// Sequential importance resampling filter fusing PDR steps, magnetometer
@@ -165,6 +186,12 @@ class ParticleFilter {
   Particle sample_uniform_particle();
   /// Moves a particle standing in a connector to an adjacent level with probability `prob`.
   void maybe_change_level(Particle& p, double prob);
+  /// Arms the barometer jump when the cloud's residual has pointed at an adjacent level for the hold time.
+  void update_baro_drift(double t, double alt);
+  /// Moves `p` to the adjacent level its barometer residual points at, inside the nearest connector.
+  void maybe_baro_jump(Particle& p, double alt);
+  /// Altitude offset for a new particle on `level` (see baro_reseed_keep_reference).
+  double fresh_baro_offset(int level, bool jitter = true);
   [[nodiscard]] double elevation(int level) const { return venue_->level(level).elevation_m; }
   /// Multiplies weights by exp(loglik - max) and renormalises. Returns false
   /// if every particle ended with zero weight.
@@ -210,6 +237,15 @@ class ParticleFilter {
   BaroAltimeter altimeter_;
   bool baro_ready_ = false;  ///< Particle altitude offsets have been initialised.
   double last_baro_update_t_ = -1e300;
+  double baro_drift_since_ = std::numeric_limits<double>::quiet_NaN();  ///< Start of the current drift.
+  int baro_drift_dir_ = 0;                                              ///< +1 up, -1 down, 0 none.
+  bool baro_jump_armed_ = false;
+  double baro_reference_ = 0.0;  ///< Weighted mean altitude offset of the particles on the estimated level.
+  bool baro_reference_valid_ = false;
+  FloorClassifier floor_classifier_;
+  std::vector<double> floor_p_;  ///< Level probabilities of the current scan.
+  bool floor_prior_active_ = false;
+  double last_floor_t_ = -1e300;  ///< Time of the last classified scan (floor_p_ holds its output).
   std::vector<double> level_weight_;
 };
 

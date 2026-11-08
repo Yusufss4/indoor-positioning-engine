@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <optional>
 #include <span>
 #include <string>
@@ -37,6 +38,18 @@ enum class ConnectorKind { Stairs, Elevator, Escalator };
 std::string_view to_string(ConnectorKind kind);
 /// Accepts "stairs", "elevator" and "escalator". Throws std::invalid_argument otherwise.
 ConnectorKind parse_connector_kind(std::string_view name);
+
+/// Radio fingerprints with a known floor (e.g. training Wi-Fi scans), for a floor classifier. Stored flat:
+/// fingerprint i holds the readings [begin[i], begin[i + 1]) of `beacon` / `rssi`.
+struct FloorFingerprints {
+  std::vector<int> level;            ///< Level index of each fingerprint.
+  std::vector<std::uint32_t> begin;  ///< Size level.size() + 1.
+  std::vector<std::uint32_t> beacon;
+  std::vector<float> rssi;
+
+  [[nodiscard]] std::size_t size() const { return level.size(); }
+  [[nodiscard]] bool empty() const { return level.empty(); }
+};
 
 /// A vertical connection (stairwell, lift, escalator). Its footprint is the
 /// only place where a pedestrian can change level.
@@ -125,6 +138,9 @@ class Venue {
   [[nodiscard]] const std::vector<Connector>& connectors() const { return connectors_; }
   /// A connector serving `level` whose footprint contains `p`, or null.
   [[nodiscard]] const Connector* connector_at(Vec2 p, int level) const;
+  /// The connector serving both `from` and `to` closest to `p` (0 inside its footprint), or null if none
+  /// is within `max_distance`.
+  [[nodiscard]] const Connector* nearest_connector(Vec2 p, int from, int to, double max_distance) const;
 
   [[nodiscard]] const std::vector<Room>& rooms() const { return rooms_; }
   /// Indices of the rooms on `level` that may contain `p` (bounding-box grid
@@ -132,6 +148,9 @@ class Venue {
   [[nodiscard]] std::span<const std::size_t> room_candidates(Vec2 p, int level) const;
 
   [[nodiscard]] const std::optional<GeoRef>& georef() const { return georef_; }
+
+  [[nodiscard]] const FloorFingerprints& floor_fingerprints() const { return floor_fingerprints_; }
+  void set_floor_fingerprints(FloorFingerprints fp) { floor_fingerprints_ = std::move(fp); }
 
   [[nodiscard]] std::optional<std::size_t> beacon_index(std::string_view id) const;
 
@@ -177,6 +196,7 @@ class Venue {
   std::vector<Grid> grids_;
   std::vector<RoomGrid> room_grids_;
   bool has_level_footprints_ = false;
+  FloorFingerprints floor_fingerprints_;
 };
 
 /// Parses the venue JSON format documented in docs/formats.md.

@@ -1,0 +1,14 @@
+{
+  "rssi": {
+    "sigma_db": 8.0
+  },
+  "pf": {
+    "num_particles": 5000,
+    "init_proposal": true,
+    "recovery_proposal": true,
+    "baro_jump": true,
+    "baro_reseed_keep_reference": 0.5,
+    "baro_offset_walk_m": 0.01,
+    "floor_prior_weight": 3.0
+  }
+}

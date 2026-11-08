@@ -196,8 +196,14 @@ Emscripten) and MSVC. A golden-value test pins the generator.
   ([ipin.md](ipin.md#failure-modes)).
 - One loss per slab for the whole venue and one floor per transmitter separate floors poorly on real Wi-Fi:
   on the IPIN buildings a nearest-neighbour fingerprint finds the floor for 93-95% of scans, while the
-  fitted slab loss is 2-4 dB ([ipin.md](ipin.md#failure-modes)).
+  fitted slab loss is 2-4 dB ([ipin.md](ipin.md#failure-modes)). A venue can carry those fingerprints
+  (`floor_fingerprints`). `pf.floor_prior_weight` then applies a k-NN floor vote per scan
+  (`core/src/floor_classifier.cpp`); it is off by default.
 - Particles change floor only inside a connector, so the floor can only follow once the position is right.
+  `pf.baro_jump` (off by default) relaxes this: after a sustained one-floor barometer change, particles
+  within 25 m of a connector move onto the new floor inside it.
+  `pf.baro_reseed_keep_reference` makes new particles keep the cloud's barometer reference, so a re-seed
+  on the wrong floor no longer fits the barometer by construction.
 - Connectors are polygons on the plan, so a long staircase that is itself inside a corridor polygon must be
   drawn tightly, or particles can change level on the corridor floor next to it.
 - Shadowing is correlated in time per beacon, not in space.
