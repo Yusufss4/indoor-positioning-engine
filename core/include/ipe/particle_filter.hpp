@@ -143,6 +143,9 @@ class ParticleFilter {
   void on_pressure(double t, double hpa);
 
   [[nodiscard]] Estimate estimate() const { return estimate_; }
+  /// Displacement of the last step itself: the weighted mean move of the particles that survived it. The
+  /// estimate's change across the step also holds corrections (particles dying at walls, resampling).
+  [[nodiscard]] Vec2 step_motion() const { return step_motion_; }
 
   [[nodiscard]] const std::vector<Particle>& particles() const { return particles_; }
   [[nodiscard]] double effective_sample_size() const;
@@ -260,6 +263,7 @@ class ParticleFilter {
   }
   Estimate estimate_;  ///< What is reported: the cloud mean, or its dominant mode (map_consistent_estimate).
   Estimate cloud_;     ///< Mean and covariance on the most likely level; what the filter's own decisions use.
+  Vec2 step_motion_;   ///< See step_motion().
 
   double w_slow_ = 0.0;
   double w_fast_ = 0.0;

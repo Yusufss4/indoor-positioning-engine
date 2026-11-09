@@ -432,6 +432,140 @@ On the IPIN validation walks (`ipin.json`):
 **Limit.** A map loss far above the truth predicts every other-floor reading below -85 dBm, so nothing
 corrects it. The unit test opens the gate to check the estimator itself.
 
+## 11. A dot that glides: steps, corrections and walls apart
+
+**Symptom.** After experiment 8, jitter p50 still equals the step length (0.64 m, sim mean) because the
+dot moves once per step. Real walks jump 2.5 (MSIL) to 6–7 (IPIN) times a minute, and UMinho's jitter p95
+is 3.1 m.
+
+**Diagnosis.** A scratch probe attributed each 5 Hz second difference, each window over 3 m/s, and each
+change of the raw estimate to the event that caused it.
+
+- **Steps.** In simulation, step events cause 70–96% of the top-5% jitter ticks.
+- **The glide was not a glide on Wi-Fi.** `correct()` applied `1 - exp(-dt/tau)` of the *new* error at
+  once, where `dt` was the time since the previous update. With BLE packets 40 ms apart that is a
+  low-pass. A Wi-Fi scan arrives about 0.5 s after the last step, so 63% of its correction was drawn
+  instantly and most of the rest at the next step. Scans move the raw estimate by a lot: p95 7.8 m (MSIL)
+  and 9.4 m (IPIN), p99 25 m.
+- **Step events carried corrections.** The dot moved by the estimate's change across a step. That change
+  includes other things than the step:
+  - particles dying at walls and resampling: more than 0.5 m on 18% of IPIN steps;
+  - the magnetometer update that follows: more than 0.5 m on 11% (MSIL) and 18% (IPIN) of steps.
+
+  With smoothing off, 7.3% of MSIL step events move the estimate more than 1.5 m, against a step of about
+  0.65 m. This also polluted the pace that `extrapolate_steps` used, which is why experiment 8 found it
+  added jumps on MSIL. `map_consistent_estimate` is not the cause (6.3% with it off).
+
+**Change** (`core/src/track_smoother.cpp`, `ParticleFilter::step_motion()`):
+- **Steps.** A step moves the dot by its own motion: the weighted mean move of the particles that survived
+  it. It is accumulated in the existing loop with no draws, so the filter is bit-identical (10 seeds,
+  smoothing off, every metric). The rest of the step's change is a correction.
+- **Corrections.** They glide in continuous time: after `dt`, `exp(-dt/tau)` of the gap is left, and
+  `max_correction_mps` caps the speed in closed form. The track no longer depends on the update rate (unit
+  test `TheGlideDoesNotDependOnTheUpdateRate`).
+- **Walls.** An estimate behind a wall is glided towards only as far as the wall. If it is still behind
+  the wall when the dot gets there, the dot jumps. The first version jumped at once, which more than
+  doubled the jumps on `office_floor_bleed` (jitter p95 2.33 → 3.46 m): the estimate of a cloud split by a
+  wall flips sides and comes back.
+- **Between steps.** The dot moves at the last step's pace, centred on the estimate (half a step behind it
+  at a step, half a step ahead at the next), and goes back once no step has come for 1.2 s.
+
+**Why centred.** Along-track bias of the drawn point, mean over 3 seeds, in metres:
+
+| Scenario | No extrapolation | Ahead of the estimate (experiment 8) | Centred |
+|---|---:|---:|---:|
+| office_nominal | +0.01 | +0.34 | +0.00 |
+| office_step_scale | +0.08 | +0.39 | +0.07 |
+| office_field_issue | +0.05 | +0.37 | +0.04 |
+| office_device_offset | −0.24 | +0.06 | −0.25 |
+
+Radio holds the estimate on the walker's mean position over a step interval, so running ahead of it by the
+time since the step draws the dot half a step too far. That is the overshoot experiment 8 saw. Centred, the
+mean error is lower than with no extrapolation in all four scenarios (0.670 → 0.650 m on
+`office_nominal`).
+
+**Steps of the change.** Sim: means over 12 scenarios, 10 seeds. Real: tune walks with `msil_wifi.json`,
+median CEP over walks.
+
+| Variant | Sim CEP50 / CEP95 | Sim jitter p50 / p95 | Sim jumps/min | MSIL CEP50 / CEP95 | MSIL jitter p95 | MSIL jumps | Nuremberg jumps | UMinho jitter p95 | UMinho jumps |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| before | 0.780 / 2.680 | 0.64 / 0.94 | 1.09 | 6.67 / 10.17 | 1.33 | 2.54 | 5.81 | 3.09 | 6.62 |
+| step motion, continuous glide, jump at walls | 0.787 / 2.670 | 0.65 / 1.01 | 1.12 | 6.51 / 10.06 | 0.92 | 2.43 | 5.43 | 2.01 | 6.38 |
+| + glide up to the wall | 0.786 / 2.673 | 0.65 / 0.87 | 1.06 | 6.51 / 10.06 | 0.92 | 1.86 | 5.42 | 1.41 | 6.21 |
+| + extrapolation ahead of the estimate | 0.782 / 2.713 | 0.05 / 0.74 | 1.06 | 6.68 / 10.19 | 0.62 | 1.82 | 5.54 | 1.35 | 6.32 |
+| **+ centred (engine default)** | **0.769 / 2.659** | **0.04 / 0.50** | **1.04** | 6.58 / 10.06 | 0.47 | 1.65 | 5.48 | 1.23 | 6.10 |
+| **+ cap 1.5 m/s (Wi-Fi configs)** | 0.770 / 2.728 | 0.04 / 0.41 | 0.80 | **6.63 / 10.16** | **0.33** | **0.00** | **4.02** | **0.90** | **4.92** |
+
+**Settings.** All with centred extrapolation over one step; same sets as above.
+
+| tau [s] | cap [m/s] | Sim CEP50 / CEP95 | Sim jitter p95 | Sim jumps | MSIL CEP95 | MSIL jumps | Nuremberg CEP95 / jumps | UMinho CEP95 / jumps |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 0.5 | - | 0.769 / 2.659 | 0.50 | 1.04 | 10.06 | 1.65 | 16.32 / 5.48 | 25.73 / 6.10 |
+| 0.5 | 1.5 | 0.770 / 2.728 | 0.41 | 0.80 | 10.16 | 0.00 | 16.63 / 4.02 | 24.47 / 4.92 |
+| 0.5 | 2 | 0.769 / 2.691 | 0.42 | 0.85 | 10.17 | 0.88 | 16.53 / 3.85 | 24.73 / 5.38 |
+| 0.5 | 3 | 0.768 / 2.666 | 0.44 | 0.91 | 10.18 | 1.65 | 16.39 / 4.68 | 25.83 / 6.12 |
+| 1 | - | 0.775 / 2.667 | 0.45 | 0.92 | 10.11 | 1.54 | 16.54 / 5.01 | 25.46 / 5.50 |
+| 1 | 1.5 | 0.777 / 2.758 | 0.41 | 0.80 | 10.11 | 0.00 | 16.65 / 4.07 | 24.39 / 4.92 |
+| 1 | 2 | 0.776 / 2.726 | 0.42 | 0.81 | 10.11 | 0.81 | 16.60 / 4.01 | 24.50 / 5.08 |
+
+- **On BLE the cap costs the tail.** At 1.5 m/s, `office_elevator` CEP95 goes 1.72 → 2.01 m and
+  `office_floor_bleed` 3.90 → 4.30 m, while simulated jumps are already near one a minute. So it is off in
+  the engine.
+- **On Wi-Fi the cap is what removes jumps.** A walker plus a 1.5 m/s correction stays under the 3 m/s
+  jump threshold. What is left on IPIN (4–5 a minute) are fast walkers with a correction along the path,
+  and floor flips; only 53 of 1,483 jump windows contained a jump of the dot itself.
+- **tau** 1 s instead of 0.5 s changes little once extrapolation and the cap are in.
+
+**Result, engine default** (10 seeds; before → after):
+
+| Scenario | CEP50 | CEP95 | Jitter p50 [m] | Jitter p95 [m] | Jumps/min | Floor flips | Path ratio |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| airport_hall_sparse | 1.08 → 1.06 | 5.71 → 5.67 | 0.64 → 0.03 | 0.83 → 0.29 | 0.5 → 0.6 | - | 1.23 → 1.15 |
+| baro_drift_long | 0.63 → 0.62 | 1.99 → 1.95 | 0.64 → 0.04 | 0.77 → 0.39 | 1.3 → 1.3 | 4.4 → 4.4 | 1.49 → 1.38 |
+| kit_tour | 0.72 → 0.71 | 3.52 → 3.53 | 0.63 → 0.04 | 0.77 → 0.34 | 1.4 → 1.3 | 3.0 → 3.0 | 1.38 → 1.27 |
+| office_device_offset | 0.76 → 0.74 | 2.08 → 2.03 | 0.61 → 0.04 | 0.79 → 0.36 | 0.4 → 0.4 | - | 1.17 → 1.09 |
+| office_elevator | 0.60 → 0.58 | 1.72 → 1.70 | 0.65 → 0.04 | 0.79 → 0.40 | 1.5 → 1.7 | 2.0 → 2.0 | 1.71 → 1.61 |
+| office_field_issue | 0.71 → 0.70 | 1.98 → 1.95 | 0.69 → 0.04 | 0.87 → 0.44 | 0.6 → 0.4 | - | 1.31 → 1.18 |
+| office_floor_bleed | 0.89 → 0.88 | 3.90 → 3.87 | 0.64 → 0.07 | 2.33 → 1.79 | 3.8 → 3.6 | 3.8 → 3.8 | 2.37 → 2.17 |
+| office_mag_disturbance | 1.12 → 1.14 | 2.65 → 2.71 | 0.65 → 0.05 | 0.87 → 0.49 | 0.9 → 0.8 | - | 1.39 → 1.26 |
+| office_nlos_heavy | 0.65 → 0.64 | 1.88 → 1.83 | 0.67 → 0.04 | 0.82 → 0.35 | 0.5 → 0.4 | - | 1.25 → 1.15 |
+| office_nominal | 0.66 → 0.64 | 1.58 → 1.55 | 0.67 → 0.04 | 0.81 → 0.35 | 0.3 → 0.1 | - | 1.19 → 1.08 |
+| office_stairs_up_down | 0.79 → 0.78 | 3.26 → 3.24 | 0.62 → 0.04 | 0.80 → 0.46 | 1.7 → 1.9 | 2.0 → 2.0 | 1.57 → 1.42 |
+| office_step_scale | 0.74 → 0.73 | 1.88 → 1.88 | 0.62 → 0.04 | 0.79 → 0.34 | 0.1 → 0.0 | - | 1.28 → 1.14 |
+| **mean** | 0.780 → 0.769 | 2.680 → 2.659 | 0.64 → 0.04 | 0.94 → 0.50 | 1.09 → 1.04 | | 1.44 → 1.33 |
+
+Floor flips are unchanged: the level is the filter's.
+
+**Result, real tune walks.** Median over walks; one replay each, or 5 seeds for `evaluate.py`.
+
+| Data | CEP50 / CEP95 [m] | Jitter p50 / p95 [m] | Jumps/min |
+|---|---:|---:|---:|
+| MSIL, 109 walks, `msil_wifi.json` | 6.67 / 10.17 → 6.63 / 10.16 | 0.66 / 1.33 → 0.06 / 0.33 | 2.54 → 0.00 |
+| IPIN Nuremberg, `msil_wifi.json` | 4.53 / 16.23 → 4.61 / 16.63 | 0.45 / 1.54 → 0.07 / 0.56 | 5.81 → 4.02 |
+| IPIN UMinho, `msil_wifi.json` | 9.90 / 25.92 → 10.08 / 24.47 | 0.48 / 3.09 → 0.08 / 0.90 | 6.62 → 4.92 |
+| IPIN Nuremberg, `ipin.json` | 5.26 / 19.78 → 5.18 / 19.45 | → 0.54 (from 1.76) | 6.3 → 3.6 |
+| IPIN UMinho, `ipin.json` | 10.78 / 27.66 → 10.90 / 27.80 | → 1.85 (from 3.99) | 8.1 → 5.8 |
+| UJI BLE, 178 sessions, default | 1.74 / 1.86 → 1.72 / 1.91 | p95 0.28 → 0.06 | - |
+
+With `ipin.json`, `datasets/ipin/evaluate.py --seeds 5`:
+- Nuremberg: CEP50 / CEP95 6.71 / 29.03 → 6.57 / 29.18 m, floor hit 90% → 90%, IPIN p75 15.03 → 14.50 m.
+- UMinho: 11.55 / 38.01 → 11.35 / 38.16 m, floor hit 66% → 66%, IPIN p75 32.49 → 32.49 m.
+
+**Costs.**
+- `office_mag_disturbance`: CEP95 2.65 → 2.71 m.
+- UJI (standing still, BLE scans 1 s apart):
+  - CEP95 rises 2.7%;
+  - fewer of the 6–13 s sessions stay under 3 m for 10 s (67 → 40 of 178).
+
+  The truth rows sit exactly at the scans. The old smoother drew 63% of each scan's correction at that
+  instant; the glide draws none of it there. This is the price of never drawing a correction at once.
+- Nuremberg CEP95 with `msil_wifi.json`: 16.23 → 16.63 m (+2.5%), against 31% fewer jumps.
+- `tests/regression/baseline.json` passes unchanged (3 seeds), so it was not regenerated.
+
+**Kept.**
+- Engine defaults: centred extrapolation over one step, tau 0.5 s, no cap.
+- `msil_wifi.json` and `ipin.json` add `smoothing.max_correction_mps` 1.5.
+
 ## Open questions
 
 - The beacon-driven init proposal is now chosen by particle density (experiment 9), but venues between

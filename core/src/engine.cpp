@@ -25,7 +25,7 @@ void PositioningEngine::on_imu(const ImuSample& sample) {
     ++steps_;
     const Estimate before = pf_.estimate();
     pf_.on_step(*step);
-    smoother_.on_step(step->t, before, pf_.estimate());
+    smoother_.on_step(step->t, before, pf_.estimate(), pf_.step_motion());
     if (step->mag_valid) {
       pf_.on_heading(step->t, step->mag_heading, deg2rad(cfg_.mag_heading_sigma_deg));
       smoother_.on_update(step->t, pf_.estimate());
