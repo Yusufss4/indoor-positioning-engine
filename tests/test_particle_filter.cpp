@@ -658,3 +658,120 @@ TEST(ParticleFilter, CalibratesTheSlabLossFromReadings) {
     }
   }
 }
+
+namespace {
+bool none_in_closed_room(const ParticleFilter& pf) {
+  return std::none_of(pf.particles().begin(), pf.particles().end(),
+                      [](const Particle& p) { return test::in_corridor_closed_room(p.pos); });
+}
+}  // namespace
+
+TEST(ParticleFilter, NoParticleStartsInAClosedRoom) {
+  const Venue v = test::corridor_venue();
+  ParticleFilter pf(v, test_config(), {});
+  ASSERT_TRUE(pf.avoids_closed_regions());
+  EXPECT_TRUE(none_in_closed_room(pf));
+
+  // Beacon R is inside the room, and its ring at -65 dBm (about 2 m) mostly so; draws there are redrawn.
+  ParticleFilter seeded(v, proposal_config(), {});
+  seeded.seed_from_beacon(0, -65.0);
+  EXPECT_TRUE(none_in_closed_room(seeded));
+
+  auto cfg = proposal_config();
+  cfg.closed_region_fraction = 0.0;
+  ParticleFilter unaware(v, cfg, {});
+  EXPECT_FALSE(unaware.avoids_closed_regions());
+  unaware.seed_from_beacon(0, -65.0);
+  EXPECT_FALSE(none_in_closed_room(unaware));
+}
+
+TEST(ParticleFilter, BeaconSeedWeightsRecoverTheOpenPrior) {
+  // Seeded from the beacon in the closed room: weighted, the cloud is uniform over the 540 m^2 a walker
+  // can be on, and empty in the room.
+  const Venue v = test::corridor_venue();
+  ParticleFilter pf(v, proposal_config(), {});
+  pf.seed_from_beacon(0, -70.0);
+  const double open = 560.0 - 20.0;
+  EXPECT_NEAR(weighted_share(pf, 0.0, 10.0, 0.0, 10.0), 100.0 / open, 0.02);
+  EXPECT_NEAR(weighted_share(pf, 10.0, 20.0, 0.0, 10.0), 100.0 / open, 0.02);
+  EXPECT_NEAR(weighted_share(pf, 30.0, 40.0, 0.0, 10.0), 100.0 / open, 0.02);
+  EXPECT_NEAR(weighted_share(pf, 0.0, 5.0, 10.0, 14.0), 20.0 / open, 0.01);
+  EXPECT_NEAR(weighted_share(pf, 10.0, 40.0, 10.0, 14.0), 120.0 / open, 0.02);
+  EXPECT_EQ(weighted_share(pf, 5.0, 10.0, 10.0, 14.0), 0.0);
+}
+
+TEST(ParticleFilter, RecoveryDoesNotInjectIntoAClosedRoom) {
+  // Converged at the corridor's east end, then the beacon in the room is heard as if from 35 cm away
+  // while the others still place the walker there: the likelihood drops and recovery draws rings
+  // around the recent packets, those of R entirely inside the room.
+  const Venue v = test::corridor_venue();
+  const RssiModel model(v);
+  for (const double fraction : {0.1, 0.0}) {
+    auto cfg = test_config();
+    cfg.recovery = true;
+    cfg.recovery_proposal = true;
+    cfg.recovery_max_fraction = 0.5;
+    cfg.beacon_integrity = false;
+    cfg.resample_ess_ratio = 1.0;  // resample at every update, so recovery gets its chance
+    cfg.closed_region_fraction = fraction;
+    ParticleFilter pf(v, cfg, {});
+    feed_rssi(pf, v, {30.0, 5.0}, 40);
+    bool entered = false;
+    double t = 100.0;
+    for (int k = 0; k < 40; ++k) {
+      for (std::size_t i = 0; i < v.beacons().size(); ++i) {
+        pf.on_rssi(t, i, i == 0 ? -50.0 : model.expected_rssi(v.beacons()[i], {30.0, 5.0}));
+        t += 0.05;
+        entered = entered || !none_in_closed_room(pf);
+      }
+    }
+    EXPECT_EQ(entered, fraction == 0.0) << fraction;
+  }
+}
+
+TEST(ParticleFilter, ReseedNextToAClosedRoomStaysOutOfIt) {
+  // Every particle dies 1.5 m below the room's wall; the re-seed scatters 3 m around the estimate.
+  const Venue v = test::corridor_venue();
+  for (const double fraction : {0.1, 0.0}) {
+    auto cfg = test_config();
+    cfg.closed_region_fraction = fraction;
+    ParticleFilter pf(v, cfg, {});
+    feed_rssi(pf, v, {7.5, 8.5}, 60);
+    StepEvent step;
+    step.t = 20.0;
+    step.length = 50.0;  // longer than the venue's diagonal
+    pf.on_step(step);
+    ASSERT_EQ(pf.recovery_count(), 1u);
+    EXPECT_EQ(none_in_closed_room(pf), fraction > 0.0) << fraction;
+    EXPECT_LT(distance(pf.estimate().pos, {7.5, 8.5}), 3.0);
+  }
+}
+
+TEST(ParticleFilter, VenuesWithoutClosedRegionsAreUnchanged) {
+  // The rooms of two_room_venue have a door: the option builds nothing and draws exactly as without it.
+  const Venue v = test::two_room_venue();
+  auto off = test_config();
+  off.recovery = true;
+  off.recovery_proposal = true;
+  off.init_proposal = true;
+  off.closed_region_fraction = 0.0;
+  auto on = off;
+  on.closed_region_fraction = 0.1;
+  ParticleFilter a(v, off, {});
+  ParticleFilter b(v, on, {});
+  EXPECT_FALSE(b.avoids_closed_regions());
+  for (auto* pf : {&a, &b}) {
+    feed_rssi(*pf, v, {15.0, 6.0}, 20);
+    StepEvent step;
+    step.t = 5.0;
+    step.length = 0.7;
+    pf->on_step(step);
+    feed_rssi(*pf, v, {3.0, 3.0}, 20, 6.0);
+  }
+  ASSERT_EQ(a.particles().size(), b.particles().size());
+  for (std::size_t i = 0; i < a.particles().size(); ++i) {
+    ASSERT_EQ(a.particles()[i].pos.x, b.particles()[i].pos.x) << i;
+    ASSERT_EQ(a.particles()[i].pos.y, b.particles()[i].pos.y) << i;
+    ASSERT_EQ(a.particles()[i].weight, b.particles()[i].weight) << i;
+  }
+}

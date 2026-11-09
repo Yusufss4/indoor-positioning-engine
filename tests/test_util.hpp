@@ -65,6 +65,30 @@ inline Venue two_level_venue() {
   })");
 }
 
+/// Walls of corridor_venue(), as JSON.
+inline std::string corridor_walls() {
+  return "[[0,0,40,0],[40,0,40,14],[40,14,0,14],[0,14,0,0],"
+         "[0,10,2,10],[3,10,40,10],[5,10,5,14],[10,10,10,14],"
+         "[20,4,22,4],[22,4,22,6],[22,6,20,6],[20,6,20,4]]";
+}
+
+/// 40 x 14 m: a corridor 10 m deep along the south wall, and a row of rooms 4 m deep along the north
+/// one. The west room [0, 5] has a 1 m door onto the corridor; the next one [5, 10] has none (20 m^2, a
+/// closed room); the rest of the row [10, 40] is one 120 m^2 hall without a door, too big to count as a
+/// room. A 2 x 2 m box stands in the corridor at [20, 22] x [4, 6]. Beacon R is in the closed room.
+inline Venue corridor_venue() {
+  return parse_venue(R"({"name": "corridor", "bounds": [0, 0, 40, 14], "walls": )" + corridor_walls() + R"(,
+    "beacons": [
+      {"id": "R", "x": 7.5, "y": 12},
+      {"id": "W", "x": 3, "y": 3},
+      {"id": "M", "x": 15, "y": 7},
+      {"id": "E", "x": 35, "y": 3}
+    ]})");
+}
+
+/// True inside the closed room of corridor_venue().
+inline bool in_corridor_closed_room(Vec2 p) { return p.x > 5.0 && p.x < 10.0 && p.y > 10.0 && p.y < 14.0; }
+
 /// The 20 x 10 m box above without its north-east quarter: 150 of 200 m^2.
 inline Polygon l_footprint() { return {{0, 0}, {20, 0}, {20, 5}, {10, 5}, {10, 10}, {0, 10}}; }
 

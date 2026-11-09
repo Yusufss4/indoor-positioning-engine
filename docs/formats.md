@@ -188,7 +188,7 @@ truth after the warm-up are skipped. `--baseline` and `--update` work as for sce
   `time_to_first_fix_s`, `convergence_s`, `steps`, `compute_us_per_update`, `floor_accuracy`,
   `floor_switch_latency_s`, `level_changes`, `coverage95`, `nees_median`, `room_events`,
   `room_event_precision`, `room_event_recall`, `room_event_latency_median_s`, `room_accuracy`,
-  `jitter_p50_m`, `jitter_p95_m`, `jumps_per_min`, `level_flips`, `path_ratio`.
+  `jitter_p50_m`, `jitter_p95_m`, `jumps_per_min`, `wall_crossings_per_min`, `level_flips`, `path_ratio`.
 
 `cep50`/`cep95` are the 50th/95th percentiles of horizontal error after a 5 s warm-up, over fixes on the
 correct floor. `floor_accuracy` is the share of fixes on the correct floor (1.0 on a single-floor venue).
@@ -211,6 +211,9 @@ horizontal jump.
   time scores about the step length, and so does one that shakes.
 - `jumps_per_min` counts non-overlapping 1 s windows in which the estimate moved more than 3 m (faster
   than anyone walks) or changed floor. A true floor change therefore counts once.
+- `wall_crossings_per_min` counts moves between consecutive samples on one floor that cross a wall: the
+  dot going through a wall into a room without a door or a corridor behind it. A dot that follows the
+  walker through doors scores 0; recorded truth (waypoints joined by straight lines) can score more.
 - `level_flips` counts changes of the reported floor; `level_changes` counts the true ones.
 - `path_ratio` is the length of the estimated track over the length of the true one. It is only reported
   when the truth is dense (median spacing <= 0.5 s), otherwise -1.

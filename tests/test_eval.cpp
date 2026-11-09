@@ -113,6 +113,27 @@ TEST(Eval, SmoothnessCountsJitterJumpsAndFlips) {
   EXPECT_DOUBLE_EQ(m.path_ratio, -1.0);
 }
 
+TEST(Eval, SmoothnessCountsMovesThroughWalls) {
+  // two_room_venue: a wall at x = 10 with a door at y in [4.5, 5.5]. Walking east through the door
+  // crosses nothing; standing at (18, 2) and blinking to (2, 2) for a second goes through the wall twice.
+  const Venue v = test::two_room_venue();
+  std::vector<TrackSample> track;
+  for (int i = 0; i < 300; ++i) {
+    const double t = i * 0.2;
+    const Vec2 pos = i < 100               ? Vec2{2.0 + 16.0 * i / 99.0, 5.0}
+                     : i >= 150 && i < 155 ? Vec2{2.0, 2.0}
+                                           : Vec2{18.0, 2.0};
+    track.push_back({t, pos, 0, true});
+  }
+  const std::vector<EstimateRecord> recs(2);
+  Metrics m;
+  compute_smoothness(m, track, 0.2, recs, 0.0, &v);
+  EXPECT_DOUBLE_EQ(m.wall_crossings_per_min, 2.0 / (299 * 0.2 / 60.0));
+  Metrics no_map;
+  compute_smoothness(no_map, track, 0.2, recs, 0.0);
+  EXPECT_DOUBLE_EQ(no_map.wall_crossings_per_min, -1.0);
+}
+
 TEST(Eval, ReplayRecordsAnEvenTrack) {
   const auto sc = sim::load_scenario_file(test::data_path("scenarios/office_nominal.json"));
   const auto venue = load_venue_file(sc.venue_path);

@@ -49,19 +49,31 @@ Particle ParticleFilter::sample_ring_particle(const Beacon& beacon, double rssi,
   // normaliser (the acceptance rate) instead of one per offset.
   draw = {};
   bool inside = false;
+  const int ring_level = multi_level_ ? beacon.level : 0;
+  int closed_redraws = 0;
   while (!inside && draw.attempts < kRingTries) {
     ++draw.attempts;
+    ++draw.draws;
     p.rssi_offset = cfg_.estimate_rssi_offset ? rng_.normal(0.0, cfg_.rssi_offset_sigma) : 0.0;
     const Ring ring = ring_for(beacon, rssi, p.rssi_offset);
     const double range = std::pow(10.0, ring.log10_mean + ring.log10_sigma * rng_.normal());
     const double bearing = rng_.uniform(-std::numbers::pi, std::numbers::pi);
     p.pos = beacon.pos + Vec2{std::cos(bearing), std::sin(bearing)} * range;
     inside = venue_->inside(p.pos);
+    if (inside && reachable_ && !reachable_->open(p.pos, ring_level)) {
+      // In a closed room (access points often are): drawn again without using up a try, so draws that
+      // leave the venue fall back to the uniform prior exactly as often as without closed regions.
+      inside = false;
+      if (closed_redraws < kClosedRedraws) {
+        ++closed_redraws;
+        --draw.attempts;
+      }
+    }
   }
   if (!inside) {
     // The last offset tried is biased towards rings that miss the venue.
     draw.fell_back = true;
-    p.pos = sample_position();
+    p.pos = sample_position(-1, ring_level);
     p.rssi_offset = cfg_.estimate_rssi_offset ? rng_.normal(0.0, cfg_.rssi_offset_sigma) : 0.0;
   }
   if (multi_level_) {
@@ -89,12 +101,13 @@ void ParticleFilter::seed_from_beacon(std::size_t beacon_index, double rssi) {
   const Beacon& beacon = venue_->beacons()[beacon_index];
   const double f = std::clamp(cfg_.init_proposal_fraction, 0.0, 1.0);
 
-  std::size_t attempts = 0, accepted = 0;
+  std::size_t attempts = 0, draws = 0, accepted = 0;
   for (auto& p : particles_) {
     if (rng_.bernoulli(f)) {
       RingDraw draw;
       p = sample_ring_particle(beacon, rssi, draw);
       attempts += static_cast<std::size_t>(draw.attempts);
+      draws += static_cast<std::size_t>(draw.draws);
       if (!draw.fell_back) ++accepted;
     } else {
       p = sample_uniform_particle();
@@ -105,23 +118,29 @@ void ParticleFilter::seed_from_beacon(std::size_t beacon_index, double rssi) {
   // prior distribution in both. With acceptance rate Z per try and K tries, a
   // ring draw has density ring(x | offset) * prior(offset) * (1 - (1-Z)^K) / Z
   // inside the venue, plus (1-Z)^K spread uniformly for the fallbacks; the
-  // offset prior cancels against the prior's.
-  const double area = venue_->walkable_area();
+  // offset prior cancels against the prior's. Draws redrawn out of a closed
+  // region are not tries: the ring is then truncated to open ground, and its
+  // density there is divided by P, the share of all draws accepted, instead
+  // of by Z (equal to it without closed regions).
+  const int ring_level = multi_level_ ? beacon.level : 0;
+  const double area = venue_->walkable_area() - (reachable_ ? reachable_->closed_area(ring_level) : 0.0);
   const double levels = multi_level_ ? static_cast<double>(venue_->level_count()) : 1.0;
   double total_area = 0.0;
-  for (int l = 0; l < venue_->level_count(); ++l) total_area += venue_->walkable_area(l);
+  for (int l = 0; l < venue_->level_count(); ++l) total_area += placeable_area(l);
   const double z = attempts > 0 ? static_cast<double>(accepted) / static_cast<double>(attempts) : 1.0;
+  const double p_open = draws > 0 ? static_cast<double>(accepted) / static_cast<double>(draws) : 1.0;
   const double miss_all = std::pow(1.0 - z, kRingTries);
-  const double ring_scale = z > 0.0 ? (1.0 - miss_all) / z : static_cast<double>(kRingTries);
+  const double ring_scale = p_open > 0.0 ? (1.0 - miss_all) / p_open : static_cast<double>(kRingTries);
   double sum = 0.0;
   for (auto& p : particles_) {
     const Ring ring = ring_for(beacon, rssi, p.rssi_offset);
     const double ring_pos =
         area * ring_scale * ring_density(distance(p.pos, beacon.pos), ring.log10_mean, ring.log10_sigma) + miss_all;
-    if (venue_->has_level_footprints()) {
+    if (venue_->has_level_footprints() || reachable_) {
       // The prior is uniform over the walkable area of all levels together
-      // (levels are drawn by area), and zero off a level's own footprint.
-      p.weight = venue_->inside(p.pos, p.level)
+      // (levels are drawn by area), and zero off a level's own footprint and
+      // in its closed regions.
+      p.weight = placeable(p.pos, p.level)
                      ? 1.0 / ((1.0 - f) + f * total_area * ring_level_prob(beacon.level, p.level) * ring_pos / area)
                      : 0.0;
     } else {
@@ -162,11 +181,13 @@ Particle ParticleFilter::sample_recovery_particle() {
       u -= floor_p_[static_cast<std::size_t>(level)];
       if (u < 0.0) break;
     }
-    if (level != p.level && venue_->inside(p.pos, level)) {
+    if (level != p.level && placeable(p.pos, level)) {
       p.level = level;
       if (baro_ready_) p.baro_offset = fresh_baro_offset(level);
     }
   }
+  // A ring particle moved to the level next to its beacon's can land in a closed region there.
+  if (reachable_ && !reachable_->open(p.pos, p.level)) return sample_uniform_particle();
   return p;
 }
 

@@ -9,6 +9,7 @@ add_library(ipe_core STATIC
   src/map_estimate.cpp
   src/particle_filter.cpp
   src/particle_filter_proposal.cpp
+  src/reachable_area.cpp
   src/pdr.cpp
   src/rooms.cpp
   src/rssi_model.cpp

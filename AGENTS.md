@@ -109,5 +109,5 @@ The companion repo `positioning-agent-tools` exposes these tools as an MCP serve
 - Adding config fields without registering them for JSON (silently ignored by presets, rejected by `--set`).
 - Treating `compute_us_per_update` from parallel runs as a performance measurement (use `--serial`).
 - Judging smoothing by CEP alone. A change to what is reported must also quote `jitter_p95_m`,
-  `jumps_per_min` and `level_flips` (in `ipe-regress` tables; definitions in
+  `jumps_per_min`, `level_flips` and, on walled maps, `wall_crossings_per_min` (in `ipe-regress` tables; definitions in
   [docs/formats.md](docs/formats.md#replay-outputs)).

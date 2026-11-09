@@ -30,7 +30,8 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
     recovery_proposal, proposal_history, proposal_max_age_s, proposal_level_jump, level_change_prob_step,
     level_change_prob_baro, baro_update_interval_s, baro_sigma_m, baro_outlier_prob, baro_offset_sigma_m,
     baro_offset_walk_m, baro_jump, baro_jump_radius_m, baro_jump_hold_s, baro_jump_prob, baro_reseed_keep_reference,
-    floor_prior_weight, floor_prior_k, floor_prior_eps, floor_prior_max_age_s)
+    floor_prior_weight, floor_prior_k, floor_prior_eps, floor_prior_max_age_s, closed_region_fraction,
+    closed_region_min_m2)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(TrackSmootherConfig, enabled, tau_s, max_correction_mps, snap_m,
                                                 extrapolate_steps, max_step_interval_s)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(RoomEventConfig, enter_prob, exit_prob, enter_dwell_s, exit_dwell_s,
@@ -199,7 +200,7 @@ Metrics compute_metrics(const std::vector<EstimateRecord>& records, double warmu
 }
 
 void compute_smoothness(Metrics& m, const std::vector<TrackSample>& track, double period_s,
-                        const std::vector<EstimateRecord>& records, double t_from) {
+                        const std::vector<EstimateRecord>& records, double t_from, const Venue* venue) {
   if (period_s <= 0.0) return;
   std::size_t first = 0;
   while (first < track.size() && track[first].t < t_from) ++first;
@@ -209,9 +210,15 @@ void compute_smoothness(Metrics& m, const std::vector<TrackSample>& track, doubl
 
   std::vector<double> second_diff;
   double est_path = 0.0, t_begin = std::numeric_limits<double>::infinity(), t_end = -t_begin;
+  int pairs = 0, wall_crossings = 0;
   for (std::size_t i = first; i + 1 < track.size(); ++i) {
     if (!usable(i, i + 1)) continue;
-    if (track[i].level != track[i + 1].level) ++m.level_flips;
+    ++pairs;
+    if (track[i].level != track[i + 1].level) {
+      ++m.level_flips;
+    } else if (venue && venue->crosses_wall(track[i].pos, track[i + 1].pos, track[i].level)) {
+      ++wall_crossings;
+    }
     est_path += distance(track[i].pos, track[i + 1].pos);
     t_begin = std::min(t_begin, track[i].t);
     t_end = std::max(t_end, track[i + 1].t);
@@ -224,6 +231,7 @@ void compute_smoothness(Metrics& m, const std::vector<TrackSample>& track, doubl
     m.jitter_p50_m = percentile(second_diff, 0.5);
     m.jitter_p95_m = percentile(second_diff, 0.95);
   }
+  if (venue && pairs > 0) m.wall_crossings_per_min = wall_crossings / (pairs * period_s / 60.0);
 
   constexpr double kJumpWindowS = 1.0, kJumpM = 3.0;
   const auto stride = std::max<std::size_t>(1, static_cast<std::size_t>(std::lround(kJumpWindowS / period_s)));
@@ -359,7 +367,7 @@ ReplayResult replay(const Venue& venue, const Trace& trace, const EngineConfig& 
   result.metrics = compute_metrics(result.records, opts.warmup_s);
   if (!result.records.empty()) {
     compute_smoothness(result.metrics, result.track, opts.track_period_s, result.records,
-                       result.records.front().t + opts.warmup_s);
+                       result.records.front().t + opts.warmup_s, &venue);
   }
   if (truth_rooms && !trace.truth.empty()) {
     for (const auto& e : engine.take_room_events()) result.room_events.push_back(e);
@@ -398,6 +406,7 @@ std::string metrics_to_json(const Metrics& m, int indent) {
                             {"jitter_p50_m", m.jitter_p50_m},
                             {"jitter_p95_m", m.jitter_p95_m},
                             {"jumps_per_min", m.jumps_per_min},
+                            {"wall_crossings_per_min", m.wall_crossings_per_min},
                             {"level_flips", m.level_flips},
                             {"path_ratio", m.path_ratio}};
   return j.dump(indent);

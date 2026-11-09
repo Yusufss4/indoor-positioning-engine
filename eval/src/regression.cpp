@@ -39,12 +39,13 @@ namespace {
 
 /// Collects the smoothness figures of the runs of one case.
 struct SmoothnessSamples {
-  std::vector<double> jitter_p50, jitter_p95, jumps, flips, changes, path_ratio;
+  std::vector<double> jitter_p50, jitter_p95, jumps, walls, flips, changes, path_ratio;
 
   void add(const Metrics& m) {
     if (m.jitter_p50_m >= 0.0) jitter_p50.push_back(m.jitter_p50_m);
     if (m.jitter_p95_m >= 0.0) jitter_p95.push_back(m.jitter_p95_m);
     if (m.jumps_per_min >= 0.0) jumps.push_back(m.jumps_per_min);
+    if (m.wall_crossings_per_min >= 0.0) walls.push_back(m.wall_crossings_per_min);
     flips.push_back(m.level_flips);
     changes.push_back(m.level_changes);
     if (m.path_ratio >= 0.0) path_ratio.push_back(m.path_ratio);
@@ -62,6 +63,7 @@ struct SmoothnessSamples {
     c.jitter_p50_m = agg(jitter_p50, -1.0);
     c.jitter_p95_m = agg(jitter_p95, -1.0);
     c.jumps_per_min = agg(jumps, -1.0);
+    c.wall_crossings_per_min = agg(walls, -1.0);
     c.level_flips = agg(flips, 0.0);
     c.level_changes = agg(changes, 0.0);
     c.path_ratio = agg(path_ratio, -1.0);
@@ -339,6 +341,7 @@ std::string benchmark_to_json(const std::vector<BenchmarkCase>& results, const B
     if (c.jitter_p50_m >= 0.0) entry["jitter_p50_m"] = round3(c.jitter_p50_m);
     if (c.jitter_p95_m >= 0.0) entry["jitter_p95_m"] = round3(c.jitter_p95_m);
     if (c.jumps_per_min >= 0.0) entry["jumps_per_min"] = round3(c.jumps_per_min);
+    if (c.wall_crossings_per_min >= 0.0) entry["wall_crossings_per_min"] = round3(c.wall_crossings_per_min);
     if (c.path_ratio >= 0.0) entry["path_ratio"] = round3(c.path_ratio);
     if (c.multi_level) {
       entry["floor_accuracy"] = round3(c.floor_accuracy);
@@ -375,26 +378,29 @@ std::string benchmark_to_markdown(const std::vector<BenchmarkCase>& results) {
   };
   if (!results.empty() && results.front().recorded) {
     out << "| Group | Filter | Traces | Median CEP50 [m] | Median CEP95 [m] | Mean CEP50 [m] | Mean CEP95 [m] | "
-           "Median coverage95 | Converged | Jitter p95 [m] | Jumps/min | Floor flips / changes | us/update |\n";
-    out << "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n";
+           "Median coverage95 | Converged | Jitter p95 [m] | Jumps/min | Through walls/min | Floor flips / changes | "
+           "us/update |\n";
+    out << "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n";
     char buf[384];
     for (const auto& c : results) {
-      char coverage[16], jitter[16], jumps[16];
+      char coverage[16], jitter[16], jumps[16], walls[16];
       share(c.median_coverage95, coverage, sizeof(coverage));
       number(c.jitter_p95_m, "%.2f", jitter, sizeof(jitter));
       number(c.jumps_per_min, "%.1f", jumps, sizeof(jumps));
+      number(c.wall_crossings_per_min, "%.2f", walls, sizeof(walls));
       std::snprintf(buf, sizeof(buf),
-                    "| %s | %s | %d | %.2f | %.2f | %.2f | %.2f | %s | %d/%d | %s | %s | %.1f / %.1f | %.1f |\n",
+                    "| %s | %s | %d | %.2f | %.2f | %.2f | %.2f | %s | %d/%d | %s | %s | %s | %.1f / %.1f | %.1f |\n",
                     c.scenario.c_str(), c.preset.c_str(), c.runs, c.median_cep50_m, c.median_cep95_m, c.cep50_m,
-                    c.cep95_m, coverage, c.runs - c.unconverged_runs, c.runs, jitter, jumps, c.level_flips,
+                    c.cep95_m, coverage, c.runs - c.unconverged_runs, c.runs, jitter, jumps, walls, c.level_flips,
                     c.level_changes, c.compute_us_per_update);
       out << buf;
     }
     return out.str();
   }
   out << "| Scenario | Filter | Mean [m] | CEP50 [m] | CEP95 [m] | Coverage95 | Converged in [s] | Floor ok | "
-         "Floor switch [s] | Floor flips / changes | Jitter p95 [m] | Jumps/min | Path ratio | us/update |\n";
-  out << "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n";
+         "Floor switch [s] | Floor flips / changes | Jitter p95 [m] | Jumps/min | Through walls/min | Path ratio | "
+         "us/update |\n";
+  out << "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n";
   char buf[384];
   for (const auto& c : results) {
     char conv[32];
@@ -413,14 +419,16 @@ std::string benchmark_to_markdown(const std::vector<BenchmarkCase>& results) {
         std::snprintf(floor_switch, sizeof(floor_switch), "%.1f", c.floor_switch_latency_s);
       }
     }
-    char coverage[16], jitter[16], jumps[16], path[16];
+    char coverage[16], jitter[16], jumps[16], walls[16], path[16];
     share(c.coverage95, coverage, sizeof(coverage));
     number(c.jitter_p95_m, "%.2f", jitter, sizeof(jitter));
     number(c.jumps_per_min, "%.1f", jumps, sizeof(jumps));
+    number(c.wall_crossings_per_min, "%.2f", walls, sizeof(walls));
     number(c.path_ratio, "%.2f", path, sizeof(path));
-    std::snprintf(buf, sizeof(buf), "| %s | %s | %.2f | %.2f | %.2f | %s | %s | %s | %s | %s | %s | %s | %s | %.1f |\n",
+    std::snprintf(buf, sizeof(buf),
+                  "| %s | %s | %.2f | %.2f | %.2f | %s | %s | %s | %s | %s | %s | %s | %s | %s | %.1f |\n",
                   c.scenario.c_str(), c.preset.c_str(), c.mean_m, c.cep50_m, c.cep95_m, coverage, conv, floor_ok,
-                  floor_switch, flips, jitter, jumps, path, c.compute_us_per_update);
+                  floor_switch, flips, jitter, jumps, walls, path, c.compute_us_per_update);
     out << buf;
   }
   return out.str();

@@ -19,6 +19,7 @@ add_executable(ipe_tests
   test_particle_filter.cpp
   test_pdr.cpp
   test_plan.cpp
+  test_reachable_area.cpp
   test_rng.cpp
   test_rooms.cpp
   test_rssi_model.cpp
