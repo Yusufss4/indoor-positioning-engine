@@ -566,11 +566,71 @@ With `ipin.json`, `datasets/ipin/evaluate.py --seeds 5`:
 - Engine defaults: centred extrapolation over one step, tau 0.5 s, no cap.
 - `msil_wifi.json` and `ipin.json` add `smoothing.max_correction_mps` 1.5.
 
+## 12. Discounting repeated packets of one beacon (not kept)
+
+**Observation.** A wider BLE likelihood improves every simulated mean at once (10 seeds, 12 scenarios, on
+the experiment 11 smoother):
+
+| `rssi.sigma_db` | CEP50 | CEP95 | Jitter p95 | Jumps/min |
+|---:|---:|---:|---:|---:|
+| 5 (default) | 0.769 | 2.659 | 0.50 | 1.04 |
+| 6 | 0.754 | 2.671 | 0.37 | 0.83 |
+| 7 | 0.723 | 2.605 | 0.35 | 0.72 |
+
+Real BLE does not prefer it. UJI standing still gives median CEP50 1.74, 1.73 and 1.74 m at 5, 7 and 8 dB
+(before experiment 11), and its measured spread per packet is 4.5–6.2 dB.
+
+**Hypothesis.** The filter counts time-correlated packets as independent. The simulator draws 4 dB AR(1)
+shadowing per beacon with a 4 s time constant and a packet every 0.5 s, so consecutive packets are far
+from independent. A plain wider sigma then helps by accident, and a discount on repeats should do better.
+
+**Change tried.** `pf.rssi_repeat_s` scaled each reading's log-likelihood by the time since the same
+beacon's previous reading over `rssi_repeat_s`, kept between `rssi_repeat_min_weight` and 1. The first
+reading after a silence counted in full. It cost O(1) per reading, needed no draws, and was bit-identical
+at 0.
+
+| `rssi_repeat_s` / min weight | CEP50 | CEP95 | Jitter p95 | Jumps/min |
+|---|---:|---:|---:|---:|
+| off | 0.769 | 2.659 | 0.50 | 1.04 |
+| 0.5 s / 0.25 or 0.5 | 0.755 | 2.807 | 0.52 | 1.13 |
+| 1 s / 0.25 | 0.788 | 2.808 | 0.41 | 0.91 |
+| 1 s / 0.5 | 0.759 | 2.895 | 0.40 | 0.95 |
+| 2 s / 0.25 | 0.787 | 3.164 | 0.37 | 0.82 |
+| 2 s / 0.5 | 0.756 | 2.996 | 0.38 | 0.88 |
+
+At 0.5 s the two minimum weights give the same numbers: packets come 0.35–0.65 s apart, so the weight
+never falls below 0.7.
+
+**Result.** It is worse than a plain wider sigma on every mean, and CEP95 is worse than doing nothing.
+Neither passes the bar set for a default:
+- no scenario's CEP95 worse by more than 10%;
+- two-floor convergence at most 2 s slower.
+
+Both trade the same scenarios (CEP95 m, convergence s):
+
+| Scenario | off | sigma 7 | repeat 1 s / 0.5 |
+|---|---:|---:|---:|
+| office_stairs_up_down | 3.24, 11 s | 4.26, 24 s | 4.06, 23 s |
+| baro_drift_long | 1.95, 13 s | 2.94, 24 s | 3.15, 23 s |
+| office_mag_disturbance | 2.71 | 3.27 | 2.86 |
+| office_floor_bleed | 3.87 | **1.69** | 4.33 |
+| office_nominal | 1.55 | **1.21** | 1.31 |
+
+A weaker radio helps most offices, but the two-floor walks take twice as long to lock on, and the
+disturbed-magnetometer walk loses its anchor. The repeat discount keeps the costs without most of the gains.
+
+**Not kept.** The code was removed. Wi-Fi scans (each access point 2–3 s apart) and the UJI scans (1 s)
+would not have been touched at `rssi_repeat_s` ≤ 1 s anyway. The engine keeps 5 dB for BLE, the measured
+per-packet spread. Why the two-floor walks need the sharper radio to lock on is open.
+
 ## Open questions
 
 - The beacon-driven init proposal is now chosen by particle density (experiment 9), but venues between
   0.6 and 1 particle per m^2 are where it is mixed. A wall-aware ring (rejection sampling against the
   full likelihood) might remove the office cost and let it be on everywhere.
+- A wider BLE likelihood (sigma 7 dB) improves 9 of 12 simulated scenarios, but the two-floor walks then
+  take twice as long to lock on (experiment 12). If the floor decision could be kept sharp while the
+  horizontal update is softened, the gain might be had without the cost.
 - `office_nlos_heavy`: the wall-aware model assumes 3.5 dB per wall while the truth is 7 dB. Learning the
   wall loss online failed both as a particle state and as a venue-wide calibration (experiment 10); the
   device offset and the wall loss trade off too easily. Per-wall-type losses from the map are the
