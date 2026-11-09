@@ -623,8 +623,160 @@ disturbed-magnetometer walk loses its anchor. The repeat discount keeps the cost
 would not have been touched at `rssi_repeat_s` ≤ 1 s anyway. The engine keeps 5 dB for BLE, the measured
 per-packet spread. Why the two-floor walks need the sharper radio to lock on is open.
 
+## 13. A dot inside a room without a door
+
+**Symptom.** In the web demo, on "site1 F1, 98 s walk", the dot jumps into shops that have no door and
+back out. The demo maps come from `convert.py --walls doors`. Every shop outline is a wall, with a doorway
+only where a training walk crossed it, so every shop that no training walk entered is closed. At seed 1, the
+seed the demo uses, the dot enters three such shops six times: 11 moves through a wall, 7.1 a minute.
+Jitter p95 is 11.1 m and jumps are 9.8 a minute.
+
+**Cause.** No particle walks into a closed room: a step that crosses a wall kills the particle, and
+roughening and the barometer jump stay on the map. Three places put particles there anyway, because to them
+the venue is everything inside the outline (`Venue::inside`):
+
+| Path | On site1 F1, seed 1 |
+|---|---|
+| The uniform start and the beacon-ring seed | t = 4.9 s |
+| Recovery injections: rings around a packet from the last 2 s, up to 5% per resample | t = 7.7, 31.1, 42.1, 45.5 and 49.1 s |
+| The re-seed when every particle has died: 3 m around the estimate, through walls | t = 87.9 s, with recovery off |
+
+Access points often sit inside shops, so their rings do too. Once a few particles are inside, one Wi-Fi
+scan moves 85–95% of the weight onto them, because the scan's readings count as independent (see
+[real_data.md](real_data.md#failure-modes-and-open-questions)). The particles die at the shop's walls a few
+seconds later, and the dot jumps back out. The raw estimate goes into the shop too: the smoother only glides
+to the wall and jumps there (experiment 11).
+
+Labelling each level's connected regions shows how common such rooms are. A 0.25 m grid is enough, with
+neighbouring cells joined unless a wall lies between their centres.
+
+| Map | Enclosed regions under 10% of the level's largest |
+|---|---|
+| Simulated offices | none: one region per level |
+| `airport_hall` | 180 m^2: three solid 10 x 6 m check-in islands |
+| KIT (OpenStreetMap) | 1–24% of each level: rooms whose door is not mapped |
+| IPIN Nuremberg, UMinho | 1–6% |
+| MSIL demo floors | 20–26%: the shops without an inferred door |
+| MSIL outline-only floors | 135–173 m^2 corners of the bounds outside the building |
+| UJI library | shelf slots, all under 10 m^2 |
+
+**Change.** `ReachableArea` labels the regions once per venue. A region is closed (`pf.closed_region_*`) if:
+- it is at least 10 m^2 (`closed_region_min_m2`);
+- it is smaller than a tenth of its level's largest region (`closed_region_fraction`);
+- it holds no stairwell or lift.
+
+No particle is placed in a closed region:
+- **Uniform draws.** The uniform start and uniform recovery reject closed positions, as does the ring's
+  fallback. Levels are drawn by their area that is not closed.
+- **Ring draws.** A ring draw in a closed region is drawn again, up to 16 times, without using up one of the
+  4 tries. Draws that leave the venue therefore fall back to the uniform prior exactly as often as before.
+  The seed's importance weights divide the ring density by the share of all draws accepted rather than by
+  the share of tries; the two are the same without closed regions. A recovery particle that a level jump
+  puts in a closed region is drawn uniformly instead.
+- **The re-seed.** It is drawn again around the estimate until it lies outside closed regions. It still
+  crosses walls, because a door missing from the map is the usual reason every particle died.
+
+Smaller pockets are left alone. Closing UJI's shelf slots moved its median CEP50 by 5% for no physical
+gain. A venue without a closed region builds no map and draws exactly as before. That covers the 10
+single-floor and two-floor office scenarios and UJI: bit-identical, checked to the last digit.
+`wall_crossings_per_min` is new ([formats.md](formats.md#replay-outputs)): it counts moves of the drawn
+dot through a wall.
+
+**Results.** Shop-wall maps first: the problem and the holdout walks the demo plays. Means over filter seeds
+(`pf.seed`). CEP50 / CEP95 [m], with jitter p95 [m], jumps and moves through a wall per minute. For
+recorded walks the figures are medians over walks.
+
+| Data | Before | After |
+|---|---|---|
+| `out_doors` tune, 111 walks, 3 seeds | 8.21 / 12.67, 0.58, 2.10, 3.28 | 8.31 / 13.08, 0.57, 2.18, 1.83 |
+| Demo walks (held out), 10 walks x 6 seeds | 14.17 / 21.83, 0.64, 2.36, 3.80 | 9.09 / 16.48, 0.55, 2.31, 2.63 |
+| site1 F1, 6 seeds | 7.16 / 20.62, 6.00, 8.48, 5.71 | 8.67 / 30.13, 5.36, 7.17, 3.23 |
+| site1 F1, seed 1 (the demo) | 7.6 / 16.7, 11.09, 9.8, 7.76 | 9.7 / 32.1, 4.03, 7.2, 2.59 |
+
+What changes on site1 F1 over the 6 seeds:
+- The dot is in a doorless shop at some point in every seed before, and in none after.
+- Moves between regions fall from 46 to 15.
+- The share of time in a region the walker is not in falls from 17% to 6%.
+
+What is left is the cloud moving across the corridor wall into the 15,510 m^2 region next to the walker's.
+Those stays last longer than a shop visit did, since nothing kills the particles there. With only 11 scored
+waypoints, that is what moves this walk's CEP95. Over all 10 demo walks the shop walls stop trapping the
+cloud, and the walks [real_data.md](real_data.md#in-the-web-demo) lists as hurt by shop walls recover:
+
+| Walk (shop walls, 6 seeds) | Before | After |
+|---|---|---|
+| site1 F4 | 16.8 / 37.8 | 6.2 / 15.0 |
+| site2 F6 | 17.1 / 36.2 | 8.1 / 12.5 |
+| site2 F8 | 21.8 / 34.2 | 11.6 / 16.1 |
+| site1 F2 | 11.5 / 17.6 | 3.9 / 8.6 |
+
+Everything else: 10 seeds for the scenarios, 80 runs (8 filter seeds x 10) where one scenario changes.
+
+| Data | Before | After |
+|---|---|---|
+| 10 office scenarios | | bit-identical |
+| `airport_hall_sparse`, 80 runs | 1.30 / 5.92, 0.33, 0.80, 0.34; converged in 53.6 s | 1.23 / 5.82, 0.31, 0.70, 0.22; 51.4 s |
+| `kit_tour`, 80 runs | 0.69 / 3.44, 0.32, 1.16, 0.91; 8.2 s; floor 98.9% | 0.68 / 3.70, 0.31, 1.15, 0.78; 7.2 s; 98.8% |
+| MSIL outline-only tune, 109 walks | 6.63 / 10.16, 0.33, 0.0, 0.00 | 6.74 / 9.66, 0.33, 0.0, 0.00 |
+| UJI tune | 1.72 / 1.91 | bit-identical |
+| IPIN tune, `evaluate.py --seeds 16`: CEP, floor hit, IPIN p75 | Nuremberg 7.23 / 28.15, 91%, 13.24; UMinho 11.97 / 40.20, 67%, 33.05 | 7.31 / 26.21, 91%, 14.60; 12.88 / 38.56, 69%, 35.09 |
+
+In the standard 10-seed run the scenario means move from 0.769 / 2.659 to 0.784 / 2.937. Almost all of
+that is one seed set of `kit_tour` with a CEP95 of 6.58; over 80 runs its CEP95 spread is 2.5–4.5 m with
+or without the change. The closed corners of the MSIL outline-only floors lie outside the building, so
+those walks only see a different random path.
+
+On IPIN, CEP95 improves by 4–7% and the official p75 worsens by 6–10%. Comparing 8 against 16 seeds of the
+code before the change moves p75 by 3–8%, so the cost is about the size of the noise, but it is in the same
+direction at both seed counts. The tune walks never stand in a closed region. The straight lines between
+their reference points cross closed regions on 1.3% of their length, which is corners cut by the
+interpolation. Two UMinho holdout walks do have a reference point inside a closed region: a room the map
+has no door to, which the filter now cannot follow anyone into.
+
+Held-out halves, replayed for reporting only:
+- **IPIN holdout** (`evaluate.py --seeds 16`): Nuremberg goes from 8.28 / 38.13 m, p75 27.16 m to
+  8.65 / 42.78 m, p75 28.02 m. UMinho goes from 15.29 / 42.97 m, p75 33.68 m to 15.72 / 43.92 m,
+  p75 34.08 m. Floor hit is unchanged.
+- **MSIL outline-only holdout** (3 seeds): 11.31 / 15.73 m to 11.53 / 15.84 m. site1 F4 and every site2
+  floor have no closed region and are bit-identical. The four site1 floors, each with a closed corner
+  outside the building, move within their seed spread.
+
+`compute_us_per_update` (`--serial`, 2 seeds) goes from 70.5 to 70.6 µs. Labelling the regions costs
+0.07–0.18 s once per venue on the largest floors (MSIL B1, 320 x 232 m).
+
+**Tried, not kept.** All measured on the same sets.
+- **Skipping a recovery injection whose ring lies entirely in closed regions**, instead of falling back
+  to a uniform draw. `out_doors` 8.36 / 13.00, 0.55, 2.05, 1.46; IPIN p75 14.55 and 34.87. Close to the
+  kept version everywhere, but site1 F1 gets worse: 11.35 / 28.87 over 6 seeds, and jitter p95 11.65 in the
+  demo seed. The uniform fallback is what lets the cloud recover there.
+- **Moving such a draw to the nearest open ground**, the shop front, since an access point in a closed
+  shop was heard from outside it. IPIN p75 15.07 and 35.77, and 2.32 jumps a minute on `out_doors`.
+- **Injecting only into regions holding at least 1% of the weight**, unless the filter looks lost. On the
+  prototype, 20–30% fewer moves through walls than the kept version, but CEP95 3% worse on `out_doors`
+  and site1 F1's CEP50 8.6 to 11.6 m. It blocks the escape from a wrong corridor that recovery exists for:
+  with recovery off, site1 F2 spends 96% of its time in a wrong region instead of 0.5%.
+- **Counting every closed draw as a try with 16 tries**, instead of redrawing it for free. IPIN got worse:
+  it also changes how often rings that leave the venue fall back.
+- **Accepting an injection only if the cloud's last 8–25 m of step motion, walked back from it, crosses no
+  wall.** It misses shops early in a walk, when there is little motion to check, and lets the cloud into
+  large wrong regions.
+
+**Kept.** `closed_region_fraction` 0.1 and `closed_region_min_m2` 10, on by default. The baselines
+were updated only where this change moves the results:
+- **`baseline.json`:** `airport_hall_sparse` and `kit_tour`. The airport's 3-seed CEP crossed the 10%
+  tolerance: 1.09 / 4.69 m to 1.40 / 5.85 m. Over 80 runs it is better.
+- **`msil_baseline.json`:** the four site1 floors and `all`. site1 F1's CEP95 (7.94 to 9.56 m) and site1
+  F3's CEP50 (5.54 to 6.93 m) crossed it, a different random path. site1 F2 improved past it.
+- **`ipin_baseline.json`:** all groups. Nuremberg's CEP50 crossed it (5.23 to 6.54 m) while its CEP95 fell
+  from 33.04 to 20.72 m. UMinho's two walks pass through a room the map closes: 10.52 / 39.53 m to
+  13.65 / 44.18 m.
+
 ## Open questions
 
+- A Wi-Fi scan can still move the whole cloud across a wall into a large region next to the walker's (a
+  parallel corridor), where it lasts longer than in a closed room (experiment 13). Forbidding injections
+  across walls blocks the escape from a wrong corridor that recovery is for. A likelihood that does not
+  treat a scan's readings as independent would attack the cause.
 - The beacon-driven init proposal is now chosen by particle density (experiment 9), but venues between
   0.6 and 1 particle per m^2 are where it is mixed. A wall-aware ring (rejection sampling against the
   full likelihood) might remove the office cost and let it be on everywhere.

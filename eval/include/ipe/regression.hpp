@@ -28,6 +28,7 @@ struct BenchmarkCase {
   double jitter_p50_m = -1.0;
   double jitter_p95_m = -1.0;
   double jumps_per_min = -1.0;
+  double wall_crossings_per_min = -1.0;
   double level_flips = 0.0;
   double level_changes = 0.0;  ///< True level changes, averaged like level_flips.
   double path_ratio = -1.0;

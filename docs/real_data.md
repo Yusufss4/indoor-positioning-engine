@@ -211,7 +211,8 @@ Held-out half, replayed once to report (no setting was chosen on it):
 So the converter's default stays `auto` (floor outline only), and `msil_baseline.json` is unchanged.
 The web demo does use the shop walls (see [below](#in-the-web-demo)). Shop walls would need either real doors (IMDF `opening` features) or a filter that gets out
 of a trapped cloud faster than the current recovery proposal, which is on in the Wi-Fi config and does
-not prevent the loss.
+not prevent the loss. Not placing particles in shops without a door (experiment 13) leaves the tune half
+at 8.3 / 13.1 m: it fixes what the demo draws, not this gap.
 
 ## Simulation vs. real data
 
@@ -267,22 +268,29 @@ It holds the longest held-out walk on every floor where that walk lasts at least
 four have no held-out walk longer than 47 s), copied to `data/real/` by `datasets/msil/export_demo.py`.
 The demo replays the recorded IMU and Wi-Fi through the particle filter with the Wi-Fi config. Its venues come from `convert.py --walls doors`, so the shop walls of the floor plan are
 real walls in the demo, with the doorways [inferred from training walks](#shop-walls-with-doorways).
-That is a choice for the demo, not the best-scoring map: on these ten walks the shop walls help on two,
-are mixed on one and hurt on seven, badly on site1 F4 and site2 F3, F6, F7 and F8 (`ipe-replay` with
-the Wi-Fi config, CEP50 / CEP95 [m]):
+That is a choice for the demo, not the best-scoring map. Shop walls also leave rooms that no training walk
+entered without a door. Until experiment 13 the filter still placed particles in them, and one Wi-Fi scan
+could pull the dot into a shop nobody can enter. No particle is placed in such a closed room any more, so the
+shops stop trapping the cloud. The shop walls are still worse than the outline alone on 6 of these 10 walks,
+and better on 3. Mean of 6 filter seeds per walk, `ipe-replay` with the Wi-Fi config, CEP50 / CEP95 [m]:
 
-| Walk | Floor outline only (`out_scans`) | Shop walls with doorways (demo) |
-|---|---:|---:|
-| site1 B1, 231 s | 9.2 / 15.2 | 10.3 / 21.4 |
-| site1 F1, 98 s | 7.8 / 11.2 | 8.2 / 15.7 |
-| site1 F2, 160 s | 6.1 / 15.7 | 2.6 / 4.5 |
-| site1 F3, 133 s | 2.7 / 4.1 | 1.3 / 3.3 |
-| site1 F4, 106 s | 8.0 / 10.1 | 23.6 / 70.9 |
-| site2 F1, 217 s | 10.6 / 13.9 | 9.2 / 15.8 |
-| site2 F3, 122 s | 11.4 / 13.8 | 31.7 / 52.0 |
-| site2 F6, 70 s | 8.8 / 9.6 | 19.1 / 31.6 |
-| site2 F7, 75 s | 10.6 / 16.4 | 21.5 / 24.2 |
-| site2 F8, 86 s | 4.4 / 8.2 | 31.1 / 40.4 |
+| Walk | Floor outline only (`out_scans`) | Shop walls, before experiment 13 | Shop walls (demo) |
+|---|---:|---:|---:|
+| site1 B1, 231 s | 9.5 / 15.5 | 9.5 / 18.7 | 9.5 / 19.5 |
+| site1 F1, 98 s | 7.1 / 13.0 | 7.2 / 20.6 | 8.7 / 30.1 |
+| site1 F2, 160 s | 6.8 / 12.6 | 11.5 / 17.6 | 3.9 / 8.6 |
+| site1 F3, 133 s | 2.3 / 3.9 | 1.2 / 3.6 | 1.3 / 3.5 |
+| site1 F4, 106 s | 7.9 / 12.1 | 16.8 / 37.8 | 6.2 / 15.0 |
+| site2 F1, 217 s | 10.4 / 28.2 | 11.0 / 20.5 | 10.1 / 24.6 |
+| site2 F3, 122 s | 11.5 / 14.2 | 22.2 / 38.6 | 20.5 / 32.3 |
+| site2 F6, 70 s | 6.9 / 8.8 | 17.1 / 36.2 | 8.1 / 12.5 |
+| site2 F7, 75 s | 12.1 / 16.8 | 19.3 / 23.0 | 13.0 / 16.9 |
+| site2 F8, 86 s | 5.1 / 9.4 | 21.8 / 34.2 | 11.6 / 16.1 |
+
+On site1 F1 the dot no longer enters a shop in any of the 6 seeds, against every seed before. Moves through
+a wall fall from 5.7 to 3.2 a minute. What is left is the cloud crossing the corridor wall into the large
+region next to the walker's, which lasts longer than a shop visit did, so this walk's CEP95 rises
+([experiments.md](experiments.md#13-a-dot-inside-a-room-without-a-door)).
 
 It draws the mall's floor plan under the
 venue and the surveyor's waypoints as squares. The black path between waypoints is interpolated and

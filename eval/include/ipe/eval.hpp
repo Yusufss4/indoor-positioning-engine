@@ -67,7 +67,10 @@ struct Metrics {
   double jitter_p50_m = -1.0;   ///< Median |p(t+T) - 2 p(t) + p(t-T)|; walking at steady speed gives ~0.
   double jitter_p95_m = -1.0;   ///< 95th percentile of the same second difference.
   double jumps_per_min = -1.0;  ///< Non-overlapping 1 s windows that moved over 3 m or changed floor.
-  int level_flips = 0;          ///< Changes of the reported level; compare with level_changes.
+  /// Moves between consecutive samples on one floor that cross a wall, per minute: the dot going
+  /// through a wall (into a room without a door, or a corridor behind a wall). -1 without the venue.
+  double wall_crossings_per_min = -1.0;
+  int level_flips = 0;  ///< Changes of the reported level; compare with level_changes.
   /// Length of the estimated track over the length of the true one, after warm-up; -1 unless the
   /// truth is dense (median spacing <= 0.5 s), since waypoint polylines cut corners.
   double path_ratio = -1.0;
@@ -127,9 +130,10 @@ ReplayResult replay(const Venue& venue, const Trace& trace, const EngineConfig& 
 
 Metrics compute_metrics(const std::vector<EstimateRecord>& records, double warmup_s);
 /// Fills the smoothness fields of `m` from an evenly spaced track (spacing `period_s`). Samples before
-/// `t_from` are skipped; `records` (truth) are only used for path_ratio.
+/// `t_from` are skipped; `records` (truth) are only used for path_ratio, `venue` (its walls) only for
+/// wall_crossings_per_min.
 void compute_smoothness(Metrics& m, const std::vector<TrackSample>& track, double period_s,
-                        const std::vector<EstimateRecord>& records, double t_from);
+                        const std::vector<EstimateRecord>& records, double t_from, const Venue* venue = nullptr);
 double percentile(std::vector<double> values, double p);
 
 /// Fills the room_event_* fields. A true event is detected by the earliest

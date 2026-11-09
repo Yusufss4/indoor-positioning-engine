@@ -41,6 +41,11 @@ ParticleFilter::ParticleFilter(const Venue& venue, ParticleFilterConfig cfg, Rss
   }
   level_weight_.resize(static_cast<std::size_t>(std::max(venue.level_count(), 1)));
   if (cfg_.map_consistent_estimate) map_estimate_.emplace(venue, static_cast<std::size_t>(cfg_.num_particles));
+  if (cfg_.closed_region_fraction > 0.0) {
+    reachable_.emplace(venue, cfg_.closed_region_fraction, cfg_.closed_region_min_m2);
+    // Nothing to avoid: no map, and every draw stays as it was.
+    if (!reachable_->any_closed()) reachable_.reset();
+  }
   initialize_uniform();
 }
 
@@ -72,23 +77,31 @@ void ParticleFilter::calibrate_floor_loss(const Beacon& beacon, double residual)
   floor_db_ = std::clamp(floor_db_ - cfg_.loss_calibration_rate * r / slabs, 0.0, kMaxFloorDb);
 }
 
-Vec2 ParticleFilter::sample_position(int level) {
+Vec2 ParticleFilter::sample_position(int level, int open_level) {
   // Rejection sampling over the bounds (or the level footprint's box); without
-  // a footprint the first draw is always accepted.
+  // a footprint or closed regions the first draw is always accepted.
   const Bounds b = level >= 0 ? venue_->sample_box(level) : venue_->bounds();
+  const int closed_level = open_level >= 0 ? open_level : std::max(level, 0);
+  const auto ok = [&](Vec2 q) {
+    return venue_->inside(q, level) && (!reachable_ || reachable_->open(q, closed_level));
+  };
   Vec2 pos{rng_.uniform(b.min_x, b.max_x), rng_.uniform(b.min_y, b.max_y)};
-  for (int i = 1; i < kFootprintTries && !venue_->inside(pos, level); ++i) {
+  for (int i = 1; i < kFootprintTries && !ok(pos); ++i) {
     pos = {rng_.uniform(b.min_x, b.max_x), rng_.uniform(b.min_y, b.max_y)};
   }
   return pos;
 }
 
+double ParticleFilter::placeable_area(int level) const {
+  return venue_->walkable_area(level) - (reachable_ ? reachable_->closed_area(level) : 0.0);
+}
+
 int ParticleFilter::sample_level_by_area() {
   double total = 0.0;
-  for (int l = 0; l < venue_->level_count(); ++l) total += venue_->walkable_area(l);
+  for (int l = 0; l < venue_->level_count(); ++l) total += placeable_area(l);
   double u = rng_.uniform() * total;
   for (int l = 0; l < venue_->level_count(); ++l) {
-    u -= venue_->walkable_area(l);
+    u -= placeable_area(l);
     if (u < 0.0) return l;
   }
   return venue_->level_count() - 1;
@@ -100,9 +113,9 @@ Particle ParticleFilter::sample_uniform_particle() {
   p.heading = rng_.uniform(-std::numbers::pi, std::numbers::pi);
   p.step_scale = std::max(0.5, rng_.normal(1.0, cfg_.step_scale_sigma));
   p.rssi_offset = cfg_.estimate_rssi_offset ? rng_.normal(0.0, cfg_.rssi_offset_sigma) : 0.0;
-  if (multi_level_ && venue_->has_level_footprints()) {
-    // Levels of different size: uniform over all walkable area, so a small
-    // landing gets few particles.
+  if (multi_level_ && (venue_->has_level_footprints() || reachable_)) {
+    // Levels of different size (own footprints, or closed regions): uniform
+    // over all walkable area, so a small landing gets few particles.
     p.level = sample_level_by_area();
     p.pos = sample_position(p.level);
   } else if (multi_level_) {
@@ -415,9 +428,16 @@ void ParticleFilter::normalize_or_recover() {
       if (cloud_.valid) {
         Vec2 pos = cloud_.pos + Vec2{rng_.normal(0.0, 3.0), rng_.normal(0.0, 3.0)};
         const int level = multi_level_ ? cloud_.level : 0;
-        if (venue_->inside(pos, level)) {
+        if (reachable_) {
+          // Near the estimate, not anywhere on the floor: a draw in a closed room is drawn again. The
+          // re-seed still crosses walls, since a door missing from the map is what got the cloud here.
+          for (int i = 1; i < kFootprintTries && !placeable(pos, level); ++i) {
+            pos = cloud_.pos + Vec2{rng_.normal(0.0, 3.0), rng_.normal(0.0, 3.0)};
+          }
+        }
+        if (placeable(pos, level)) {
           fresh.pos = pos;
-        } else if (multi_level_ && venue_->has_level_footprints()) {
+        } else if (multi_level_ && (venue_->has_level_footprints() || reachable_)) {
           fresh.pos = sample_position(level);
         }
         fresh.heading = wrap_angle(cloud_.heading + rng_.normal(0.0, 0.5));

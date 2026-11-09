@@ -27,6 +27,7 @@ use it, so they see identical inputs.
 | Beacon-driven init/recovery proposals | `core/src/particle_filter_proposal.cpp` |
 | Beacon integrity monitor | `core/src/beacon_integrity.cpp` |
 | Estimate kept on the map (dominant group of a split cloud) | `core/src/map_estimate.cpp` |
+| Closed regions no particle is placed in (rooms without a door) | `core/src/reachable_area.cpp` |
 | Reported level (averaged level weights with hysteresis) | `core/src/level_selector.cpp` |
 | Drawn position: filter estimate smoothed between updates | `core/src/track_smoother.cpp` |
 | Config JSON, presets, replay, metrics | `eval/src/eval.cpp` |
@@ -58,6 +59,15 @@ State per particle: position, heading, step-length scale, device RSSI offset.
   venue has one. Uniform draws (start, recovery, ring fallback) are rejection-sampled inside the footprint.
   The footprint matters for buildings that fill a small part of their bounds: in an L-shaped building,
   particles started in the empty corner sit outside the outline walls, and the walls keep them there.
+- **Closed regions** (`closed_region_fraction` 0.1, `closed_region_min_m2` 10): the walls split each level
+  into connected regions, and a walker never gets from one to another except by a stairwell or lift. A
+  region of at least 10 m^2, smaller than a tenth of its level's largest and without a connector is
+  closed: a room without a door, an island drawn as an outline (`ReachableArea`, a 0.25 m grid built once).
+  Steps already keep particles out of one; the uniform start, the beacon rings, recovery and the re-seed
+  used to put them there, and one Wi-Fi scan could then pull the estimate in (experiment 13). Now no
+  particle is placed in a closed region, and the prior is uniform over the rest. Smaller pockets (gaps
+  between double walls, shelf slots) are left alone, and a venue without a closed region builds no map
+  and draws exactly as before.
 - **RSSI likelihood**: log-distance path loss, minus `wall_attenuation_db` per wall on the straight radio
   path, plus the particle's device offset. The likelihood is a Gaussian/uniform mixture so one bad packet
   cannot wipe out the cloud.
@@ -66,13 +76,16 @@ State per particle: position, heading, step-length scale, device RSSI offset.
 - **Resampling**: systematic, when ESS < N/2, followed by small position roughening that respects walls.
 - **Recovery**: augmented MCL (`w_slow`/`w_fast`) injects up to 5% uniform particles when the short-term
   likelihood falls below the long-term one. If every particle dies, the cloud is re-seeded around the last
-  estimate.
+  estimate. The re-seed may cross walls (a door missing from the map is the usual reason everything
+  died), but not into a closed region.
 - **Beacon-driven proposal** (`init_proposal` / `recovery_proposal`): after a 1 s collection
   window, the packet with the shortest apparent range re-seeds the cloud. 80% of the particles come from a
   ring around that beacon, with log-range normal around the inverted path-loss model for each particle's
   device offset; 20% stay uniform. Weights are prior/proposal, computed analytically. Draws that leave
   the venue are rejected jointly with their offset (up to 4 tries), so one acceptance rate normalises
-  the truncated ring. Recovery can draw from the ring of a recent packet instead of uniformly. The init
+  the truncated ring. Draws in a closed region are drawn again without using up a try (up to 16), so the
+  ring is truncated to open ground and its density there is divided by the share of all draws accepted
+  rather than by the acceptance rate per try; the two are equal without closed regions. Recovery can draw from the ring of a recent packet instead of uniformly. The init
   proposal slows convergence in small walled venues (experiment 4), so it turns itself on only when the
   cloud is sparse: under `init_proposal_auto_density` (0.6) particles per m^2 of walkable area, all
   levels together (experiment 9). `init_proposal: true` turns it on everywhere; the recovery proposal is

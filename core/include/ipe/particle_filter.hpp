@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <limits>
@@ -14,6 +15,7 @@
 #include "ipe/level_selector.hpp"
 #include "ipe/map_estimate.hpp"
 #include "ipe/particle.hpp"
+#include "ipe/reachable_area.hpp"
 #include "ipe/rng.hpp"
 #include "ipe/rssi_model.hpp"
 #include "ipe/venue.hpp"
@@ -34,6 +36,13 @@ struct ParticleFilterConfig {
   /// shop between two groups). Report the dominant group's mean instead then;
   /// the covariance still covers the whole cloud.
   bool map_consistent_estimate = true;
+  /// Rooms nobody can walk into. The walls split each level into connected regions; one of at least
+  /// `closed_region_min_m2`, smaller than `closed_region_fraction` of its level's largest region and
+  /// without a stairwell or lift is closed (a room without a door, an island drawn as an outline). No
+  /// particle is placed in one: not by the uniform start, a beacon ring, recovery or a re-seed. Steps
+  /// cannot enter one anyway. 0 turns it off; a venue without a closed region is unaffected.
+  double closed_region_fraction = 0.1;
+  double closed_region_min_m2 = 10.0;
   /// The reported level follows the level weights averaged with time constant `level_smoothing_s`, and
   /// only moves once another level leads the reported one by `level_hysteresis` in that average, so a
   /// cloud split between floors does not flicker with every packet. Both 0 report the most likely level
@@ -157,6 +166,8 @@ class ParticleFilter {
   [[nodiscard]] double floor_loss_db() const { return floor_db_; }
   /// Whether the init proposal is in use (`init_proposal`, or chosen by `init_proposal_auto_density`).
   [[nodiscard]] bool init_proposal_active() const { return cfg_.init_proposal; }
+  /// Whether the venue has closed regions that sampling avoids (see `closed_region_fraction`).
+  [[nodiscard]] bool avoids_closed_regions() const { return reachable_.has_value(); }
 
   /// Replaces the cloud with draws from the init proposal for one packet and
   /// importance-weights them back to the prior. The packet's likelihood is not
@@ -182,11 +193,14 @@ class ParticleFilter {
   };
 
   struct RingDraw {
-    int attempts = 0;
+    int attempts = 0;        ///< Tries: draws that left the venue, or were accepted.
+    int draws = 0;           ///< Every draw, the ones redrawn out of a closed region too.
     bool fell_back = false;  ///< Every try left the venue; the position is uniform.
   };
 
   static constexpr int kRingTries = 4;
+  /// Ring draws in a closed region per particle that are drawn again without using up a try.
+  static constexpr int kClosedRedraws = 16;
   static constexpr double kMaxFloorDb = 40.0;
   static constexpr int kFootprintTries = 64;  ///< Enough for a footprint covering 10% of the bounds.
 
@@ -213,10 +227,18 @@ class ParticleFilter {
 
   void initialize_uniform();
   /// Uniform over the venue's walkable area (its footprint, else its bounds);
-  /// with `level` >= 0, over that level's footprint if it has one.
-  Vec2 sample_position(int level = -1);
-  /// A level index with probability proportional to its walkable area.
+  /// with `level` >= 0, over that level's footprint if it has one. Never in a
+  /// closed region of `open_level` (default: `level`, or 0 for none).
+  Vec2 sample_position(int level = -1, int open_level = -1);
+  /// A level index with probability proportional to its walkable area (closed regions left out).
   int sample_level_by_area();
+  /// Walkable area of `level` that a particle may be placed in: closed regions left out.
+  [[nodiscard]] double placeable_area(int level) const;
+  /// True if a particle may be placed at `p` on `level`: inside the venue (and the level's footprint)
+  /// and not in a closed region.
+  [[nodiscard]] bool placeable(Vec2 p, int level) const {
+    return venue_->inside(p, level) && (!reachable_ || reachable_->open(p, std::max(level, 0)));
+  }
   Particle sample_uniform_particle();
   /// Moves a particle standing in a connector to an adjacent level with probability `prob`.
   void maybe_change_level(Particle& p, double prob);
@@ -256,6 +278,7 @@ class ParticleFilter {
   std::vector<RssiReading> scan_;  ///< Readings of the current scan that passed the integrity check.
   BeaconIntegrityMonitor integrity_;
   std::optional<MapConsistentEstimate> map_estimate_;  ///< Engaged when `map_consistent_estimate` is on.
+  std::optional<ReachableArea> reachable_;             ///< Engaged when the venue has closed regions to avoid.
   double mean_rssi_offset_ = 0.0;
   double floor_db_ = 0.0;  ///< Loss per slab in the radio model (the venue's value until calibrated).
   [[nodiscard]] double expected_rssi(const Beacon& b, Vec2 pos, int level) const {
