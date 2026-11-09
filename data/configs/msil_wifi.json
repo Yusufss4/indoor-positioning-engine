@@ -6,5 +6,8 @@
     "num_particles": 5000,
     "init_proposal": true,
     "recovery_proposal": true
+  },
+  "smoothing": {
+    "max_correction_mps": 1.5
   }
 }

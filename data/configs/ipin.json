@@ -11,5 +11,8 @@
     "baro_offset_walk_m": 0.01,
     "floor_prior_weight": 3.0,
     "calibrate_floor_loss": true
+  },
+  "smoothing": {
+    "max_correction_mps": 1.5
   }
 }

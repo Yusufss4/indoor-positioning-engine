@@ -202,6 +202,11 @@ void ParticleFilter::initialize_uniform() {
 void ParticleFilter::on_step(const StepEvent& step) {
   now_ = step.t;
   const double heading_sigma = deg2rad(cfg_.heading_sigma_deg);
+  // The step's own motion: the weighted mean move of the particles that survive it, on the reported level
+  // (all of them if none there), by their weights before the step. What else the step does to the estimate
+  // (particles dying at walls, resampling) is a correction, not motion. Accumulated only; no draws.
+  Vec2 move_level{}, move_all{};
+  double w_level = 0.0, w_all = 0.0;
   for (auto& p : particles_) {
     if (p.weight <= 0.0) continue;
     p.heading = wrap_angle(p.heading + step.heading_delta + rng_.normal(0.0, heading_sigma));
@@ -213,9 +218,17 @@ void ParticleFilter::on_step(const StepEvent& step) {
       p.weight = 0.0;
       continue;
     }
+    const Vec2 move = (next - p.pos) * p.weight;
+    move_all += move;
+    w_all += p.weight;
+    if (p.level == estimate_.level) {
+      move_level += move;
+      w_level += p.weight;
+    }
     p.pos = next;
     if (multi_level_) maybe_change_level(p, cfg_.level_change_prob_step);
   }
+  step_motion_ = w_level > 0.0 ? move_level * (1.0 / w_level) : w_all > 0.0 ? move_all * (1.0 / w_all) : Vec2{};
   finish_update(step.t);
 }
 

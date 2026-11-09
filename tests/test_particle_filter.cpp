@@ -120,6 +120,40 @@ TEST(ParticleFilter, WallConstraintRemovesParticlesThatCrossWalls) {
   }
 }
 
+TEST(ParticleFilter, StepMotionIsTheMoveOfTheSurvivingParticles) {
+  const Venue v = test::two_room_venue();
+  ParticleFilter pf(v, test_config(), {});
+  feed_rssi(pf, v, {5.0, 5.0}, 60);
+  for (int i = 0; i < 10; ++i) pf.on_heading(0.1 * i, 0.0, 0.1);  // facing +x
+  StepEvent step;
+  step.t = 1.0;
+  step.length = 0.7;
+  // Expected: each particle's step at its own heading and step scale, before the motion noise.
+  Vec2 expected{};
+  for (const auto& p : pf.particles()) {
+    expected += Vec2{std::cos(p.heading), std::sin(p.heading)} * (p.weight * step.length * p.step_scale);
+  }
+  const Estimate before = pf.estimate();
+  pf.on_step(step);
+  EXPECT_LT(distance(pf.step_motion(), expected), 0.03);
+  // In open space nothing dies, so the estimate moves by about as much.
+  EXPECT_LT(distance(pf.estimate().pos - before.pos, pf.step_motion()), 0.05);
+}
+
+TEST(ParticleFilter, StepMotionLeavesOutTheParticlesAWallStopped) {
+  // Facing the wall at x = 10 from 2 m away with 2.5 m steps: the survivors are the ones that went
+  // through the door, so the motion is still about a step, unlike the estimate's change.
+  const Venue v = test::two_room_venue();
+  ParticleFilter pf(v, test_config(), {});
+  feed_rssi(pf, v, {8.0, 2.0}, 60);
+  for (int i = 0; i < 10; ++i) pf.on_heading(0.1 * i, 0.0, 0.1);
+  StepEvent step;
+  step.t = 1.0;
+  step.length = 1.0;
+  pf.on_step(step);
+  EXPECT_NEAR(std::sqrt(pf.step_motion().norm2()), 1.0, 0.2);
+}
+
 namespace {
 
 /// 20 x 10 m split by a solid wall at x = 10, with one beacon on the wall.

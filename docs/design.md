@@ -94,19 +94,30 @@ State per particle: position, heading, step-length scale, device RSSI offset.
 `PositioningEngine::estimate()` passes the filter's estimate through `TrackSmoother`
 (`EngineConfig::smoothing`); `raw_estimate()` is the filter's own. The filter recomputes its estimate after
 every packet, step and heading update, so drawn as-is it shakes (jitter p95 about 1 m on `office_nominal`)
-and on real Wi-Fi jumps several times a minute. The smoother:
+and on real Wi-Fi jumps several times a minute. The smoother separates what the walker did from what the
+filter learned (experiments 8 and 11):
 
-- moves the dot by the filter's own displacement for each step, immediately, so it does not lag the walker;
-- pulls it towards the filter's estimate after every other update with a 0.5 s time constant
-  (`smoothing.tau_s`), so radio noise is not drawn as motion;
-- jumps to the filter's estimate when that is more than 10 m away (`smoothing.snap_m`), when the reported
-  level changes, and whenever gliding would cross a wall or leave the walkable area, so it never slides
-  through a wall;
-- reports the filter's covariance taken about the drawn point, so `coverage95` stays honest.
+- **Steps.** A step moves the dot at once by the step's own motion, `ParticleFilter::step_motion()`: the
+  weighted mean move of the particles that survived it. Whatever else the step did to the estimate
+  (particles dying at walls, resampling) counts as a correction, and so does the magnetometer update after it.
+- **Between steps.** The dot keeps moving at the last step's pace (`smoothing.extrapolate_steps`, one step
+  interval). The motion is centred on the filter's estimate: half a step behind it at a step, half a step
+  ahead at the next. Radio holds the estimate on the walker's mean position over a step interval, so
+  running ahead of it would draw the dot half a step too far. If no step comes for
+  `smoothing.max_step_interval_s` (1.2 s), the walker has stopped and the offset is taken back.
+- **Corrections.** Every other change of the estimate is glided towards in continuous time: after `dt`, the
+  gap left is `exp(-dt / tau_s)` of what it was (`smoothing.tau_s` = 0.5 s). A correction is never drawn at
+  the instant it arrives, whether updates come every 40 ms (BLE) or every 2 s (a Wi-Fi scan).
+  `smoothing.max_correction_mps` caps the glide's speed; it is off by default and 1.5 m/s in the Wi-Fi
+  configs, where one scan can move the estimate several metres.
+- **Jumps.** The dot jumps to the filter's estimate when that is more than 10 m away (`smoothing.snap_m`)
+  and when the reported level changes. An estimate behind a wall is glided towards only as far as the wall.
+  If it is still behind the wall once the dot gets there, the dot jumps; often it has come back first (a
+  cloud split by a wall). The dot never slides through a wall.
+- **Covariance.** The filter's covariance is reported about the drawn point, so `coverage95` stays honest.
 
 Room events use the particles, not the drawn point, so they are unaffected. `smoothing.enabled = false`
-gives the filter's estimate bit for bit. `smoothing.extrapolate_steps` (off) keeps the dot moving at the
-last step's pace between steps; it overshoots where the walker stops or turns (experiment 8).
+gives the filter's estimate bit for bit.
 
 ## Floors
 

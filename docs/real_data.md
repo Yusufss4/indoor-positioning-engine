@@ -68,7 +68,10 @@ interpolated positions, after the usual 5 s warm-up.
 
 Median CEP50 / median CEP95 [m] over walks. "Wi-Fi config" is
 [`data/configs/msil_wifi.json`](../data/configs/msil_wifi.json): RSSI sigma 8 dB, 5,000 particles, and
-the beacon-driven init and recovery proposals from experiment 4 in [experiments.md](experiments.md).
+the beacon-driven init and recovery proposals from experiment 4 in [experiments.md](experiments.md). Since
+experiment 11 it also caps how fast the drawn dot absorbs a correction (1.5 m/s), which removes the jumps a
+scan used to draw. The tables on this page predate that cap and the smoother's rework; experiment 11 has
+the current tune-set numbers.
 
 | Config | Median CEP50 | Median CEP95 | Mean CEP50 | Mean CEP95 |
 |---|---:|---:|---:|---:|
