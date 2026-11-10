@@ -16,14 +16,28 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
     active_floor_rel, level_change_prob_step, level_change_prob_baro, baro_update_interval_s, baro_sigma_m,
     baro_outlier_prob, baro_offset_sigma_m, baro_offset_walk_m, level_smoothing_s, level_hysteresis,
     map_consistent_estimate, beacon_integrity, integrity_threshold_db, integrity_alpha, integrity_min_samples,
-    integrity_max_sigma_m)
+    integrity_max_sigma_m, floor_prior_weight, floor_prior_k, floor_prior_eps)
+
+namespace {
+
+/// `grid` with a negative floor_prior_weight replaced by the engine config's floor prior settings.
+GridFilterConfig resolve(GridFilterConfig grid, const EngineConfig& base) {
+  if (grid.floor_prior_weight < 0.0) {
+    grid.floor_prior_weight = base.pf.floor_prior_weight;
+    grid.floor_prior_k = base.pf.floor_prior_k;
+    grid.floor_prior_eps = base.pf.floor_prior_eps;
+  }
+  return grid;
+}
+
+}  // namespace
 
 GridEngine::GridEngine(const Venue& venue, std::shared_ptr<const GridMap> map, const EngineConfig& base,
                        const GridFilterConfig& grid)
     : venue_(&venue),
       cfg_(base),
       pdr_(base.pdr),
-      filter_(std::move(map), grid, base.rssi, base.baro),
+      filter_(std::move(map), resolve(grid, base), base.rssi, base.baro),
       smoother_(venue, base.smoothing) {
   if (&filter_.map().venue() != &venue) throw std::invalid_argument("GridEngine: the map is of another venue");
   if (!venue.rooms().empty()) {

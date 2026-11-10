@@ -12,6 +12,7 @@
 #include "ipe/baro.hpp"
 #include "ipe/beacon_integrity.hpp"
 #include "ipe/filter.hpp"
+#include "ipe/floor_classifier.hpp"
 #include "ipe/level_selector.hpp"
 #include "ipe/map_estimate.hpp"
 #include "ipe/particle.hpp"
@@ -83,6 +84,16 @@ struct GridFilterConfig {
   double integrity_alpha = 0.1;
   int integrity_min_samples = 8;
   double integrity_max_sigma_m = 3.0;
+
+  /// Floor prior from the k-NN classifier over the venue's Wi-Fi floor fingerprints, applied per scan as
+  /// `floor_prior_weight * log p(level)` on every cell, as pf.floor_prior_weight does per particle. The radio
+  /// model's 2-4 dB per slab barely separates floors, and the barometer only reports changes, so without it
+  /// nothing rejects mass that has walked the same path one floor up. 0 (or a venue without fingerprints)
+  /// turns it off. Negative: GridEngine takes pf.floor_prior_weight, _k and _eps from the engine config, so
+  /// `--config ipin.json` turns it on for both filters; a GridFilter on its own treats it as 0.
+  double floor_prior_weight = -1.0;
+  int floor_prior_k = 5;
+  double floor_prior_eps = 0.1;
 };
 
 /// The venue as a lattice of cells, built once and shared read-only by every GridFilter on that venue.
@@ -124,6 +135,13 @@ class GridMap {
   /// Lattice column / row holding x / y (may be off the lattice).
   [[nodiscard]] int lattice_x(double x) const { return static_cast<int>(std::floor((x - origin_.x) / cell_m_)); }
   [[nodiscard]] int lattice_y(double y) const { return static_cast<int>(std::floor((y - origin_.y) / cell_m_)); }
+  /// Lattice columns.
+  [[nodiscard]] int lattice_nx() const { return nx_; }
+  /// Cell index per lattice point of `level`, row by row (lattice_nx() per row), -1 where there is no cell.
+  [[nodiscard]] const std::int32_t* lattice_index(int level) const {
+    return index_.data() +
+           static_cast<std::size_t>(level) * static_cast<std::size_t>(nx_) * static_cast<std::size_t>(ny_);
+  }
   /// Cell containing `p` on `level`, or -1.
   [[nodiscard]] std::int32_t locate(Vec2 p, int level) const { return at(level, lattice_x(p.x), lattice_y(p.y)); }
   /// Bit index of lattice offset (dx, dy), both within radius().
@@ -246,14 +264,19 @@ class GridFilter {
   // Scratch for the step.
   std::vector<float> h_next_;
   std::vector<std::uint8_t> touched_;  ///< Cells some active mass moved into during the current step.
-  std::vector<double> acc_mass_, acc_x_, acc_y_, acc_d1_, acc_d2_, acc_b1_, acc_b2_;
+  /// What a step moves into a cell: mass, mass times centroid, and mass times the offsets' first and second
+  /// moments, side by side (64 bytes per cell) rather than in seven arrays.
+  struct StepAcc {
+    double mass, x, y, d1, d2, b1, b2, unused;
+  };
+  std::vector<StepAcc> acc_;
   std::vector<double> move_x_, move_y_;     ///< Per (scale, heading, node): the move of the current step [m].
+  std::vector<int> move_offset_;            ///< The same move's lattice offset from the cell being moved, or -1.
   std::vector<std::int32_t> local_target_;  ///< Per lattice offset: target cell of the cell being moved, or -1.
   std::vector<double> local_w_, local_x_, local_y_;
-  std::vector<std::uint16_t> used_;  ///< Offsets with a target, for the cell being moved.
-  std::vector<double> row_lik_;      ///< Magnetometer likelihood per (scale, heading).
-  std::vector<double> bin_lik_;      ///< Per heading bin: magnetometer likelihood, or the cloud's heading histogram.
-  std::vector<double> row_;          ///< One cell's (scale, heading) row in double precision.
+  std::vector<double> row_lik_;  ///< Magnetometer likelihood per (scale, heading).
+  std::vector<double> bin_lik_;  ///< Per heading bin: magnetometer likelihood, or the cloud's heading histogram.
+  std::vector<double> row_;      ///< One cell's (scale, heading) row in double precision.
   std::vector<RssiReading> scan_;
   std::vector<double> level_weight_;
   std::vector<Particle> points_;  ///< Cells as particles for MapConsistentEstimate.
@@ -262,6 +285,9 @@ class GridFilter {
   std::vector<float> conn_h_;
 
   BeaconIntegrityMonitor integrity_;
+  FloorClassifier floor_classifier_;
+  std::vector<double> floor_p_;      ///< Level probabilities of the scan being applied.
+  bool floor_prior_active_ = false;  ///< Set while update_rssi applies a classified scan.
   LevelSelector level_selector_;
   std::optional<MapConsistentEstimate> map_estimate_;
   BaroAltimeter altimeter_;

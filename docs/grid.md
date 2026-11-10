@@ -3,7 +3,8 @@
 The engine finds the position with a particle filter. `grid/` is a different way to do it: a Bayes filter
 on a grid of map cells that holds the whole posterior. It has no random particles at all. It is a
 prototype next to the particle filter, not part of the engine:
-- `PositioningEngine`, the web demo and the baselines do not use it;
+- `PositioningEngine` and the baselines do not use it; the web demo runs it next to the particle filter
+  (the "grid" checkbox), in a Web Worker;
 - `ipe-grid` runs it and compares it with the particle filter on the same traces.
 
 The results are experiment 14 in [experiments.md](experiments.md). In short:
@@ -11,8 +12,9 @@ The results are experiment 14 in [experiments.md](experiments.md). In short:
   half the jitter and fewer jumps. The two-floor walks converge in 1–2 s.
 - **Real walks:** better median CEP50 on MSIL, IPIN and UJI, and a much lower IPIN score. UJI's tune
   CEP95 is 2% worse.
-- **Costs:** a covariance that is too tight, 3–25× the compute on the simulated venues, and about real
-  time on a mall floor.
+- **Costs:** a covariance that is too tight, and compute. At the time the grid took 3–25× the particle
+  filter's compute on the simulated venues and about real time on a mall floor. After the exact speed-ups
+  under [Cost](#cost) it takes 2–20× the compute and about half of real time.
 
 ```bash
 # one trace, metrics as JSON (the flags of ipe-replay)
@@ -57,9 +59,12 @@ Built once per venue and shared read-only by every run on it (`ipe-grid compare`
 - **Moves.** Each cell has one bit per lattice offset within `max_reach_m` (2 m, 4 cells): set when the
   segment between the two centres crosses no wall and the target cell exists. A step's wall test is one
   bit.
-- **Radio.** The walls between each cell's centre and each beacon are counted with
-  `Venue::count_wall_crossings`, the first time the beacon is heard (thread-safe). This is cheap on every
-  map except the shop-wall mall floors, where it takes about a second per beacon.
+- **Radio.** The walls between each cell's centre and each beacon are counted the first time the beacon is
+  heard (thread-safe), with exactly the result of `Venue::count_wall_crossings`. Testing every wall against
+  every cell took about a second per beacon on the shop-wall mall floors. Instead, each wall's shadow seen
+  from the beacon (the wedge behind it) is filled in lattice row by lattice row. Only the cells within
+  10 µm of a shadow's edge get the segment test. This takes 1–5 ms per beacon on IPIN, KIT and site1_F2,
+  and 10 ms on site2_F6 (1,217 walls): 25–100× faster.
 - **Floors and rooms.** Cells inside a connector link to the cell at the same place on the levels next to
   it. Each cell lists the rooms its centre is in.
 
@@ -107,6 +112,35 @@ They use the particle filter's models and, where a setting has a counterpart, it
   A scan applies its readings one after another and renormalises once. The readings of one scan share
   the device offset, so they are not counted as fully independent of each other. Readings first pass the
   same `BeaconIntegrityMonitor` as in the particle filter, judged at the cloud estimate.
+- **Floor prior.** On venues with Wi-Fi floor fingerprints (the IPIN buildings), each scan also adds
+  `floor_prior_weight · log p(level)` to every cell, with p from the particle filter's k-NN
+  `FloorClassifier` ([ipin.md](ipin.md#floor-model)). By default the grid takes `pf.floor_prior_*` from
+  the engine config, so `--config ipin.json` turns it on for both filters; `--grid-set
+  '{"floor_prior_weight":0}'` turns it off. Without it, nothing rejects mass that walks the same path one
+  floor up: the radio model's 2–4 dB per slab barely separates floors, and every level's barometer offset
+  was fitted to it at the first reading. On the Nuremberg demo walk the grid spent 84% of 10–60 s on
+  Floor 0 while the walker stayed on Floor -2 (0% with the prior). Tune walks, `ipin.json`, prior off →
+  on (median CEP50 / CEP95, floor hit, p75):
+  - Nuremberg, 4 walks: 5.90 / 19.80 m, 91%, 10.20 m → 5.73 / 17.50 m, 95%, 8.07 m;
+  - UMinho, 23 walks: 8.75 / 27.22 m, 40%, 32.36 m → 8.03 / 23.64 m, 82%, 18.68 m.
+
+  Floor hit rises or holds on all 27 walks; p75 is better on 22 and worse on 5 (by 0.9–4.1 m). The
+  scoring walks, replayed once with these settings, carry the gain over in part, as they did for the
+  particle filter:
+  - UMinho, 2 walks: floor hit 56% → 84%, p75 32.19 → 25.02 m, CEP95 39.65 → 36.01 m (both walks better);
+  - Nuremberg, 4 walks (25–35 min against the tune walks' 8–12): median floor hit 81% → 83%, p75 18.56 →
+    17.99 m, but CEP95 30.39 → 55.06 m. Two walks improve (p75 34.9 → 13.7 and 16.9 → 12.2 m); two get
+    worse (p75 18.1 → 35.4 and 19.1 → 22.3 m, CEP95 32 → 79 and 29 → 100 m).
+
+  What is left is the stairs. Mass changes level only inside a connector, and dead reckoning can carry it
+  out of a small stairwell before the barometer has seen half the climb: the mass moved up too early is
+  rejected, the rest is stranded on the old floor. The grid then reaches the new floor through recovery
+  mass, whose barometer offset is fitted to its own level and so matches the reading on any floor. On the
+  Nuremberg demo walk that takes until 248 s for a climb at 240–256 s, and the floor prior pulls the grid
+  back to the old floor for 252–264 s, where the classifier is unsure near the stairs. Giving recovery mass
+  the distribution's barometer reference instead (as `pf.baro_reseed_keep_reference`) closes that route:
+  on the tune walks Nuremberg's floor hit fell from 95% to 77% and its p75 rose from 8.07 to 25.34 m. The
+  fix would be a barometer jump like `pf.baro_jump`.
 - **Barometer.** Every 0.5 s, the particle filter's mixture likelihood and an assumed-density update of
   the offset, with a 0.05 m random walk. The first sample sets each cell's offset from its own level, and
   lift rides move 10% of each connector cell's mass to the next level, as in the particle filter.
@@ -137,4 +171,36 @@ They use the particle filter's models and, where a setting has a counterpart, it
 Per step and per magnetometer update: O(cells × heading bins × scales). Per radio reading: O(cells).
 Memory is about 8 bytes per (cell, heading bin, scale) plus about 120 bytes per cell. A 960 m² office has
 3,840 cells; the KIT building, 60,351 cells on 7 floors; a mall floor, up to 200,000. Experiment 14 has the
-timings.
+timings of the first version.
+
+Two later speed-ups leave every result unchanged to the byte. That was checked on the per-sample
+estimates, tracks, room events and cell snapshots of the 12 scenarios, three mall walks and an IPIN walk,
+and on runs with an active floor and step-scale states.
+- **Wall counts**, by filling each wall's shadow (see [the map](#the-map-gridmap)), per beacon:
+  - site1_F2: 467 → 4.8 ms;
+  - site2_F6: 957 → 10 ms;
+  - KIT: 46 → 4 ms;
+  - IPIN Nuremberg: 39 → 1.4 ms.
+- **The step loop** works on local copies of the members' pointers and of the cell's lattice position and
+  mask, and keeps the running sums of the current target in registers (byte stores into the arrays forced
+  the compiler to reload them on every move). A target cell's seven accumulators sit side by side, and the
+  lattice offsets of all moves come from a separate loop that the compiler vectorises. A step on site1_F2
+  (136,491 cells) went from 178 to 116 ms. Compute per update fell 1.25–1.6× on the 12 scenarios.
+
+Replay on one desktop core (Ryzen 7 5800H) with `msil_wifi.json`:
+
+| Walk | Cells | APs heard | Before | After |
+|---|---:|---:|---:|---:|
+| site1_F2, 160 s | 136,491 | 148 | 145 s | 65 s |
+| site2_F1, 217 s | 159,278 | 526 | 366 s | 121 s |
+| site2_F6, 69 s | 155,276 | 211 | 213 s | 35 s |
+
+The web demo runs both filters in one Web Worker. Timed in Node, in WebAssembly, the demo recordings take
+this share of their duration:
+- site1 floors: 0.47–0.63 (site1_F2 was 1.33);
+- site2 floors: 0.86–1.27 (site2_F6 was 4.5);
+- IPIN: 0.09–0.2.
+
+The particle filter is about a quarter of that (0.26 on site2_F6). On a mall floor, what remains is about
+half the step loop. Most of the rest is the radio update: `log10`, `exp` and `log` for every (cell,
+reading). It is a third of the time in WebAssembly, where those functions are slower than natively.

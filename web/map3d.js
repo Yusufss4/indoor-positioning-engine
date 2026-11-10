@@ -18,6 +18,9 @@ const MAPLIBRE = {
 
 const LEVEL_COLORS = ["#4c78a8", "#f58518", "#54a24b", "#b279a2", "#9d755d", "#e45756"];
 const MAX_PARTICLES_3D = 1200;
+const MAX_CELLS_3D = 1000; // grid filter cells, heaviest first
+const GRID_RGB = [44, 160, 44];
+const PAPER_RGB = [251, 252, 254];
 
 let maplibrePromise = null;
 
@@ -76,6 +79,19 @@ function ring(frame, cx, cy, r, n) {
   return { type: "Polygon", coordinates: [pts] };
 }
 
+/// Axis-aligned square of half-side h around (cx, cy).
+function square(frame, cx, cy, h) {
+  const pts = [[cx - h, cy - h], [cx + h, cy - h], [cx + h, cy + h], [cx - h, cy + h], [cx - h, cy - h]];
+  return { type: "Polygon", coordinates: [pts.map(([x, y]) => frame.toLngLat(x, y))] };
+}
+
+/// Grid cell colour for relative mass m in [0, 1]: from pale to the grid filter's green.
+function cellColor(m) {
+  const a = 0.3 + 0.7 * Math.sqrt(m);
+  const c = PAPER_RGB.map((p, i) => Math.round(p + (GRID_RGB[i] - p) * a));
+  return `rgb(${c[0]}, ${c[1]}, ${c[2]})`;
+}
+
 /// `props` carries what a click on the feature reports: {kind, id, level}.
 function extruded(geometry, base, top, color, props = {}) {
   return { type: "Feature", geometry, properties: { base, top, color, ...props } };
@@ -99,7 +115,7 @@ function ribbon(frame, pts, width) {
 }
 
 // Click targets in the order a click prefers them when several overlap.
-const PICK_RANK = { beacon: 0, truth: 1, pf: 1, connector: 2, room: 3, level: 4 };
+const PICK_RANK = { beacon: 0, truth: 1, pf: 1, grid: 1, connector: 2, room: 3, level: 4 };
 
 const EMPTY = { type: "FeatureCollection", features: [] };
 
@@ -311,9 +327,10 @@ class Map3D {
     if (this.map) this.map.resize();
   }
 
-  /// frame: {truth, estimates: [{name, color, e}], particles: Float32Array (x, y, w, level), rooms: [room id],
-  /// focusLevel, trailKey, trails: () => [{color, width, runs: [{level, pts: [[x, y]]}]}]}; trails() is only
-  /// called when trailKey changes.
+  /// frame: {truth, estimates: [{name, color, e}], particles: Float32Array (x, y, w, level),
+  /// cells: Float32Array (x, y, relative mass, level) of the grid filter, heaviest first, cellSize,
+  /// rooms: [{id, color, stack}], focusLevel, trailKey, trails: () => [{color, width, runs: [{level, pts: [[x, y]]}]}]};
+  /// trails() is only called when trailKey changes.
   update(frame, force = false) {
     if (!this.map || !this.levels.length) return;
     const now = performance.now();
@@ -325,12 +342,14 @@ class Map3D {
       this.applyFocus();
     }
 
-    const roomKey = (frame.rooms || []).join("\n");
+    // One slab per filter in the room, stacked so that two filters in the same room do not z-fight.
+    const roomKey = (frame.rooms || []).map((r) => `${r.id}|${r.color}`).join("\n");
     if (roomKey !== this.activeRooms) {
       this.activeRooms = roomKey;
-      const fs = (frame.rooms || []).map((id) => this.spaceById.get(id)).filter(Boolean)
-        .map((s) => extruded(s.geometry, this.z(s.level, 0.02), this.z(s.level, 0.08), "#d62728",
-                             { kind: "room", id: s.id, level: s.level }));
+      const fs = (frame.rooms || []).map((r) => [this.spaceById.get(r.id), r]).filter(([s]) => s)
+        .map(([s, r]) => extruded(s.geometry, this.z(s.level, 0.02 + 0.07 * (r.stack || 0)),
+                                  this.z(s.level, 0.08 + 0.07 * (r.stack || 0)), r.color,
+                                  { kind: "room", id: s.id, level: s.level }));
       this.map.getSource("rooms").setData({ type: "FeatureCollection", features: fs });
     }
 
@@ -370,6 +389,17 @@ class Map3D {
         const [x, y, level] = [p[4 * k], p[4 * k + 1], p[4 * k + 3]];
         parts.push(extruded(ring(this.frame, x, y, 0.09, 4), this.z(level, 0.05), this.z(level, 0.12),
                             LEVEL_COLORS[level % LEVEL_COLORS.length]));
+      }
+    }
+    // The grid filter's posterior as a histogram: one bar per heavy cell, its height and colour by mass.
+    const c = frame.cells;
+    if (c && c.length) {
+      const h = Math.max(0.1, (frame.cellSize || 0.5) / 2);
+      const n = Math.min(c.length / 4, MAX_CELLS_3D);
+      for (let k = 0; k < n; ++k) {
+        const [x, y, m, level] = [c[4 * k], c[4 * k + 1], c[4 * k + 2], c[4 * k + 3]];
+        parts.push(extruded(square(this.frame, x, y, h), this.z(level, 0.04), this.z(level, 0.06 + 1.2 * m),
+                            cellColor(m)));
       }
     }
 

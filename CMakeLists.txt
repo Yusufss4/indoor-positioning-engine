@@ -50,11 +50,13 @@ add_subdirectory(core)
 add_subdirectory(sim)
 add_subdirectory(eval)
 
-# Map import/export, beacon planning and the grid filter prototype are native tooling; the wasm demo reads
-# venue JSON directly and runs the particle filter only.
+# Map import/export and beacon planning are native tooling; the wasm demo reads venue JSON directly. The grid
+# filter prototype also runs in the demo, next to the particle filter.
 if(IPE_BUILD_TOOLS OR IPE_BUILD_TESTS)
   add_subdirectory(geo)
   add_subdirectory(plan)
+endif()
+if(IPE_BUILD_TOOLS OR IPE_BUILD_TESTS OR IPE_BUILD_WASM)
   add_subdirectory(grid)
 endif()
 
