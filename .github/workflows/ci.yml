@@ -78,7 +78,8 @@ jobs:
           path: build-wasm/site
 
   pages:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # Also on a manual run (workflow_dispatch) of main, to redeploy without a new commit.
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     needs: [wasm, build-test]
     runs-on: ubuntu-24.04
     permissions:
