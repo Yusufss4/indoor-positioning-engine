@@ -266,7 +266,7 @@ The scenario menu of the [live demo](https://yusufss4.github.io/indoor-positioni
 "Real recordings" group (the demo itself opens on `kit_tour`; `default` in `demos.json` is not used).
 It holds the longest held-out walk on every floor where that walk lasts at least 60 s (10 of the 14 floors; the other
 four have no held-out walk longer than 47 s), copied to `data/real/` by `datasets/msil/export_demo.py`.
-The demo replays the recorded IMU and Wi-Fi through the particle filter with the Wi-Fi config. Its venues come from `convert.py --walls doors`, so the shop walls of the floor plan are
+The demo replays the recorded IMU and Wi-Fi through the grid filter ([grid.md](grid.md)) with the Wi-Fi config. Its venues come from `convert.py --walls doors`, so the shop walls of the floor plan are
 real walls in the demo, with the doorways [inferred from training walks](#shop-walls-with-doorways).
 That is a choice for the demo, not the best-scoring map. Shop walls also leave rooms that no training walk
 entered without a door. Until experiment 13 the filter still placed particles in them, and one Wi-Fi scan

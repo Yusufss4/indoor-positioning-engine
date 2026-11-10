@@ -1,10 +1,10 @@
 "use strict";
 
 const COLORS = {
-  truth: "#222", pf: "#d62728", grid: "#2ca02c", beacon: "#7f3fbf",
+  truth: "#222", grid: "#2ca02c", beacon: "#7f3fbf",
   wall: "rgba(29, 78, 137, 0.45)", ink: "#1d4e89", paper: "#fbfcfe",
 };
-const FILTER_TITLES = { pf: "Particle filter", grid: "Grid filter" };
+const FILTER_TITLES = { grid: "Grid filter" };
 const LABEL_FONT = '500 11px "Barlow Condensed", "Arial Narrow", sans-serif';
 const FRAME_DT = 0.05; // simulated seconds per recorded frame (as in worker.js)
 const TRAIL_START_S = 3;
@@ -29,7 +29,7 @@ const canvas = el("map");
 const ctx = canvas.getContext("2d");
 
 // The engine runs in a Web Worker (worker.js) and streams its frames here. run: {worker, duration, finished,
-// filters (["pf"] or ["pf", "grid"]), cellSize, cellCount}; null while a run starts.
+// filters (["grid"]), cellSize, cellCount}; null while a run starts.
 let run = null;
 let startSeq = 0; // the newest start() call; older ones stop at their next await
 let venue = null;
@@ -156,7 +156,7 @@ async function loadRecording(entry) {
     `${entry.title} with a real Android phone (IMU + Wi-Fi), held out from fitting and tuning. Squares are ` +
     `the surveyor's waypoints, the only ground truth; the black path is interpolated between them, and the ` +
     `live error is measured against it. Purple dots are Wi-Fi access points located from other walks. The ` +
-    `particle filter uses data/configs/msil_wifi.json.`;
+    `engine config is data/configs/msil_wifi.json.`;
   return { venue: venueText, trace: traceText, config: configText };
 }
 
@@ -164,7 +164,7 @@ async function loadRecording(entry) {
 function startRun(job) {
   return new Promise((resolve, reject) => {
     const worker = new Worker("worker.js");
-    const r = { worker, duration: 0, finished: false, filters: ["pf"], cellSize: 0, cellCount: 0 };
+    const r = { worker, duration: 0, finished: false, filters: ["grid"], cellSize: 0, cellCount: 0 };
     run = r;
     const fail = (message) => {
       if (run !== r) return;
@@ -200,8 +200,7 @@ async function start() {
   real = name.startsWith("real:") ? realDemos.get(name.slice(5)) : null;
   const job = real ? await loadRecording(real) : await loadSimulated(name);
   if (seq !== startSeq) return;
-  job.grid = el("show-grid").checked;
-  el("clock").textContent = job.grid ? "starting the particle filter and the grid filter..." : "starting...";
+  el("clock").textContent = "starting the grid filter...";
   closeInfo();
   roomLog = [];
   lastFix = {};
@@ -224,8 +223,8 @@ async function start() {
 }
 
 /// Appends a batch of frames from the worker to `recorded`: {t, steps, truth, est: {filter: estimate},
-/// rooms: {truth, filter: [room index]}, ble: [{id, rssi}], particles, cells}. The cloud snapshots come at
-/// 5 Hz; a frame without one keeps the previous frame's.
+/// rooms: {truth, filter: [room index]}, ble: [{id, rssi}], cells}. The cell snapshots come at 5 Hz; a frame
+/// without one keeps the previous frame's.
 function addFrames({ frames, events }) {
   for (const fr of frames) {
     for (const f of run.filters) {
@@ -236,7 +235,6 @@ function addFrames({ frames, events }) {
       if (e.valid) lastFix[f] = e;
     }
     const prev = recorded[recorded.length - 1];
-    if (!fr.particles) fr.particles = prev ? prev.particles : new Float32Array(0);
     if (!fr.cells) fr.cells = prev ? prev.cells : null;
     recorded.push(fr);
   }
@@ -377,15 +375,11 @@ function drawGrid(T) {
   ctx.fillText(`GRID ${metres} M`, 8, canvas.height - 8);
 }
 
-/// Room outlines on `level`: a faint fill, each shown filter's current rooms tinted in its colour (red for the
-/// particle filter, green for the grid filter), the true ones outlined, and a name wherever it fits inside the
-/// room's on-screen box.
+/// Room outlines on `level`: a faint fill, the grid filter's current rooms tinted green, the true ones outlined,
+/// and a name wherever it fits inside the room's on-screen box.
 function drawRooms(T, level, fr) {
   if (!venue.rooms.length) return;
-  const shown = visibleFilters();
-  const roomsOf = (f) => new Set(shown.includes(f) ? fr.rooms[f] : []);
-  const pfIn = roomsOf("pf");
-  const gridIn = roomsOf("grid");
+  const gridIn = new Set(visibleFilters().includes("grid") ? fr.rooms.grid : []);
   const truthIn = new Set(fr.rooms.truth);
   ctx.font = LABEL_FONT;
   venue.rooms.forEach((r, i) => {
@@ -393,12 +387,8 @@ function drawRooms(T, level, fr) {
     ctx.beginPath();
     r.area.forEach(([x, y], k) => (k ? ctx.lineTo(T.toX(x), T.toY(y)) : ctx.moveTo(T.toX(x), T.toY(y))));
     ctx.closePath();
-    ctx.fillStyle = pfIn.has(i) ? "rgba(214, 39, 40, 0.14)" : "rgba(29, 78, 137, 0.035)";
+    ctx.fillStyle = gridIn.has(i) ? "rgba(44, 160, 44, 0.16)" : "rgba(29, 78, 137, 0.035)";
     ctx.fill();
-    if (gridIn.has(i)) {
-      ctx.fillStyle = "rgba(44, 160, 44, 0.16)";
-      ctx.fill();
-    }
     if (truthIn.has(i)) {
       ctx.strokeStyle = "rgba(34, 34, 34, 0.55)";
       ctx.lineWidth = 1.5;
@@ -536,26 +526,17 @@ function draw(level, idx) {
   }
 
   const shown = visibleFilters();
-  if (el("show-particles").checked) {
-    // The grid filter's heaviest cells as squares, darker with more mass.
-    const c = shown.includes("grid") ? fr.cells : null;
-    if (c) {
-      const h = Math.max(2, run.cellSize * T.s);
-      ctx.fillStyle = COLORS.grid;
-      for (let k = 0; k < c.length; k += 4) {
-        if (c[k + 3] !== level) continue;
-        ctx.globalAlpha = 0.06 + 0.5 * Math.sqrt(c[k + 2]);
-        ctx.fillRect(T.toX(c[k]) - h / 2, T.toY(c[k + 1]) - h / 2, h, h);
-      }
-      ctx.globalAlpha = 1;
+  // The grid filter's heaviest cells as squares, darker with more mass.
+  const c = el("show-cells").checked ? fr.cells : null;
+  if (c) {
+    const h = Math.max(2, run.cellSize * T.s);
+    ctx.fillStyle = COLORS.grid;
+    for (let k = 0; k < c.length; k += 4) {
+      if (c[k + 3] !== level) continue;
+      ctx.globalAlpha = 0.06 + 0.5 * Math.sqrt(c[k + 2]);
+      ctx.fillRect(T.toX(c[k]) - h / 2, T.toY(c[k + 1]) - h / 2, h, h);
     }
-    if (shown.includes("pf")) {
-      const p = fr.particles;
-      ctx.fillStyle = "rgba(214, 39, 40, 0.25)";
-      for (let k = 0; k < p.length; k += 4) {
-        if (p[k + 3] === level) ctx.fillRect(T.toX(p[k]) - 1, T.toY(p[k + 1]) - 1, 2, 2);
-      }
-    }
+    ctx.globalAlpha = 1;
   }
 
   const trails = el("show-trails").checked;
@@ -640,8 +621,7 @@ function currentFrame(fr, level, idx) {
         runs: trailRuns(idx, (h) => (h.t > TRAIL_START_S && h.est[f].valid ? h.est[f] : null)),
       })),
     ],
-    particles: el("show-particles").checked && filters.includes("pf") ? fr.particles : null,
-    cells: el("show-particles").checked && filters.includes("grid") ? fr.cells : null,
+    cells: el("show-cells").checked ? fr.cells : null,
     cellSize: run.cellSize,
     rooms: filters.flatMap((f, stack) => fr.rooms[f].map((i) => ({ id: venue.rooms[i].id, color: COLORS[f], stack }))),
     focusLevel: level,
@@ -798,8 +778,6 @@ document.addEventListener("keydown", (ev) => {
 document.addEventListener("keyup", (ev) => handledKey(ev) && ev.preventDefault());
 
 el("restart").addEventListener("click", start);
-// The grid filter is only computed when it is shown, so switching it restarts the run.
-el("show-grid").addEventListener("change", start);
 el("scenario").addEventListener("change", () => {
   zoom = { k: 1, x: 0, y: 0 };
   start();

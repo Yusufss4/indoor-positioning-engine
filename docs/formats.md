@@ -92,7 +92,7 @@ Instead of top-level `walls`, a multi-floor venue has `levels`, and may add `con
 |---|---|---|
 | top | `venue` | Venue file, relative to the scenario file |
 | top | `seed` | Default simulation seed |
-| top | `demo_config` | Optional particle-filter config patch the web demo applies, relative to the scenario file. `ipe-regress` ignores it and uses the default config |
+| top | `demo_config` | Optional engine config patch the web demo applies, relative to the scenario file. The demo's grid filter takes its PDR, RSSI, smoothing, room and floor prior settings from it. `ipe-regress` ignores it and uses the default config |
 | `walk` | `waypoints` | Polyline followed by a pure-pursuit walker: `[x, y]` or `[x, y, level_ordinal]` |
 | `walk` | `step_frequency_hz`, `step_length_m`, `step_length_sigma`, `turn_rate_deg_s` | Gait |
 | `walk` | `stairs_speed_factor` | Horizontal speed on stairs relative to walking (0.6) |

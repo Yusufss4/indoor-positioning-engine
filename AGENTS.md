@@ -21,7 +21,7 @@ truth; a replay tool and a regression suite measure accuracy.
  scores against simulated CEP on thinned layouts.
 - `grid/` - a grid Bayes filter prototype (`ipe_grid`, [docs/grid.md](docs/grid.md)): the posterior on a lattice of
   map cells instead of particles, with `GridEngine` running it through the engine's PDR, smoother and room events.
-  The engine and the baselines do not use it; the web demo runs it next to the particle filter (`web/worker.js`).
+  The engine and the baselines do not use it; the web demo runs it instead of the particle filter (`web/worker.js`).
   Its floor prior follows the engine config's `pf.floor_prior_*` unless `--grid-set` overrides it. `ipe-grid
   compare` replays the same traces through `pf` and the grid filter (eval's `BenchmarkOptions::estimators`).
 - `tools/` - `ipe-sim`, `ipe-replay`, `ipe-regress`, `ipe-import`, `ipe-plan`, `ipe-grid`.

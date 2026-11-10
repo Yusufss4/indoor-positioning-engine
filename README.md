@@ -145,7 +145,7 @@ particles only inside it. With the beacon-driven start every run converges (CEP5
 1.7-7.0 m). Before the footprint, particles were drawn anywhere in the bounds. Then 3 of 10 runs locked
 onto a spot up to 61 m away, outside the building, and the outline walls kept them there: CEP50 2.68 m and
 CEP95 14.60 m, and the default PF reached 2.94 / 29.16 m. The synthetic venues fill their bounds and have
-no footprint, so their results are bit-identical. The web demo plays this walk with the open-venue config.
+no footprint, so their results are bit-identical.
 
 <details>
 <summary>Tracks and error CDF on office_nominal</summary>
@@ -198,21 +198,24 @@ menu. Trails show only that floor, estimates on another floor are drawn as dashe
 table adds a floor column for two-floor scenarios. The "Real recordings" scenarios replay phone walks from
 two shopping malls instead of simulating one, over the mall's floor plan, with its shop walls and the
 surveyor's waypoints as squares. `kit_tour` simulates a walk through a real seven-floor university
-building imported from OpenStreetMap; the demo opens on it, in the 3D view. Rooms are drawn on the plan
-with the particle filter's current rooms tinted red and the true room outlined; the Rooms panel lists
-the filter's current rooms and a log of Enter/Exit events, the walker's true events included. The 3D
-view highlights the particle filter's current rooms.
+building imported from OpenStreetMap; the demo opens on it, in the 3D view. The demo runs the
+[grid filter](docs/grid.md), not the particle filter: the estimate is a green dot, and the most probable
+cells are green squares, darker with more probability. Rooms are drawn on the plan with the filter's
+current rooms tinted green and the true room outlined; the Rooms panel lists the filter's current rooms
+and a log of Enter/Exit events, the walker's true events included. The 3D view highlights the filter's
+current rooms.
 
 The **3D** button switches to a MapLibre GL view of the venue: walls extruded per floor, translucent slabs,
-stair and lift shafts, the walker, the estimate with its uncertainty, and the particles coloured
-by floor. The estimated floor is drawn opaque, floors above it nearly vanish, and "Exploded" pulls the
+stair and lift shafts, the walker, the estimate with its uncertainty, and the grid filter's cells as
+bars, taller with more probability. The estimated floor is drawn opaque, floors above it nearly vanish, and "Exploded" pulls the
 floors apart. MapLibre loads from a CDN on first use with a blank style (no tile keys); an OpenStreetMap
 underlay is optional.
 
 ![kit_tour in 3D: up the west stairwell, then down the north lift](docs/img/demo_3d.gif)
 
-`kit_tour` in 3D: the walker (black) climbs the west stairwell from L1 to L2, then rides the north lift
-down to L0. The floor the walker is on turns opaque, and the particles follow it up and down.
+`kit_tour` in 3D, recorded when the demo still ran the particle filter: the walker (black) climbs the west
+stairwell from L1 to L2, then rides the north lift down to L0. The floor the walker is on turns opaque, and
+the particles follow it up and down.
 
 A timeline under the map works in both views: drag it to any moment, play forwards or in reverse, or step
 frame by frame (Space, the arrow keys and J/K/L do the same). The page keeps every frame the engine has

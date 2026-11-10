@@ -6,7 +6,7 @@
 //
 // Input is the GeoJSON written by `ipe-import export` (data/geojson/*.geojson):
 // walls are thin polygons extruded per floor, levels become slabs, connectors
-// become shafts and spaces (rooms) are tinted on their floor. Everything dynamic (dots, uncertainty, particles) is drawn as
+// become shafts and spaces (rooms) are tinted on their floor. Everything dynamic (dots, uncertainty, grid cells) is drawn as
 // small extruded polygons because circle layers cannot be lifted off the ground.
 
 const MAPLIBRE = {
@@ -16,8 +16,6 @@ const MAPLIBRE = {
   cssIntegrity: "sha384-MinO0mNliZ3vwppuPOUnGa+iq619pfMhLVUXfC4LHwSCvF9H+6P/KO4Q7qBOYV5V",
 };
 
-const LEVEL_COLORS = ["#4c78a8", "#f58518", "#54a24b", "#b279a2", "#9d755d", "#e45756"];
-const MAX_PARTICLES_3D = 1200;
 const MAX_CELLS_3D = 1000; // grid filter cells, heaviest first
 const GRID_RGB = [44, 160, 44];
 const PAPER_RGB = [251, 252, 254];
@@ -115,7 +113,7 @@ function ribbon(frame, pts, width) {
 }
 
 // Click targets in the order a click prefers them when several overlap.
-const PICK_RANK = { beacon: 0, truth: 1, pf: 1, grid: 1, connector: 2, room: 3, level: 4 };
+const PICK_RANK = { beacon: 0, truth: 1, grid: 1, connector: 2, room: 3, level: 4 };
 
 const EMPTY = { type: "FeatureCollection", features: [] };
 
@@ -237,7 +235,7 @@ class Map3D {
     // everything behind it: the live layers go first and the building is blended over them.
     add("dots", 1.0);
     add("trails", 1.0);
-    add("particles", 0.7);
+    add("cells", 0.7);
     add("uncertainty", 0.25);
     add("rooms", 0.3);
     // fill-extrusion-opacity is per layer, hence one layer per floor.
@@ -327,7 +325,7 @@ class Map3D {
     if (this.map) this.map.resize();
   }
 
-  /// frame: {truth, estimates: [{name, color, e}], particles: Float32Array (x, y, w, level),
+  /// frame: {truth, estimates: [{name, color, e}],
   /// cells: Float32Array (x, y, relative mass, level) of the grid filter, heaviest first, cellSize,
   /// rooms: [{id, color, stack}], focusLevel, trailKey, trails: () => [{color, width, runs: [{level, pts: [[x, y]]}]}]};
   /// trails() is only called when trailKey changes.
@@ -380,18 +378,8 @@ class Map3D {
                          { kind: "truth", level: t.level }));
     }
 
-    const parts = [];
-    const p = frame.particles;
-    if (p && p.length) {
-      const n = p.length / 4;
-      const stride = Math.max(1, Math.ceil(n / MAX_PARTICLES_3D));
-      for (let k = 0; k < n; k += stride) {
-        const [x, y, level] = [p[4 * k], p[4 * k + 1], p[4 * k + 3]];
-        parts.push(extruded(ring(this.frame, x, y, 0.09, 4), this.z(level, 0.05), this.z(level, 0.12),
-                            LEVEL_COLORS[level % LEVEL_COLORS.length]));
-      }
-    }
     // The grid filter's posterior as a histogram: one bar per heavy cell, its height and colour by mass.
+    const parts = [];
     const c = frame.cells;
     if (c && c.length) {
       const h = Math.max(0.1, (frame.cellSize || 0.5) / 2);
@@ -405,11 +393,11 @@ class Map3D {
 
     this.map.getSource("dots").setData({ type: "FeatureCollection", features: dots });
     this.map.getSource("uncertainty").setData({ type: "FeatureCollection", features: halos });
-    this.map.getSource("particles").setData({ type: "FeatureCollection", features: parts });
+    this.map.getSource("cells").setData({ type: "FeatureCollection", features: parts });
 
     if (this.follow) {
-      const pf = frame.estimates.find((s) => s.e.valid);
-      if (pf) this.map.jumpTo({ center: this.frame.toLngLat(pf.e.x, pf.e.y) });
+      const est = frame.estimates.find((s) => s.e.valid);
+      if (est) this.map.jumpTo({ center: this.frame.toLngLat(est.e.x, est.e.y) });
     }
   }
 }
