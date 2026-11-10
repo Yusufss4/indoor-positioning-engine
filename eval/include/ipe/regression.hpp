@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -48,6 +49,14 @@ struct BenchmarkOptions {
   bool parallel = true;
   /// JSON merge patches applied in order to every preset (A/B experiments).
   std::vector<std::string> config_patches;
+
+  /// A replay that is not an engine preset (a prototype estimator): run on the same traces as the
+  /// presets and reported after them under `name`. `config_patches` are not applied to it.
+  struct Estimator {
+    std::string name;
+    std::function<ReplayResult(const Venue&, const Trace&, const ReplayOptions&)> run;
+  };
+  std::vector<Estimator> estimators;
 };
 
 /// Simulates every scenario file in `scenario_dir` and replays it through

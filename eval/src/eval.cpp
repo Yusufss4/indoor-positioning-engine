@@ -285,100 +285,18 @@ void score_room_events(Metrics& m, const std::vector<RoomEvent>& estimated, cons
   m.room_event_latency_median_s = latencies.empty() ? -1.0 : percentile(latencies, 0.5);
 }
 
+void append_snapshot(const PositioningEngine& engine, std::vector<std::array<float, 4>>& out, std::size_t max) {
+  const auto& ps = engine.particle_filter().particles();
+  const std::size_t stride = std::max<std::size_t>(1, ps.size() / std::max<std::size_t>(1, max));
+  for (std::size_t k = 0; k < ps.size(); k += stride) {
+    out.push_back({static_cast<float>(ps[k].pos.x), static_cast<float>(ps[k].pos.y), static_cast<float>(ps[k].weight),
+                   static_cast<float>(ps[k].level)});
+  }
+}
+
 ReplayResult replay(const Venue& venue, const Trace& trace, const EngineConfig& cfg, const ReplayOptions& opts) {
-  using clock = std::chrono::steady_clock;
   PositioningEngine engine(venue, cfg);
-  ReplayResult result;
-  result.records.reserve(trace.truth.size());
-
-  TracePlayer player(venue, trace);
-  clock::duration busy{};
-  std::uint64_t updates = 0;
-  Estimate last_fix;
-  std::optional<RoomTracker> truth_rooms;
-  if (!venue.rooms().empty()) truth_rooms.emplace(venue, truth_room_config());
-  std::vector<std::size_t> truth_in, est_in;
-  std::size_t truth_seen = 0;
-  const double track_t0 = trace.truth.empty() ? 0.0 : trace.truth.front().t;
-  std::size_t track_ticks = 0;
-  while (!player.finished()) {
-    if (opts.track_period_s > 0.0) {
-      // The estimate as it stands after every event up to and including the tick.
-      for (double tick = track_t0 + static_cast<double>(track_ticks) * opts.track_period_s; tick < player.next_time();
-           tick = track_t0 + static_cast<double>(++track_ticks) * opts.track_period_s) {
-        const Estimate e = engine.estimate();
-        result.track.push_back({tick, e.pos, e.level, e.valid});
-      }
-    }
-    const auto start = clock::now();
-    if (player.step(engine) != TracePlayer::Event::Truth) {
-      busy += clock::now() - start;
-      ++updates;
-    } else {
-      const auto& truth = player.truth();
-      const Estimate est = engine.estimate();
-      if (est.valid) last_fix = est;
-
-      EstimateRecord rec;
-      rec.t = truth.t;
-      rec.truth = truth.pos;
-      rec.truth_level = truth.level;
-      rec.has_fix = last_fix.valid;
-      if (rec.has_fix) {
-        rec.estimate = last_fix.pos;
-        rec.sigma_m = last_fix.sigma_radius();
-        rec.cov_xx = last_fix.cov_xx;
-        rec.cov_xy = last_fix.cov_xy;
-        rec.cov_yy = last_fix.cov_yy;
-        rec.error_m = distance(last_fix.pos, truth.pos);
-        rec.est_level = last_fix.level;
-      }
-      if (truth_rooms) {
-        Estimate at_truth;
-        at_truth.pos = truth.pos;
-        at_truth.level = truth.level;
-        at_truth.valid = true;
-        truth_rooms->update(truth.t, at_truth, nullptr);
-        truth_rooms->current_rooms(truth_in);
-        engine.room_tracker()->current_rooms(est_in);
-        rec.rooms_match = truth_in == est_in ? 1 : 0;
-        for (const auto& e : engine.take_room_events()) result.room_events.push_back(e);
-      }
-      result.records.push_back(rec);
-
-      const auto& pf = engine.particle_filter();
-      if (opts.particle_snapshot_every > 0 &&
-          truth_seen % static_cast<std::size_t>(opts.particle_snapshot_every) == 0) {
-        ParticleSnapshot snap;
-        snap.t = truth.t;
-        const auto& ps = pf.particles();
-        const std::size_t stride =
-            std::max<std::size_t>(1, ps.size() / std::max<std::size_t>(1, opts.particle_snapshot_max));
-        for (std::size_t k = 0; k < ps.size(); k += stride) {
-          snap.particles.push_back({static_cast<float>(ps[k].pos.x), static_cast<float>(ps[k].pos.y),
-                                    static_cast<float>(ps[k].weight), static_cast<float>(ps[k].level)});
-        }
-        result.snapshots.push_back(std::move(snap));
-      }
-      ++truth_seen;
-    }
-  }
-
-  result.metrics = compute_metrics(result.records, opts.warmup_s);
-  if (!result.records.empty()) {
-    compute_smoothness(result.metrics, result.track, opts.track_period_s, result.records,
-                       result.records.front().t + opts.warmup_s, &venue);
-  }
-  if (truth_rooms && !trace.truth.empty()) {
-    for (const auto& e : engine.take_room_events()) result.room_events.push_back(e);
-    result.truth_room_events = truth_rooms->take_events();
-    score_room_events(result.metrics, result.room_events, result.truth_room_events,
-                      trace.truth.front().t + opts.warmup_s);
-  }
-  result.metrics.steps = engine.step_count();
-  result.metrics.compute_us_per_update =
-      updates ? std::chrono::duration<double, std::micro>(busy).count() / static_cast<double>(updates) : 0.0;
-  return result;
+  return replay_with(engine, venue, trace, opts);
 }
 
 std::string metrics_to_json(const Metrics& m, int indent) {

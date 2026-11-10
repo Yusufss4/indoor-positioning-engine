@@ -27,6 +27,22 @@ std::vector<EngineConfig> preset_configs(const BenchmarkOptions& opts) {
   return configs;
 }
 
+/// Preset names, then estimator names: the order of every per-trace result list.
+std::vector<std::string> case_names(const BenchmarkOptions& opts) {
+  std::vector<std::string> names = opts.presets;
+  for (const auto& e : opts.estimators) names.push_back(e.name);
+  return names;
+}
+
+/// Metrics of one trace through every preset, then every estimator.
+std::vector<Metrics> replay_all(const Venue& venue, const Trace& trace, const std::vector<EngineConfig>& configs,
+                                const BenchmarkOptions& opts) {
+  std::vector<Metrics> out;
+  for (const auto& cfg : configs) out.push_back(replay(venue, trace, cfg, opts.replay).metrics);
+  for (const auto& e : opts.estimators) out.push_back(e.run(venue, trace, opts.replay).metrics);
+  return out;
+}
+
 double mean_or(const std::vector<double>& values, double fallback) {
   if (values.empty()) return fallback;
   double sum = 0.0;
@@ -99,9 +115,7 @@ std::vector<BenchmarkCase> run_benchmark(const std::string& scenario_dir, const 
     const auto& sc = scenarios[si];
     const Venue& venue = *venues.at(sc.venue_path);
     const Trace trace = sim::simulate(sc, venue, sc.seed + static_cast<std::uint64_t>(k));
-    JobResult r{si, {}};
-    for (const auto& cfg : configs) r.per_preset.push_back(replay(venue, trace, cfg, opts.replay).metrics);
-    return r;
+    return JobResult{si, replay_all(venue, trace, configs, opts)};
   };
 
   std::vector<JobResult> job_results;
@@ -115,12 +129,13 @@ std::vector<BenchmarkCase> run_benchmark(const std::string& scenario_dir, const 
       for (int k = 0; k < opts.seeds; ++k) job_results.push_back(job(si, k));
   }
 
+  const std::vector<std::string> names = case_names(opts);
   std::vector<BenchmarkCase> cases;
   for (std::size_t si = 0; si < scenarios.size(); ++si) {
-    for (std::size_t pi = 0; pi < configs.size(); ++pi) {
+    for (std::size_t pi = 0; pi < names.size(); ++pi) {
       BenchmarkCase c;
       c.scenario = scenarios[si].name;
-      c.preset = opts.presets[pi];
+      c.preset = names[pi];
       c.multi_level = venues.at(scenarios[si].venue_path)->multi_level();
       c.floor_accuracy = 0.0;
       c.floor_switch_latency_s = 0.0;
@@ -195,9 +210,7 @@ std::vector<BenchmarkCase> run_trace_benchmark(const std::string& manifest_path,
   auto job = [&](std::size_t i) {
     const Venue& venue = *venues.at(entries[i].venue);
     const Trace trace = read_trace_file(entries[i].trace);
-    std::vector<Metrics> per_preset;
-    for (const auto& cfg : configs) per_preset.push_back(replay(venue, trace, cfg, opts.replay).metrics);
-    return per_preset;
+    return replay_all(venue, trace, configs, opts);
   };
   std::vector<std::vector<Metrics>> results(entries.size());
   if (opts.parallel) {
@@ -209,12 +222,13 @@ std::vector<BenchmarkCase> run_trace_benchmark(const std::string& manifest_path,
   }
 
   groups.push_back("all");
+  const std::vector<std::string> names = case_names(opts);
   std::vector<BenchmarkCase> cases;
   for (const auto& group : groups) {
-    for (std::size_t pi = 0; pi < configs.size(); ++pi) {
+    for (std::size_t pi = 0; pi < names.size(); ++pi) {
       BenchmarkCase c;
       c.scenario = group;
-      c.preset = opts.presets[pi];
+      c.preset = names[pi];
       c.recorded = true;
       std::vector<double> means, cep50s, cep95s, coverages;
       SmoothnessSamples smooth;

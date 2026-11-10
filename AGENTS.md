@@ -19,7 +19,11 @@ truth; a replay tool and a regression suite measure accuracy.
 - `plan/` - beacon placement analysis (`ipe_plan`): coverage, Cramer-Rao bound and floor margin of a
  beacon layout from the map and RSSI model; native tooling only. `viz/placement_study.py` checks the
  scores against simulated CEP on thinned layouts.
-- `tools/` - `ipe-sim`, `ipe-replay`, `ipe-regress`, `ipe-import`, `ipe-plan`.
+- `grid/` - a grid Bayes filter prototype (`ipe_grid`, [docs/grid.md](docs/grid.md)): the posterior on a lattice of
+  map cells instead of particles, with `GridEngine` running it through the engine's PDR, smoother and room events.
+  Native tooling only; the engine, the web demo and the baselines do not use it. `ipe-grid compare` replays the
+  same traces through `pf` and the grid filter (eval's `BenchmarkOptions::estimators`).
+- `tools/` - `ipe-sim`, `ipe-replay`, `ipe-regress`, `ipe-import`, `ipe-plan`, `ipe-grid`.
 - `tests/` - GoogleTest unit tests and the `accuracy_regression` CTest.
 - `data/venues`, `data/scenarios` - inputs. `tests/regression/baseline.json` - accepted accuracy.
 - `data/geojson`, `data/imdf` - generated from `data/venues` by `ipe-import`; a unit test fails when they

@@ -771,6 +771,194 @@ were updated only where this change moves the results:
   from 33.04 to 20.72 m. UMinho's two walks pass through a room the map closes: 10.52 / 39.53 m to
   13.65 / 44.18 m.
 
+## 14. A grid Bayes filter instead of particles (prototype)
+
+**Question.** Much of the particle filter's machinery is there because a sample covers the posterior
+sparsely:
+- recovery injections, and the hijack trade-off they bring (experiment 2);
+- the beacon-ring start, and the density rule that switches it on (experiments 4 and 9);
+- rejection sampling around closed rooms (experiment 13);
+- seed noise in every comparison.
+
+What do the same sensor models do as an exact posterior on a grid of map cells?
+
+**Change.** `grid/` and `ipe-grid`, a standalone prototype ([grid.md](grid.md)).
+- The state lives on a 0.5 m lattice of walkable cells. Each cell carries its mass, the mass centroid,
+  the device RSSI offset and the barometer offset as Gaussians, and a distribution over 36 heading bins.
+- Heading bins are offsets from the gyro yaw, so turns need no interpolation.
+- Walls are one bit per lattice offset.
+- The filter uses no random numbers.
+- `GridEngine` runs it through the engine's PDR, `TrackSmoother`, `LevelSelector`,
+  `MapConsistentEstimate`, `BeaconIntegrityMonitor` and `RoomTracker`.
+
+The engine, the web demo and the baselines are untouched. Three hooks let `ipe-grid compare` replay the
+same traces through both filters and score them with the same code:
+- `TracePlayer::step` is a template over the engine;
+- `eval::replay_with` holds the replay loop;
+- `BenchmarkOptions::estimators` adds extra estimators to a benchmark.
+
+The particle filter is unchanged by them: `ipe-regress --seeds 10` gives identical results, and the
+per-sample estimates, track, room events and particle snapshots of `kit_tour`, `office_floor_bleed` and
+`office_field_issue` are byte-identical.
+
+**Settings.** All chosen on 10-seed runs of the 12 scenarios (means below); recovery was then checked on
+the tune walks. "rel" is the along-track step noise relative to the step length (`step_length_rel_sigma`).
+"Recovery" is the uniform mass mixed in per second (`teleport_rate_per_s`); rows without a rate use 1e-3.
+
+| Setting | CEP50 | CEP95 | Coverage95 | Jitter p95 | Jumps/min | field_issue CEP95 | step_scale CEP50 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| PF (engine default) | 0.784 | 2.937 | 82% | 0.50 | 1.06 | 1.95 | 0.73 |
+| rel 0.1, recovery 1e-3 (first version) | 0.741 | 2.167 | 61% | 0.32 | 0.67 | 3.64 | 0.92 |
+| + 72 heading bins | 0.753 | 2.207 | 60% | 0.32 | 0.67 | 3.67 | 0.92 |
+| + step scale state (0.85, 1, 1.15) | 0.683 | 2.218 | 75% | 0.33 | 0.63 | 3.97 | 0.49 |
+| rel 0.05 | 0.775 | 2.282 | 56% | 0.33 | 0.72 | 4.34 | 0.93 |
+| rel 0.15 | 0.688 | 2.090 | 70% | 0.32 | 0.64 | 3.59 | 0.87 |
+| rel 0.2 | 0.658 | 2.026 | 78% | 0.31 | 0.61 | 3.65 | 0.78 |
+| rel 0.15, augmented-MCL trigger, no constant rate | 0.699 | 2.271 | 74% | 0.39 | 0.96 | 4.13 | 0.83 |
+| rel 0.2, recovery 1e-4 | 0.655 | 1.898 | 76% | 0.30 | 0.52 | 2.42 | 0.78 |
+| rel 0.2, recovery 1e-4, active floor 1e-6 | 0.658 | 1.885 | 75% | 0.30 | 0.51 | 2.04 | 0.79 |
+| rel 0.2, recovery 1e-4, step scale state | 0.673 | 1.967 | 79% | 0.31 | 0.50 | 2.27 | 0.49 |
+| rel 0.25, recovery 1e-4 | 0.647 | 1.893 | 79% | 0.30 | 0.50 | 2.45 | 0.71 |
+| rel 0.2, recovery 1e-5 | 0.653 | 1.853 | 75% | 0.29 | 0.48 | 1.95 | 0.79 |
+| rel 0.2, recovery 1e-6 | 0.655 | 1.832 | 74% | 0.29 | 0.44 | 1.71 | 0.78 |
+| **rel 0.2, recovery 1e-8** | 0.656 | 1.827 | 74% | 0.28 | 0.41 | 1.68 | 0.78 |
+| rel 0.2, recovery 1e-12 | 0.655 | 1.836 | 74% | 0.28 | 0.40 | 1.67 | 0.78 |
+| rel 0.2, no recovery | 0.656 | 1.831 | 74% | 0.28 | 0.39 | 1.67 | 0.78 |
+
+- **Recovery is the setting that matters.** Recovery mass is in every cell at once. When the moved beacon
+  S3 reads 25 dB hot in N3 (experiment 2), the mass already sitting at S3's mapped position wins within
+  a few packets, before the integrity monitor can exclude S3: 15 m for 10 s on one seed checked. A lower
+  constant rate only delays it; at 1e-6 and below the walk is better than the PF's.
+- **Augmented MCL's trigger is the wrong signal.** It injects exactly when S3 misbehaves, and is worse
+  than any constant rate (4.13 m).
+- **On real Wi-Fi recovery mass costs more still.** On the IPIN tune walks, mean IPIN p75 is 26.6 m with
+  no recovery, 27.0 at 1e-8, 27.2 at 1e-6 and 28.5 at 1e-4 (the PF: 38.1). Medians swing more from walk to
+  walk: Nuremberg p75 is 10.9, 10.2, 15.0 and 14.1 m. One scan's readings count as independent, so a scan
+  can pull the posterior into any region that holds mass. 1e-8 is kept: no measurable cost, and a way
+  back from a wrong lock.
+- **Wider along-track noise beats a step-scale state.** Three scale values fix `office_step_scale`
+  (CEP50 0.49 m) but cost most other offices 0.1–0.35 m of CEP95, and triple the work. rel 0.2 stands in
+  for the scale the particle filter carries.
+- **Neutral.**
+  - 72 heading bins.
+  - The active floor, which leaves cells under 1e-6 of the heaviest in place at a step. On the traces
+    checked, 1e-9 equals the exact filter to 4 digits but saves nothing on Wi-Fi, where most cells stay
+    above it. It stays off.
+
+**Result, simulated** (10 seeds, PF → grid with the defaults above; the PF numbers are the engine
+default):
+
+| Scenario | CEP50 | CEP95 | Converged [s] | Coverage95 | Jitter p95 [m] | Jumps/min | Through walls/min | Floor ok / flips |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| airport_hall_sparse | 1.21 → 1.01 | 5.95 → 3.76 | 35.9 → 34.5 | 72% → 68% | 0.29 → 0.20 | 0.7 → 0.2 | 0.31 → 0.05 | - |
+| baro_drift_long | 0.62 → 0.54 | 1.95 → 1.42 | 13.3 → 1.0 | 87% → 78% | 0.39 → 0.28 | 1.3 → 0.6 | 1.15 → 0.17 | 99.1% / 4.4 → 99.2% / 4.2 |
+| kit_tour | 0.74 → 0.66 | 6.58 → 2.67 | 8.0 → 0.7 | 76% → 65% | 0.35 → 0.26 | 1.4 → 0.9 | 1.13 → 1.19 | 98.9% / 3.2 → 99.0% / 3.0 |
+| office_device_offset | 0.74 → 0.49 | 2.03 → 1.15 | 5.7 → 5.2 | 83% → 92% | 0.36 → 0.31 | 0.4 → 0.1 | 1.22 → 0.73 | - |
+| office_elevator | 0.58 → 0.54 | 1.70 → 1.28 | 1.3 → 2.5 | 91% → 76% | 0.40 → 0.22 | 1.7 → 0.9 | 1.24 → 0.12 | 99.0% / 2.0 → 99.0% / 2.0 |
+| office_field_issue | 0.70 → 0.56 | 1.95 → 1.68 | 2.5 → 5.7 | 86% → 83% | 0.44 → 0.30 | 0.4 → 0.1 | 1.13 → 0.49 | - |
+| office_floor_bleed | 0.88 → 0.68 | 3.87 → 1.50 | 8.0 → 1.8 | 80% → 66% | 1.79 → 0.32 | 3.6 → 1.0 | 5.51 → 0.52 | 96.6% / 3.8 → 97.9% / 2.9 |
+| office_mag_disturbance | 1.14 → 0.94 | 2.71 → 2.65 | 3.8 → 6.1 | 64% → 53% | 0.49 → 0.37 | 0.8 → 0.3 | 2.80 → 2.60 | - |
+| office_nlos_heavy | 0.64 → 0.57 | 1.83 → 1.28 | 2.7 → 3.8 | 91% → 84% | 0.35 → 0.28 | 0.4 → 0.0 | 0.94 → 0.34 | - |
+| office_nominal | 0.64 → 0.55 | 1.55 → 1.14 | 1.7 → 2.2 | 88% → 85% | 0.35 → 0.29 | 0.1 → 0.0 | 0.64 → 0.39 | - |
+| office_stairs_up_down | 0.78 → 0.58 | 3.24 → 1.62 | 11.1 → 1.2 | 79% → 74% | 0.46 → 0.30 | 1.9 → 0.8 | 2.01 → 0.08 | 98.9% / 2.0 → 99.1% / 2.0 |
+| office_step_scale | 0.73 → 0.78 | 1.88 → 1.77 | 2.1 → 3.3 | 82% → 62% | 0.34 → 0.28 | 0.0 → 0.0 | 1.00 → 0.78 | - |
+| **mean** | 0.784 → 0.656 | 2.937 → 1.827 | 8.0 → 5.7 | 82% → 74% | 0.50 → 0.28 | 1.06 → 0.41 | 1.59 → 0.62 | |
+
+The PF's `kit_tour` CEP95 here is dominated by one seed set (experiment 13: 2.5–4.5 m over 80 runs), so
+that row overstates the gap. Every run of both filters converges. Path ratio falls from 1.08–2.17 to
+1.01–1.13.
+
+**Result, real tune walks** (settings were chosen on these and on the scenarios; median over walks).
+CEP counts only fixes on the right floor, so IPIN also gets the floor hit and the competition's p75
+(`datasets/ipin/evaluate.py`; the PF with 5 filter seeds, the grid once, since it has none):
+
+| Data | PF | Grid |
+|---|---|---|
+| MSIL, 109 walks, `msil_wifi.json`: CEP50 / CEP95 (mean CEP95) | 6.74 / 9.66 (15.48) | 6.46 / 9.25 (16.24) |
+| IPIN Nuremberg, 4 walks, `msil_wifi.json`: CEP50 / CEP95, floor hit, p75 | 7.84 / 19.92, 73%, 27.32 | 5.90 / 19.80, 91%, 10.20 |
+| IPIN UMinho, 23 walks, same | 12.49 / 39.43, 41%, 38.43 | 8.75 / 27.22, 40%, 32.36 |
+| UJI BLE, 270 sessions, default config, no warm-up: CEP50 / CEP95 | 2.04 / 3.33 | 1.88 / 3.40 |
+
+- **The PF with its opt-in floor model** (`ipin.json`: floor prior, barometer jump, slab-loss
+  calibration) reaches 91% / 64% floor hit and p75 15.12 / 36.91 m. The grid has none of these and still
+  has the lower p75, but UMinho's floor stays where the radio puts it (about 40%).
+- **Smoothness on real walks** (`ipe-grid compare`, median over walks):
+  - MSIL: jitter p95 0.33 → 0.35 m, no jumps for either (the Wi-Fi config caps corrections).
+  - IPIN Nuremberg: 0.58 → 0.59 m, jumps 4.0 → 2.3 a minute.
+  - IPIN UMinho: 0.91 → 1.25 m, jumps 4.8 → 5.5 a minute. The grid's track is less smooth there.
+
+**Held out** (replayed once with the settings above, for reporting only):
+
+| Data | PF | Grid |
+|---|---|---|
+| MSIL, 109 walks: CEP50 / CEP95 (mean CEP95) | 7.34 / 9.46 (15.67) | 6.76 / 9.41 (14.40) |
+| IPIN Nuremberg, 4 walks: CEP50 / CEP95, floor hit, p75 | 7.66 / 31.57, 78%, 24.13 | 6.56 / 30.39, 81%, 18.56 |
+| IPIN UMinho, 2 walks, same | 14.22 / 42.98, 59%, 34.36 | 9.10 / 39.65, 56%, 32.19 |
+| UJI BLE, 282 sessions: CEP50 / CEP95 | 1.78 / 3.27 | 1.72 / 2.89 |
+
+**Cost.** `--serial`, microseconds per update (IMU samples included); the map is built once per venue.
+
+| Venue | Cells (size) | PF | Grid | Map build |
+|---|---:|---:|---:|---:|
+| Offices (one floor) | 3,840 (0.5 m) | 41–67 | 171–179 | 7 ms |
+| Offices (two floors) | 7,680 (0.5 m) | 72–92 | 310–357 | 13 ms |
+| `airport_hall` | 12,080 (0.5 m) | 37 | 556 | 18 ms |
+| KIT, 7 levels | 60,351 (0.5 m) | 112 | 2,860 | 0.3 s |
+| MSIL site2 B1, outline map, 42 s walk | 200,152 (0.77 m) | 214 | 14,676 | 0.3 s |
+| MSIL site2 F1, outline map, 172 s walk | 199,984 (0.51 m) | 1,069 | 19,685 | 0.3 s |
+
+- **Wall counts** for the radio model are computed the first time a beacon is heard, and count as update
+  time. They take 23–150 ms per beacon on KIT and IPIN, and 0.8–1.6 s on the mall floors with shop walls
+  (`out_doors`).
+- **Against the clock.** Replaying a walk on one desktop core takes 1–2% of its duration for an office.
+  For a mall walk it takes 60–100% (the PF: 2–5%).
+- **Memory** is about 8 bytes per (cell, heading) plus about 120 bytes per cell: 130–210 MB for a mall
+  floor.
+
+**Findings.**
+- **No sampling, no lock-on problem.** The uniform prior is exact from the first update. Without any
+  beacon-ring start, three of the four two-floor walks and KIT converge in 0.7–1.8 s instead of 8–13 s.
+  `office_elevator`, which the PF already settles in 1.3 s, takes 2.5 s.
+- **The airport is not faster** (35.9 → 34.5 s). With 35% loss and beacons 20 m apart, the posterior
+  itself stays ambiguous for half a minute; the PF's ring start was not what limited it.
+- **Most single-floor offices converge 0.5–3 s later** (`office_field_issue` 2.5 → 5.7 s,
+  `office_mag_disturbance` 3.8 → 6.1 s; `office_device_offset` 0.5 s sooner). Likely reason, not
+  verified: the heading stays spread until the walls and the magnetometer settle it, and the error must
+  stay under 3 m for 10 s to count.
+- **The raw track is calm.**
+  - Jitter p95 nearly halves.
+  - Jumps fall by 60%.
+  - Moves through walls fall by 60%: `office_floor_bleed` 5.51 → 0.52 a minute, the stairs walk 2.01 →
+    0.08.
+  There is no sampling noise for the smoother to hide.
+- **The posterior is sharper than the truth warrants.** Coverage95 is 82% → 74%, and 62% on
+  `office_step_scale`; on the real walks it falls too (IPIN 33% → 15%). The grid's spread is what the
+  model says, and the model counts time-correlated packets as independent. Likely, not verified: the PF's
+  roughening and sampling noise inflate its spread.
+- **One scenario's CEP50 is worse**: `office_step_scale` 0.73 → 0.78 m (+7%), the cost of not carrying a
+  step scale.
+- **MSIL is mixed.** The median CEP improves and the held-out mean CEP95 too, but the tune mean CEP95
+  rises 5%.
+- **Compute is the price.**
+  - 3–5× the PF on the offices;
+  - 15× on the airport hall;
+  - 25× on KIT;
+  - 18–70× on a mall floor.
+
+**Verdict.** The grid filter clears the accuracy bar set for a later promotion:
+- mean CEP95 over the 12 scenarios no worse (2.94 → 1.83 m);
+- no scenario more than 10% worse;
+- real tune medians no worse;
+- on IPIN, p75 lower in every group: by 17 m (Nuremberg) and 6 m (UMinho) on the tune walks, 6 m and 2 m
+  held out.
+
+It does not clear the cost bar for the mall floors: about real time on a desktop core, not a phone.
+Its covariance is less honest, and its track is rougher on UMinho. It stays a prototype next to the
+engine. Making it the engine would need:
+- a sparse active set that works on Wi-Fi, or coarser cells away from the cloud;
+- a wall count that does not scale with cells × beacons on shop-wall maps;
+- the floor prior that `ipin.json` gives the PF.
+
 ## Open questions
 
 - A Wi-Fi scan can still move the whole cloud across a wall into a large region next to the walker's (a
