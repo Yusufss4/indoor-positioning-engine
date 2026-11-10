@@ -909,7 +909,8 @@ CEP counts only fixes on the right floor, so IPIN also gets the floor hit and th
 
 - **Wall counts** for the radio model are computed the first time a beacon is heard, and count as update
   time. They take 23–150 ms per beacon on KIT and IPIN, and 0.8–1.6 s on the mall floors with shop walls
-  (`out_doors`).
+  (`out_doors`). Later rewritten without changing any result: 1–10 ms per beacon, and the step loop
+  1.3–1.6× faster; see [grid.md](grid.md#cost).
 - **Against the clock.** Replaying a walk on one desktop core takes 1–2% of its duration for an office.
   For a mall walk it takes 60–100% (the PF: 2–5%).
 - **Memory** is about 8 bytes per (cell, heading) plus about 120 bytes per cell: 130–210 MB for a mall

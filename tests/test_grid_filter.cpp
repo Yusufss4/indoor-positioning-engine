@@ -1,11 +1,16 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <memory>
 #include <numbers>
+#include <sstream>
+#include <string>
+#include <vector>
 
 #include "ipe/grid_engine.hpp"
 #include "ipe/grid_filter.hpp"
+#include "ipe/rng.hpp"
 #include "ipe/rssi_model.hpp"
 #include "test_util.hpp"
 
@@ -262,6 +267,118 @@ TEST(GridFilter, PredictsTheRadioModelAtTheCellCentre) {
       ASSERT_DOUBLE_EQ(free - v.wall_attenuation_db() * walls[c], model.expected_rssi(v.beacons()[b], p));
     }
   }
+}
+
+namespace {
+
+/// Checks GridMap::wall_counts against Venue::count_wall_crossings for every `stride`-th cell and every beacon
+/// (or those in `only`).
+void expect_exact_wall_counts(const Venue& v, const GridFilterConfig& cfg, std::size_t stride = 1,
+                              std::vector<std::size_t> only = {}) {
+  const GridMap map(v, cfg);
+  if (only.empty()) {
+    for (std::size_t b = 0; b < v.beacons().size(); ++b) only.push_back(b);
+  }
+  std::size_t checked = 0;
+  for (const std::size_t b : only) {
+    const auto walls = map.wall_counts(b);
+    const Vec2 bp = v.beacons()[b].pos;
+    for (std::size_t c = 0; c < map.size(); c += stride) {
+      const int want = std::min(255, v.count_wall_crossings(map.centre(c), bp, map.cell(c).level));
+      ASSERT_EQ(walls[c], want) << "beacon " << v.beacons()[b].id << " at (" << bp.x << ", " << bp.y << "), cell " << c
+                                << " at (" << map.centre(c).x << ", " << map.centre(c).y << ") on level "
+                                << map.cell(c).level;
+      ++checked;
+    }
+  }
+  EXPECT_GT(checked, 0u);
+}
+
+/// "[x1,y1,x2,y2]" for a wall.
+std::string wall_json(double x1, double y1, double x2, double y2) {
+  std::ostringstream s;
+  s.precision(17);
+  s << '[' << x1 << ',' << y1 << ',' << x2 << ',' << y2 << ']';
+  return s.str();
+}
+
+}  // namespace
+
+TEST(GridMap, WallCountsMatchTheVenueOnEdgeCases) {
+  // 0.5 m cells from (0, 0): centres at x.25 / x.75, edges at x.0 / x.5. Walls and beacons sit exactly on
+  // centres, edges, junctions and each other's lines, where a shadow edge passes through cell centres.
+  const Venue v = parse_venue(R"({"name": "edges", "bounds": [0, 0, 20, 12],
+    "levels": [
+      {"ordinal": 0, "walls": [[0,0,20,0],[20,0,20,12],[20,12,0,12],[0,12,0,0],
+        [2.25,3.25,9.75,3.25], [2,6,10,6], [2,6,10,6], [12.25,1.25,12.25,10.75],
+        [14,2,18,2], [18,2,18,6], [14,8,18,8], [16,8,16,11],
+        [5.25,9.25,5.25,9.25], [11,11,11.005,11],
+        [1.25,7.25,4.75,10.75], [6.25,10.75,9.75,7.25], [10.25,0.25,19.75,9.75]]},
+      {"ordinal": 1, "walls": [[0.25,0.25,19.75,11.75], [3,3,3,9], [3,9,9,9], [9.5,0.5,9.5,11.5],
+        [13.75,4.25,17.25,4.25], [15.5,1,15.5,7]]}
+    ],
+    "beacons": [
+      {"id": "centre", "x": 4.25, "y": 4.75, "level": 0},
+      {"id": "endpoint", "x": 2.25, "y": 3.25, "level": 0},
+      {"id": "collinear", "x": 0.75, "y": 3.25, "level": 0},
+      {"id": "diagonal", "x": 0.25, "y": 6.25, "level": 0},
+      {"id": "on_wall", "x": 6, "y": 6, "level": 0},
+      {"id": "corner", "x": 10, "y": 4, "level": 0},
+      {"id": "outside", "x": -3, "y": 5, "level": 0},
+      {"id": "near_end", "x": 18.001, "y": 6, "level": 0},
+      {"id": "junction", "x": 16, "y": 8, "level": 0},
+      {"id": "upstairs", "x": 15.25, "y": 9.75, "level": 1},
+      {"id": "on_diagonal", "x": 5.25, "y": 3.25, "level": 1}
+    ]})");
+  GridFilterConfig cfg;
+  cfg.closed_region_fraction = 0.0;  // keep every cell, closed or not
+  expect_exact_wall_counts(v, cfg);
+}
+
+TEST(GridMap, WallCountsMatchTheVenueOnRandomSnappedWalls) {
+  // Endpoints and beacons on a 0.25 m grid, so that many of them line up with the 0.5 m lattice exactly.
+  Rng rng(17);
+  const auto snap = [&](double hi) { return 0.25 * std::floor(rng.uniform(0.0, hi / 0.25)); };
+  GridFilterConfig cfg;
+  cfg.closed_region_fraction = 0.0;
+  for (int trial = 0; trial < 20; ++trial) {
+    std::string walls;
+    for (int w = 0; w < 30; ++w) {
+      const double x1 = snap(15.0), y1 = snap(10.0);
+      double x2 = snap(15.0), y2 = snap(10.0);
+      const double kind = rng.uniform();
+      if (kind < 0.25)
+        x2 = x1;  // vertical
+      else if (kind < 0.5)
+        y2 = y1;  // horizontal
+      else if (kind < 0.55)
+        x2 = x1, y2 = y1;  // a point
+      if (!walls.empty()) walls += ',';
+      walls += wall_json(x1, y1, x2, y2);
+    }
+    std::string beacons;
+    for (int b = 0; b < 6; ++b) {
+      if (!beacons.empty()) beacons += ',';
+      std::ostringstream s;
+      s << R"({"id": "B)" << b << R"(", "x": )" << snap(15.0) << R"(, "y": )" << snap(10.0) << '}';
+      beacons += s.str();
+    }
+    const Venue v = parse_venue(R"({"name": "fuzz", "bounds": [0, 0, 15, 10], "walls": [)" + walls +
+                                R"(], "beacons": [)" + beacons + "]}");
+    SCOPED_TRACE("trial " + std::to_string(trial));
+    expect_exact_wall_counts(v, cfg);
+    if (::testing::Test::HasFatalFailure()) return;
+  }
+}
+
+TEST(GridMap, WallCountsMatchTheVenueOnAShopWallMall) {
+  // A mall floor with shop walls, where the counts matter most (1 m cells and every third cell, for time).
+  const Venue v = load_venue_file(IPE_DATA_DIR "/real/site1_F2/venue.json");
+  GridFilterConfig cfg;
+  cfg.cell_m = 1.0;
+  cfg.closed_region_fraction = 0.0;
+  const std::size_t n = v.beacons().size();
+  expect_exact_wall_counts(v, cfg, 3, {0, n / 2, n - 1});
 }
 
 TEST(GridFilter, IsDeterministic) {

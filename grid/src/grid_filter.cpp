@@ -21,6 +21,12 @@ constexpr double kMinVar = 1e-6;
 /// cell holds some recovery mass, and that mass is not a group of hypotheses.
 constexpr double kPointFloorRel = 1e-3;
 
+/// std::floor to int, for |v| < 2^31.
+int floor_int(double v) {
+  const int i = static_cast<int>(v);
+  return i - (v < static_cast<double>(i));
+}
+
 /// Mixes N(mu2, var2) into N(mu, var) with weight f (moment matching).
 void mix_gaussian(double& mu, double& var, double mu2, double var2, double f) {
   const double m = (1.0 - f) * mu + f * mu2;
@@ -87,15 +93,15 @@ GridFilter::GridFilter(std::shared_ptr<const GridMap> map, GridFilterConfig cfg,
   h_.assign(states, 0.0F);
   h_next_.assign(states, 0.0F);
   touched_.assign(n, 0);
-  for (auto* v : {&acc_mass_, &acc_x_, &acc_y_, &acc_d1_, &acc_d2_, &acc_b1_, &acc_b2_}) v->assign(n, 0.0);
+  acc_.assign(n, StepAcc{});
   move_x_.assign(static_cast<std::size_t>(scales_) * static_cast<std::size_t>(bins_) * 3, 0.0);
   move_y_.assign(move_x_.size(), 0.0);
+  move_offset_.assign(move_x_.size(), -1);
   const auto offsets = static_cast<std::size_t>((2 * map_->radius() + 1) * (2 * map_->radius() + 1));
   local_target_.assign(offsets, -1);
   local_w_.assign(offsets, 0.0);
   local_x_.assign(offsets, 0.0);
   local_y_.assign(offsets, 0.0);
-  used_.reserve(offsets);
   row_lik_.assign(static_cast<std::size_t>(scales_) * static_cast<std::size_t>(bins_), 0.0);
   bin_lik_.assign(static_cast<std::size_t>(bins_), 0.0);
   row_.assign(static_cast<std::size_t>(scales_) * static_cast<std::size_t>(bins_), 0.0);
@@ -221,90 +227,140 @@ void GridFilter::on_step(const StepEvent& step) {
     }
   }
 
-  for (auto* v : {&acc_mass_, &acc_x_, &acc_y_, &acc_d1_, &acc_d2_, &acc_b1_, &acc_b2_}) {
-    std::fill(v->begin(), v->end(), 0.0);
-  }
+  std::fill(acc_.begin(), acc_.end(), StepAcc{});
   std::fill(touched_.begin(), touched_.end(), std::uint8_t{0});
-  // A cell first reached this step starts its new row from the mass that stays in it: none for an active
-  // cell (its own mass moves), all of it for a background cell (below the active floor it stays put).
-  const auto touch = [&](std::size_t t) {
-    if (touched_[t]) return;
-    touched_[t] = 1;
-    float* hn = &h_next_[t * row];
-    if (mass_[t] > 0.0 && !active(t)) {
-      for (std::size_t i = 0; i < row; ++i) hn[i] = static_cast<float>(mass_[t] * h_[t * row + i]);
-    } else {
-      std::fill_n(hn, row, 0.0F);
-    }
-  };
   const int radius = map_->radius();
   const int side = 2 * radius + 1;
+  const std::ptrdiff_t lattice_nx = map_->lattice_nx();
   const int shown_level = estimate_.level;
   const Vec2 origin = map_->lattice_centre(0, 0) - Vec2{0.5 * map_->cell_m(), 0.5 * map_->cell_m()};
   Vec2 move_level{}, move_all{};
   double w_level = 0.0, w_all = 0.0;
+  // The scatter runs for every (cell, scale, heading, node). It reads the members through local pointers and
+  // keeps the cell's lattice position and mask in locals: the byte and float stores below could alias the
+  // members, so the compiler would otherwise reload them on every iteration.
+  const double* const mass = mass_.data();
+  const float* const h = h_.data();
+  float* const h_next = h_next_.data();
+  std::uint8_t* const touched = touched_.data();
+  const double* const move_x = move_x_.data();
+  const double* const move_y = move_y_.data();
+  std::int32_t* const local_target = local_target_.data();
+  double* const local_w = local_w_.data();
+  double* const local_x = local_x_.data();
+  double* const local_y = local_y_.data();
+  StepAcc* const acc = acc_.data();
+  int* const move_offset = move_offset_.data();
+  std::array<std::uint16_t, (2 * GridMap::kMaxRadius + 1) * (2 * GridMap::kMaxRadius + 1)> used{};
   for (std::size_t c = 0; c < n; ++c) {
-    const double m = mass_[c];
+    const double m = mass[c];
     if (m <= 0.0) continue;
     const double d1 = dev_mu_[c], d2 = dev_var_[c] + d1 * d1;
     const double b1 = baro_mu_[c], b2 = baro_var_[c] + b1 * b1;
     if (!active(c)) {
       // Background: uniform recovery mass, which a step leaves uniform. It stays where it is.
-      acc_mass_[c] += m;
-      acc_x_[c] += m * cx_[c];
-      acc_y_[c] += m * cy_[c];
-      acc_d1_[c] += m * d1;
-      acc_d2_[c] += m * d2;
-      acc_b1_[c] += m * b1;
-      acc_b2_[c] += m * b2;
+      StepAcc& stay = acc[c];
+      stay.mass += m;
+      stay.x += m * cx_[c];
+      stay.y += m * cy_[c];
+      stay.d1 += m * d1;
+      stay.d2 += m * d2;
+      stay.b1 += m * b1;
+      stay.b2 += m * b2;
       continue;
     }
     const GridMap::Cell& cell = map_->cell(c);
+    const int cell_ix = cell.ix, cell_iy = cell.iy;
+    const std::uint64_t mask_lo = cell.mask[0], mask_hi = cell.mask[1];
+    const std::int32_t* const around =
+        map_->lattice_index(cell.level) + static_cast<std::ptrdiff_t>(cell_iy) * lattice_nx + cell_ix;
     const double bx = cx_[c], by = cy_[c];
     const double ux = (bx - origin.x) * inv_cell, uy = (by - origin.y) * inv_cell;
     // Per target offset, the mass and its move summed over the cell's headings and nodes; the per-cell
-    // accumulators are written once per target.
-    used_.clear();
-    const float* hc = &h_[c * row];
+    // accumulators are written once per target. Consecutive moves often land on the same offset, so its sums
+    // stay in registers until another offset comes (the additions keep their order).
+    std::size_t n_used = 0;
+    int slot = -1;
+    double run_w = 0.0, run_x = 0.0, run_y = 0.0;
+    float* hn = nullptr;
+    const float* const hc = h + c * row;
+    // The lattice offset of every move from this cell, or -1 beyond the reach (a loop of its own, without
+    // branches, so that the compiler vectorises it).
+    for (std::size_t i = 0; i < row * 3; ++i) {
+      const int dx = floor_int(ux + move_x[i] * inv_cell) - cell_ix;
+      const int dy = floor_int(uy + move_y[i] * inv_cell) - cell_iy;
+      const bool inside = dx >= -radius && dx <= radius && dy >= -radius && dy <= radius;
+      move_offset[i] = inside ? (dy + radius) * side + dx + radius : -1;
+    }
     for (std::size_t sk = 0; sk < row; ++sk) {
       const double p = m * hc[sk];
       if (p <= 0.0) continue;
       for (std::size_t j = 0; j < 3; ++j) {
-        const double mx = move_x_[sk * 3 + j], my = move_y_[sk * 3 + j];
-        const int dx = static_cast<int>(std::floor(ux + mx * inv_cell)) - cell.ix;
-        const int dy = static_cast<int>(std::floor(uy + my * inv_cell)) - cell.iy;
-        if (dx < -radius || dx > radius || dy < -radius || dy > radius) continue;
-        const int b = (dy + radius) * side + dx + radius;
-        if (!GridMap::test(cell, b)) continue;
-        const auto ub = static_cast<std::size_t>(b);
-        if (local_target_[ub] < 0) {
-          local_target_[ub] = map_->at(cell.level, cell.ix + dx, cell.iy + dy);
-          local_w_[ub] = local_x_[ub] = local_y_[ub] = 0.0;
-          used_.push_back(static_cast<std::uint16_t>(b));
-          touch(static_cast<std::size_t>(local_target_[ub]));
+        const double mx = move_x[sk * 3 + j], my = move_y[sk * 3 + j];
+        const int b = move_offset[sk * 3 + j];
+        if (b < 0) continue;
+        if ((((b >> 6) != 0 ? mask_hi : mask_lo) >> (b & 63) & 1U) == 0) continue;
+        if (b != slot) {
+          if (slot >= 0) {
+            local_w[slot] = run_w;
+            local_x[slot] = run_x;
+            local_y[slot] = run_y;
+          }
+          slot = b;
+          if (local_target[b] < 0) {
+            const int dx = b % side - radius, dy = b / side - radius;
+            const std::int32_t t = around[static_cast<std::ptrdiff_t>(dy) * lattice_nx + dx];
+            local_target[b] = t;
+            used[n_used++] = static_cast<std::uint16_t>(b);
+            run_w = run_x = run_y = 0.0;
+            const auto ut = static_cast<std::size_t>(t);
+            if (touched[ut] == 0) {
+              // First mass into this cell: its new row starts from the mass that stays in it, none for an
+              // active cell (its own mass moves), all of it for a background cell (it stays put).
+              touched[ut] = 1;
+              float* const ht = h_next + ut * row;
+              if (mass[ut] > 0.0 && !active(ut)) {
+                for (std::size_t i = 0; i < row; ++i) ht[i] = static_cast<float>(mass[ut] * h[ut * row + i]);
+              } else {
+                std::fill_n(ht, row, 0.0F);
+              }
+            }
+          } else {
+            run_w = local_w[b];
+            run_x = local_x[b];
+            run_y = local_y[b];
+          }
+          hn = h_next + static_cast<std::size_t>(local_target[b]) * row;
         }
         const double w = kWeights[j] * p;
-        h_next_[static_cast<std::size_t>(local_target_[ub]) * row + sk] += static_cast<float>(w);
-        local_w_[ub] += w;
-        local_x_[ub] += w * mx;
-        local_y_[ub] += w * my;
+        hn[sk] += static_cast<float>(w);
+        run_w += w;
+        run_x += w * mx;
+        run_y += w * my;
       }
     }
-    for (const std::uint16_t b : used_) {
-      const auto t = static_cast<std::size_t>(local_target_[b]);
-      local_target_[b] = -1;
-      const double w = local_w_[b];
-      acc_mass_[t] += w;
-      acc_x_[t] += w * bx + local_x_[b];
-      acc_y_[t] += w * by + local_y_[b];
-      acc_d1_[t] += w * d1;
-      acc_d2_[t] += w * d2;
-      acc_b1_[t] += w * b1;
-      acc_b2_[t] += w * b2;
-      move_all += Vec2{local_x_[b], local_y_[b]};
+    if (slot >= 0) {
+      local_w[slot] = run_w;
+      local_x[slot] = run_x;
+      local_y[slot] = run_y;
+    }
+    for (std::size_t k = 0; k < n_used; ++k) {
+      const std::uint16_t b = used[k];
+      const auto t = static_cast<std::size_t>(local_target[b]);
+      local_target[b] = -1;
+      const double w = local_w[b];
+      StepAcc& to = acc[t];
+      to.mass += w;
+      to.x += w * bx + local_x[b];
+      to.y += w * by + local_y[b];
+      to.d1 += w * d1;
+      to.d2 += w * d2;
+      to.b1 += w * b1;
+      to.b2 += w * b2;
+      move_all += Vec2{local_x[b], local_y[b]};
       w_all += w;
       if (cell.level == shown_level) {
-        move_level += Vec2{local_x_[b], local_y_[b]};
+        move_level += Vec2{local_x[b], local_y[b]};
         w_level += w;
       }
     }
@@ -312,7 +368,8 @@ void GridFilter::on_step(const StepEvent& step) {
   step_motion_ = w_level > 0.0 ? move_level * (1.0 / w_level) : w_all > 0.0 ? move_all * (1.0 / w_all) : Vec2{};
 
   for (std::size_t c = 0; c < n; ++c) {
-    const double m = acc_mass_[c];
+    const StepAcc& in = acc[c];
+    const double m = in.mass;
     mass_[c] = m;
     if (m <= 0.0) {
       // Empty: whatever arrives later (recovery) brings its own centroid and heading.
@@ -321,12 +378,12 @@ void GridFilter::on_step(const StepEvent& step) {
       cy_[c] = p.y;
       continue;
     }
-    cx_[c] = acc_x_[c] / m;
-    cy_[c] = acc_y_[c] / m;
-    dev_mu_[c] = acc_d1_[c] / m;
-    dev_var_[c] = cfg_.estimate_rssi_offset ? std::max(acc_d2_[c] / m - dev_mu_[c] * dev_mu_[c], kMinVar) : 0.0;
-    baro_mu_[c] = acc_b1_[c] / m;
-    baro_var_[c] = std::max(acc_b2_[c] / m - baro_mu_[c] * baro_mu_[c], kMinVar);
+    cx_[c] = in.x / m;
+    cy_[c] = in.y / m;
+    dev_mu_[c] = in.d1 / m;
+    dev_var_[c] = cfg_.estimate_rssi_offset ? std::max(in.d2 / m - dev_mu_[c] * dev_mu_[c], kMinVar) : 0.0;
+    baro_mu_[c] = in.b1 / m;
+    baro_var_[c] = std::max(in.b2 / m - baro_mu_[c] * baro_mu_[c], kMinVar);
     if (!touched_[c]) continue;  // a background cell nothing moved into keeps its row
     const float* hn = &h_next_[c * row];
     double sum = 0.0;

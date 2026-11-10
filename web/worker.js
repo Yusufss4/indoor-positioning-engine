@@ -1,9 +1,9 @@
 "use strict";
 
 // Runs the engine off the page's thread and streams the frames it records to app.js. The grid filter is
-// expensive: the first time it hears a Wi-Fi access point on a mall floor it counts the walls between every
-// cell and the access point, about a second each, and the page must stay responsive meanwhile. app.js starts
-// a new worker for every run and terminates the old one, so nothing here needs to be reset.
+// expensive: on the larger mall floors it takes about as long as the walk itself (docs/grid.md#cost), and the
+// page must stay responsive meanwhile. app.js starts a new worker for every run and terminates the old one, so
+// nothing here needs to be reset.
 importScripts("ipe_wasm.js");
 
 const FRAME_DT = 0.05; // simulated seconds per recorded frame (as in app.js)

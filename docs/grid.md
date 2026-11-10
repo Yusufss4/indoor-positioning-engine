@@ -12,8 +12,9 @@ The results are experiment 14 in [experiments.md](experiments.md). In short:
   half the jitter and fewer jumps. The two-floor walks converge in 1–2 s.
 - **Real walks:** better median CEP50 on MSIL, IPIN and UJI, and a much lower IPIN score. UJI's tune
   CEP95 is 2% worse.
-- **Costs:** a covariance that is too tight, 3–25× the compute on the simulated venues, and about real
-  time on a mall floor.
+- **Costs:** a covariance that is too tight, and compute. At the time the grid took 3–25× the particle
+  filter's compute on the simulated venues and about real time on a mall floor. After the exact speed-ups
+  under [Cost](#cost) it takes 2–20× the compute and about half of real time.
 
 ```bash
 # one trace, metrics as JSON (the flags of ipe-replay)
@@ -58,9 +59,12 @@ Built once per venue and shared read-only by every run on it (`ipe-grid compare`
 - **Moves.** Each cell has one bit per lattice offset within `max_reach_m` (2 m, 4 cells): set when the
   segment between the two centres crosses no wall and the target cell exists. A step's wall test is one
   bit.
-- **Radio.** The walls between each cell's centre and each beacon are counted with
-  `Venue::count_wall_crossings`, the first time the beacon is heard (thread-safe). This is cheap on every
-  map except the shop-wall mall floors, where it takes about a second per beacon.
+- **Radio.** The walls between each cell's centre and each beacon are counted the first time the beacon is
+  heard (thread-safe), with exactly the result of `Venue::count_wall_crossings`. Testing every wall against
+  every cell took about a second per beacon on the shop-wall mall floors. Instead, each wall's shadow seen
+  from the beacon (the wedge behind it) is filled in lattice row by lattice row. Only the cells within
+  10 µm of a shadow's edge get the segment test. This takes 1–5 ms per beacon on IPIN, KIT and site1_F2,
+  and 10 ms on site2_F6 (1,217 walls): 25–100× faster.
 - **Floors and rooms.** Cells inside a connector link to the cell at the same place on the levels next to
   it. Each cell lists the rooms its centre is in.
 
@@ -167,4 +171,36 @@ They use the particle filter's models and, where a setting has a counterpart, it
 Per step and per magnetometer update: O(cells × heading bins × scales). Per radio reading: O(cells).
 Memory is about 8 bytes per (cell, heading bin, scale) plus about 120 bytes per cell. A 960 m² office has
 3,840 cells; the KIT building, 60,351 cells on 7 floors; a mall floor, up to 200,000. Experiment 14 has the
-timings.
+timings of the first version.
+
+Two later speed-ups leave every result unchanged to the byte. That was checked on the per-sample
+estimates, tracks, room events and cell snapshots of the 12 scenarios, three mall walks and an IPIN walk,
+and on runs with an active floor and step-scale states.
+- **Wall counts**, by filling each wall's shadow (see [the map](#the-map-gridmap)), per beacon:
+  - site1_F2: 467 → 4.8 ms;
+  - site2_F6: 957 → 10 ms;
+  - KIT: 46 → 4 ms;
+  - IPIN Nuremberg: 39 → 1.4 ms.
+- **The step loop** works on local copies of the members' pointers and of the cell's lattice position and
+  mask, and keeps the running sums of the current target in registers (byte stores into the arrays forced
+  the compiler to reload them on every move). A target cell's seven accumulators sit side by side, and the
+  lattice offsets of all moves come from a separate loop that the compiler vectorises. A step on site1_F2
+  (136,491 cells) went from 178 to 116 ms. Compute per update fell 1.25–1.6× on the 12 scenarios.
+
+Replay on one desktop core (Ryzen 7 5800H) with `msil_wifi.json`:
+
+| Walk | Cells | APs heard | Before | After |
+|---|---:|---:|---:|---:|
+| site1_F2, 160 s | 136,491 | 148 | 145 s | 65 s |
+| site2_F1, 217 s | 159,278 | 526 | 366 s | 121 s |
+| site2_F6, 69 s | 155,276 | 211 | 213 s | 35 s |
+
+The web demo runs both filters in one Web Worker. Timed in Node, in WebAssembly, the demo recordings take
+this share of their duration:
+- site1 floors: 0.47–0.63 (site1_F2 was 1.33);
+- site2 floors: 0.86–1.27 (site2_F6 was 4.5);
+- IPIN: 0.09–0.2.
+
+The particle filter is about a quarter of that (0.26 on site2_F6). On a mall floor, what remains is about
+half the step loop. Most of the rest is the radio update: `log10`, `exp` and `log` for every (cell,
+reading). It is a third of the time in WebAssembly, where those functions are slower than natively.
