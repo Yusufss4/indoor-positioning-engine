@@ -7,28 +7,13 @@
 importScripts("ipe_wasm.js");
 
 const FRAME_DT = 0.05; // simulated seconds per recorded frame (as in app.js)
-const PARTICLE_EVERY = 4; // frames per particle and cell snapshot (5 Hz)
-const MAX_RECORDED_PARTICLES = 1000;
+const CELLS_EVERY = 4; // frames per cell snapshot (5 Hz)
 const POST_EVERY_MS = 50; // frames are sent in batches
 
 const modulePromise = createIpeModule();
 
-/// Subsampled copy of the particle view (x, y, w, level per particle), which aliases WASM memory.
-function sampleParticles(p) {
-  const n = p.length / 4;
-  const stride = Math.max(1, Math.ceil(n / MAX_RECORDED_PARTICLES));
-  const out = new Float32Array(Math.ceil(n / stride) * 4);
-  for (let k = 0, j = 0; k < n; k += stride, j += 4) {
-    out[j] = p[4 * k];
-    out[j + 1] = p[4 * k + 1];
-    out[j + 2] = p[4 * k + 2];
-    out[j + 3] = p[4 * k + 3];
-  }
-  return out;
-}
-
-/// The engine state after the last advance(). Snapshots of the clouds are taken every PARTICLE_EVERY frames;
-/// in between they are null and the page keeps the previous ones.
+/// The engine state after the last advance(). Snapshots of the grid filter's cells are taken every CELLS_EVERY
+/// frames; in between they are null and the page keeps the previous ones.
 function frame(demo, k, filters, transfer) {
   const est = {};
   const rooms = { truth: demo.currentRooms("truth") };
@@ -37,14 +22,10 @@ function frame(demo, k, filters, transfer) {
     rooms[f] = demo.currentRooms(f);
   }
   const fr = { t: demo.time(), steps: demo.steps(), truth: demo.truth(), est, rooms, ble: demo.recentBle(),
-               particles: null, cells: null };
-  if (k % PARTICLE_EVERY === 0) {
-    fr.particles = sampleParticles(demo.particles());
-    transfer.push(fr.particles.buffer);
-    if (demo.hasGrid()) {
-      fr.cells = new Float32Array(demo.gridCells());
-      transfer.push(fr.cells.buffer);
-    }
+               cells: null };
+  if (k % CELLS_EVERY === 0) {
+    fr.cells = new Float32Array(demo.gridCells());
+    transfer.push(fr.cells.buffer);
   }
   return fr;
 }
@@ -75,9 +56,9 @@ onmessage = async ({ data }) => {
     const Module = await modulePromise;
     const t0 = performance.now();
     const demo = data.trace !== undefined
-      ? Module.Demo.replay(data.venue, data.trace, data.config, data.grid)
-      : new Module.Demo(data.venue, data.scenario, 1, data.config, data.grid);
-    const filters = demo.hasGrid() ? ["pf", "grid"] : ["pf"];
+      ? Module.Demo.replay(data.venue, data.trace, data.config)
+      : new Module.Demo(data.venue, data.scenario, 1, data.config);
+    const filters = ["grid"];
     postMessage({
       type: "info", duration: demo.duration(), filters, gridCellSize: demo.gridCellSize(),
       gridCells: demo.gridCellCount(), setupMs: performance.now() - t0,

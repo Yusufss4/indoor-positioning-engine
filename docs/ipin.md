@@ -185,8 +185,9 @@ The tune gains carry over only in part:
   is about unchanged, and CEP95 gets worse on two of them.
 
 Six walks are too few to call that a regression or a gain. So `ipin.json` stays opt-in, and
-`ipin_regression` keeps gating `msil_wifi.json`. The web demo uses `ipin.json`. Its Nuremberg walk is a
-validation walk; on the full recording, floor accuracy goes from 63% to 96%. The demo cuts the first
+`ipin_regression` keeps gating `msil_wifi.json`. The web demo uses `ipin.json`; its grid filter takes the
+floor prior from it. The demo's Nuremberg walk is a validation walk; on the full recording, the particle
+filter's floor accuracy goes from 63% to 96%. The demo cuts the first
 90 s ([In the web demo](#in-the-web-demo)).
 
 On the synthetic scenarios (10 seeds), the jump changes nothing: their walkers always reach the stairs.

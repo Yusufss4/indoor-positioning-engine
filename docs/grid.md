@@ -3,8 +3,8 @@
 The engine finds the position with a particle filter. `grid/` is a different way to do it: a Bayes filter
 on a grid of map cells that holds the whole posterior. It has no random particles at all. It is a
 prototype next to the particle filter, not part of the engine:
-- `PositioningEngine` and the baselines do not use it; the web demo runs it next to the particle filter
-  (the "grid" checkbox), in a Web Worker;
+- `PositioningEngine` and the baselines do not use it; the web demo runs it instead of the particle filter,
+  in a Web Worker;
 - `ipe-grid` runs it and compares it with the particle filter on the same traces.
 
 The results are experiment 14 in [experiments.md](experiments.md). In short:
@@ -195,12 +195,12 @@ Replay on one desktop core (Ryzen 7 5800H) with `msil_wifi.json`:
 | site2_F1, 217 s | 159,278 | 526 | 366 s | 121 s |
 | site2_F6, 69 s | 155,276 | 211 | 213 s | 35 s |
 
-The web demo runs both filters in one Web Worker. Timed in Node, in WebAssembly, the demo recordings take
-this share of their duration:
-- site1 floors: 0.47–0.63 (site1_F2 was 1.33);
-- site2 floors: 0.86–1.27 (site2_F6 was 4.5);
-- IPIN: 0.09–0.2.
+The web demo runs the grid filter alone in a Web Worker. Timed in Node through the demo's worker, in
+WebAssembly, the demo recordings take this share of their duration:
+- site1 floors: 0.46–0.63 (site1_F2 was 1.33 before the speed-ups, with the particle filter next to it);
+- site2 floors: 0.62–0.79, and 1.18 on site2_F8 (site2_F6 was 4.5);
+- IPIN: 0.08–0.19.
 
-The particle filter is about a quarter of that (0.26 on site2_F6). On a mall floor, what remains is about
-half the step loop. Most of the rest is the radio update: `log10`, `exp` and `log` for every (cell,
-reading). It is a third of the time in WebAssembly, where those functions are slower than natively.
+On a mall floor about half of that is the step loop. Most of the rest is the radio update: `log10`, `exp`
+and `log` for every (cell, reading). It is a third of the time in WebAssembly, where those functions are
+slower than natively.

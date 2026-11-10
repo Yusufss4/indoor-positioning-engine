@@ -13,8 +13,7 @@
   <header>
     <h1>Indoor Positioning Engine</h1>
     <p>The C++ engine compiled to WebAssembly: a simulated walker, BLE beacons, phone IMU and barometer, fused by a
-      particle filter (red dot, its particles as a faint cloud). Next to it runs the grid filter prototype (green
-      dot): it holds a probability for every 0.5 m cell of the floor plan instead of particles, drawn as green
+      grid Bayes filter (green dot). It holds a probability for every 0.5 m cell of the floor plan, drawn as green
       squares, darker (and in 3D taller) with more probability. Everything runs in your browser.
       It opens in 3D on a simulated walk through a real seven-floor university building imported from
       OpenStreetMap. The "Real recordings" replay phone data over the buildings' floor plans: walks in two
@@ -55,10 +54,9 @@
       </select>
     </label>
     <button id="restart">Restart</button>
-    <label><input id="show-particles" type="checkbox" checked> particles</label>
-    <label><input id="show-pf" type="checkbox" checked> PF</label>
-    <label title="Runs the grid filter prototype next to the particle filter. It costs far more compute (on the larger mall floors it runs at about the speed of the walk, so playback may wait for it), so switching it restarts the run."><input
-        id="show-grid" type="checkbox" checked> grid</label>
+    <label title="The grid filter's most probable cells. On the larger mall floors the filter runs at about the speed of the walk, so playback may wait for it."><input
+        id="show-cells" type="checkbox" checked> cells</label>
+    <label><input id="show-grid" type="checkbox" checked> estimate</label>
     <label><input id="show-trails" type="checkbox" checked> trails</label>
     <label id="floor-control" hidden>Floor <select id="floor"></select></label>
     <span class="toggle">
@@ -116,10 +114,10 @@
         <h2>Rooms</h2>
         <p id="rooms-now"></p>
         <ol id="room-log"></ol>
-        <p class="hint">Enter/exit events, newest first. A filter enters a room once its probability (the
-          particle weight inside it, or the grid filter's mass in the room's cells) stays above 60% for 1.5 s, and
-          exits once it stays below 30% for 1.5 s. Truth events come from the true position without delay. In 2D
-          the particle filter's room is tinted red, the grid filter's green, and the true room is dashed.</p>
+        <p class="hint">Enter/exit events, newest first. The filter enters a room once its probability (the mass
+          in the room's cells) stays above 60% for 1.5 s, and exits once it stays below 30% for 1.5 s. Truth events
+          come from the true position without delay. In 2D the filter's room is tinted green and the true room is
+          dashed.</p>
       </section>
     </aside>
   </main>
