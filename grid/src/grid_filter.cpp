@@ -61,6 +61,7 @@ GridFilter::GridFilter(std::shared_ptr<const GridMap> map, GridFilterConfig cfg,
       multi_level_(map_->venue().multi_level()),
       integrity_(map_->venue().beacons().size(), {cfg.integrity_threshold_db, cfg.integrity_alpha,
                                                   cfg.integrity_min_samples, cfg.integrity_max_sigma_m}),
+      floor_classifier_(map_->venue(), {cfg.floor_prior_k, cfg.floor_prior_eps}),
       level_selector_(cfg.level_smoothing_s, cfg.level_hysteresis),
       altimeter_(baro_cfg) {
   const std::size_t n = map_->size();
@@ -99,6 +100,7 @@ GridFilter::GridFilter(std::shared_ptr<const GridMap> map, GridFilterConfig cfg,
   bin_lik_.assign(static_cast<std::size_t>(bins_), 0.0);
   row_.assign(static_cast<std::size_t>(scales_) * static_cast<std::size_t>(bins_), 0.0);
   level_weight_.assign(static_cast<std::size_t>(std::max(map_->venue().level_count(), 1)), 0.0);
+  floor_p_.assign(level_weight_.size(), 0.0);
   points_.reserve(n);
   scan_.reserve(map_->venue().beacons().size());
   const std::size_t conns = map_->connector_cells().size();
@@ -408,7 +410,9 @@ void GridFilter::on_rssi_scan(double t, std::span<const RssiReading> readings) {
     scan_.push_back(r);
   }
   if (scan_.empty()) return;
+  floor_prior_active_ = multi_level_ && cfg_.floor_prior_weight > 0.0 && floor_classifier_.classify(scan_, floor_p_);
   update_rssi(t, scan_);
+  floor_prior_active_ = false;
 }
 
 double GridFilter::expected_rssi(std::size_t beacon, std::size_t cell, Vec2 pos) const {
@@ -450,6 +454,15 @@ void GridFilter::update_rssi(double t, std::span<const RssiReading> readings) {
   }
   if (cfg_.estimate_rssi_offset) {
     for (std::size_t c = 0; c < n; ++c) dev_var_[c] += walk2;
+  }
+  // The scan's floor classification as a likelihood on each cell's level (before the recovery statistic,
+  // as in the particle filter).
+  if (floor_prior_active_) {
+    for (std::size_t c = 0; c < n; ++c) {
+      if (mass_[c] > 0.0) {
+        loglik_[c] += cfg_.floor_prior_weight * std::log(floor_p_[static_cast<std::size_t>(map_->cell(c).level)]);
+      }
+    }
   }
   if (cfg_.recovery_max_fraction > 0.0) {
     // Predictive likelihood of the update under the current distribution, as augmented MCL averages it.

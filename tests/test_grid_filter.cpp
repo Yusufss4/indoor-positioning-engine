@@ -166,6 +166,51 @@ TEST(GridFilter, LevelChangesOnlyInsideConnectors) {
   EXPECT_NEAR(level_mass(stairs, first), cfg.level_change_prob_step, 1e-12);
 }
 
+TEST(GridFilter, FloorPriorPullsTheMassToTheClassifiedLevel) {
+  // As the particle filter's test: the fingerprints say a beacon-A0 reading of -70 dBm is heard on level 1,
+  // while the radio model (15 dB per slab) favours level 0, A0's own floor. The prior multiplies the odds of
+  // level 1 by exactly p(1) / p(0) = 0.95 / 0.05 = 19 per scan, whatever the radio model does.
+  Venue v = test::two_level_venue();
+  FloorFingerprints fp;
+  fp.begin.push_back(0);
+  for (int i = 0; i < 6; ++i) {
+    fp.level.push_back(1);
+    fp.beacon.push_back(0);
+    fp.rssi.push_back(-70.0F);
+    fp.begin.push_back(static_cast<std::uint32_t>(fp.beacon.size()));
+  }
+  v.set_floor_fingerprints(fp);
+
+  const std::vector<RssiReading> scan = {{0, -70.0}};
+  double share[2] = {0.0, 0.0};
+  for (const int on : {0, 1}) {
+    GridFilterConfig cfg = quiet_config();
+    cfg.floor_prior_weight = on ? 1.0 : 0.0;
+    auto map = std::make_shared<const GridMap>(v, cfg);
+    GridFilter f(map, cfg, {});
+    for (int k = 0; k < 5; ++k) f.on_rssi_scan(2.0 * k, scan);
+    share[on] = level_mass(f, 1);
+  }
+  EXPECT_LT(share[0], 0.1);
+  const auto odds = [](double p) { return p / (1.0 - p); };
+  EXPECT_NEAR(std::log(odds(share[1]) / odds(share[0])), 5.0 * std::log(19.0), 1e-6);
+}
+
+TEST(GridEngine, FloorPriorFollowsTheEngineConfigUnlessSet) {
+  const Venue v = test::two_level_venue();
+  EngineConfig base;
+  base.pf.floor_prior_weight = 3.0;
+  base.pf.floor_prior_k = 7;
+  GridFilterConfig cfg;
+  auto map = std::make_shared<const GridMap>(v, cfg);
+  const GridEngine follows(v, map, base, cfg);
+  EXPECT_EQ(follows.filter().config().floor_prior_weight, 3.0);
+  EXPECT_EQ(follows.filter().config().floor_prior_k, 7);
+  cfg.floor_prior_weight = 0.0;
+  const GridEngine off(v, map, base, cfg);
+  EXPECT_EQ(off.filter().config().floor_prior_weight, 0.0);
+}
+
 TEST(GridFilter, LearnsTheDeviceOffsetPerCell) {
   const Venue v = open_venue();
   GridFilterConfig cfg = quiet_config();

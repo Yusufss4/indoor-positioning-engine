@@ -12,6 +12,7 @@
 #include "ipe/baro.hpp"
 #include "ipe/beacon_integrity.hpp"
 #include "ipe/filter.hpp"
+#include "ipe/floor_classifier.hpp"
 #include "ipe/level_selector.hpp"
 #include "ipe/map_estimate.hpp"
 #include "ipe/particle.hpp"
@@ -83,6 +84,16 @@ struct GridFilterConfig {
   double integrity_alpha = 0.1;
   int integrity_min_samples = 8;
   double integrity_max_sigma_m = 3.0;
+
+  /// Floor prior from the k-NN classifier over the venue's Wi-Fi floor fingerprints, applied per scan as
+  /// `floor_prior_weight * log p(level)` on every cell, as pf.floor_prior_weight does per particle. The radio
+  /// model's 2-4 dB per slab barely separates floors, and the barometer only reports changes, so without it
+  /// nothing rejects mass that has walked the same path one floor up. 0 (or a venue without fingerprints)
+  /// turns it off. Negative: GridEngine takes pf.floor_prior_weight, _k and _eps from the engine config, so
+  /// `--config ipin.json` turns it on for both filters; a GridFilter on its own treats it as 0.
+  double floor_prior_weight = -1.0;
+  int floor_prior_k = 5;
+  double floor_prior_eps = 0.1;
 };
 
 /// The venue as a lattice of cells, built once and shared read-only by every GridFilter on that venue.
@@ -262,6 +273,9 @@ class GridFilter {
   std::vector<float> conn_h_;
 
   BeaconIntegrityMonitor integrity_;
+  FloorClassifier floor_classifier_;
+  std::vector<double> floor_p_;      ///< Level probabilities of the scan being applied.
+  bool floor_prior_active_ = false;  ///< Set while update_rssi applies a classified scan.
   LevelSelector level_selector_;
   std::optional<MapConsistentEstimate> map_estimate_;
   BaroAltimeter altimeter_;

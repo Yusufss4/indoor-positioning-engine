@@ -19,7 +19,8 @@ namespace ipe {
 
 /// PositioningEngine's pipeline with the grid filter in place of the particle filter: PDR steps, the
 /// magnetometer heading after each step, radio, pressure, the same TrackSmoother and room events from the
-/// mass in each room's cells. The particle filter settings (`base.pf`) are not used.
+/// mass in each room's cells. Of the particle filter settings (`base.pf`) only the floor prior is used, when
+/// the grid config's floor_prior_weight is negative (its default).
 class GridEngine {
  public:
   GridEngine(const Venue& venue, std::shared_ptr<const GridMap> map, const EngineConfig& base,

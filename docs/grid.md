@@ -3,7 +3,8 @@
 The engine finds the position with a particle filter. `grid/` is a different way to do it: a Bayes filter
 on a grid of map cells that holds the whole posterior. It has no random particles at all. It is a
 prototype next to the particle filter, not part of the engine:
-- `PositioningEngine`, the web demo and the baselines do not use it;
+- `PositioningEngine` and the baselines do not use it; the web demo runs it next to the particle filter
+  (the "grid" checkbox), in a Web Worker;
 - `ipe-grid` runs it and compares it with the particle filter on the same traces.
 
 The results are experiment 14 in [experiments.md](experiments.md). In short:
@@ -107,6 +108,35 @@ They use the particle filter's models and, where a setting has a counterpart, it
   A scan applies its readings one after another and renormalises once. The readings of one scan share
   the device offset, so they are not counted as fully independent of each other. Readings first pass the
   same `BeaconIntegrityMonitor` as in the particle filter, judged at the cloud estimate.
+- **Floor prior.** On venues with Wi-Fi floor fingerprints (the IPIN buildings), each scan also adds
+  `floor_prior_weight · log p(level)` to every cell, with p from the particle filter's k-NN
+  `FloorClassifier` ([ipin.md](ipin.md#floor-model)). By default the grid takes `pf.floor_prior_*` from
+  the engine config, so `--config ipin.json` turns it on for both filters; `--grid-set
+  '{"floor_prior_weight":0}'` turns it off. Without it, nothing rejects mass that walks the same path one
+  floor up: the radio model's 2–4 dB per slab barely separates floors, and every level's barometer offset
+  was fitted to it at the first reading. On the Nuremberg demo walk the grid spent 84% of 10–60 s on
+  Floor 0 while the walker stayed on Floor -2 (0% with the prior). Tune walks, `ipin.json`, prior off →
+  on (median CEP50 / CEP95, floor hit, p75):
+  - Nuremberg, 4 walks: 5.90 / 19.80 m, 91%, 10.20 m → 5.73 / 17.50 m, 95%, 8.07 m;
+  - UMinho, 23 walks: 8.75 / 27.22 m, 40%, 32.36 m → 8.03 / 23.64 m, 82%, 18.68 m.
+
+  Floor hit rises or holds on all 27 walks; p75 is better on 22 and worse on 5 (by 0.9–4.1 m). The
+  scoring walks, replayed once with these settings, carry the gain over in part, as they did for the
+  particle filter:
+  - UMinho, 2 walks: floor hit 56% → 84%, p75 32.19 → 25.02 m, CEP95 39.65 → 36.01 m (both walks better);
+  - Nuremberg, 4 walks (25–35 min against the tune walks' 8–12): median floor hit 81% → 83%, p75 18.56 →
+    17.99 m, but CEP95 30.39 → 55.06 m. Two walks improve (p75 34.9 → 13.7 and 16.9 → 12.2 m); two get
+    worse (p75 18.1 → 35.4 and 19.1 → 22.3 m, CEP95 32 → 79 and 29 → 100 m).
+
+  What is left is the stairs. Mass changes level only inside a connector, and dead reckoning can carry it
+  out of a small stairwell before the barometer has seen half the climb: the mass moved up too early is
+  rejected, the rest is stranded on the old floor. The grid then reaches the new floor through recovery
+  mass, whose barometer offset is fitted to its own level and so matches the reading on any floor. On the
+  Nuremberg demo walk that takes until 248 s for a climb at 240–256 s, and the floor prior pulls the grid
+  back to the old floor for 252–264 s, where the classifier is unsure near the stairs. Giving recovery mass
+  the distribution's barometer reference instead (as `pf.baro_reseed_keep_reference`) closes that route:
+  on the tune walks Nuremberg's floor hit fell from 95% to 77% and its p75 rose from 8.07 to 25.34 m. The
+  fix would be a barometer jump like `pf.baro_jump`.
 - **Barometer.** Every 0.5 s, the particle filter's mixture likelihood and an assumed-density update of
   the offset, with a 0.05 m random walk. The first sample sets each cell's offset from its own level, and
   lift rides move 10% of each connector cell's mass to the next level, as in the particle filter.

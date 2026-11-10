@@ -1,15 +1,12 @@
 "use strict";
 
 const COLORS = {
-  truth: "#222", pf: "#d62728", beacon: "#7f3fbf",
+  truth: "#222", pf: "#d62728", grid: "#2ca02c", beacon: "#7f3fbf",
   wall: "rgba(29, 78, 137, 0.45)", ink: "#1d4e89", paper: "#fbfcfe",
 };
+const FILTER_TITLES = { pf: "Particle filter", grid: "Grid filter" };
 const LABEL_FONT = '500 11px "Barlow Condensed", "Arial Narrow", sans-serif';
-const FILTERS = ["pf"];
-const FRAME_DT = 0.05; // simulated seconds per recorded frame
-const PARTICLE_EVERY = 4; // frames per particle snapshot (5 Hz)
-const MAX_RECORDED_PARTICLES = 1000;
-const COMPUTE_BUDGET_MS = 25; // engine time per animation frame when running ahead
+const FRAME_DT = 0.05; // simulated seconds per recorded frame (as in worker.js)
 const TRAIL_START_S = 3;
 const PING_S = 0.6;
 const TRAIL_STEP_3D = 0.4; // metres between trail points in 3D
@@ -31,8 +28,10 @@ const el = (id) => document.getElementById(id);
 const canvas = el("map");
 const ctx = canvas.getContext("2d");
 
-let Module = null;
-let demo = null;
+// The engine runs in a Web Worker (worker.js) and streams its frames here. run: {worker, duration, finished,
+// filters (["pf"] or ["pf", "grid"]), cellSize, cellCount}; null while a run starts.
+let run = null;
+let startSeq = 0; // the newest start() call; older ones stop at their next await
 let venue = null;
 let geojsonUrl = null;
 let playing = true;
@@ -123,7 +122,8 @@ function normalizeVenue(v) {
   };
 }
 
-async function startSimulated(name) {
+/// Loads a simulated scenario; returns the worker's start message.
+async function loadSimulated(name) {
   const scenarioUrl = new URL(`data/scenarios/${name}.json`, window.location.href);
   const scenarioText = await loadJson(scenarioUrl);
   const scenario = JSON.parse(scenarioText);
@@ -136,11 +136,11 @@ async function startSimulated(name) {
   waypoints = [];
   // The real-building tour explains itself on the map; the synthetic scenarios name the effect they inject.
   el("description").textContent = scenario.demo_config ? "" : scenario.description || "";
-  if (demo) demo.delete();
-  demo = new Module.Demo(venueText, scenarioText, 1, configText);
+  return { venue: venueText, scenario: scenarioText, config: configText };
 }
 
-async function startRecording(entry) {
+/// Loads a recording; returns the worker's start message.
+async function loadRecording(entry) {
   const at = (path) => new URL(path, entry.base);
   const [venueText, traceText, configText] = await Promise.all([
     loadJson(at(entry.venue)), loadJson(at(entry.trace)), entry.config ? loadJson(at(entry.config)) : "",
@@ -157,27 +157,59 @@ async function startRecording(entry) {
     `the surveyor's waypoints, the only ground truth; the black path is interpolated between them, and the ` +
     `live error is measured against it. Purple dots are Wi-Fi access points located from other walks. The ` +
     `particle filter uses data/configs/msil_wifi.json.`;
-  if (demo) demo.delete();
-  demo = Module.Demo.replay(venueText, traceText, configText);
+  return { venue: venueText, trace: traceText, config: configText };
+}
+
+/// Starts a worker on `job` (the start message) and resolves once its first frames have arrived.
+function startRun(job) {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker("worker.js");
+    const r = { worker, duration: 0, finished: false, filters: ["pf"], cellSize: 0, cellCount: 0 };
+    run = r;
+    const fail = (message) => {
+      if (run !== r) return;
+      el("clock").textContent = `engine failed: ${message}`;
+      reject(new Error(message));
+    };
+    worker.onmessage = ({ data }) => {
+      if (run !== r) return;
+      if (data.type === "info") {
+        Object.assign(r, { duration: data.duration, filters: data.filters, cellSize: data.gridCellSize,
+                           cellCount: data.gridCells });
+      } else if (data.type === "frames") {
+        addFrames(data);
+        r.finished = data.finished;
+        resolve();
+      } else if (data.type === "error") {
+        fail(data.message);
+      }
+    };
+    worker.onerror = (ev) => fail(ev.message || "worker error");
+    worker.postMessage({ type: "start", ...job });
+  });
 }
 
 async function start() {
-  // Drop the old frames first: tick() must not draw them over the new venue while it loads.
+  const seq = ++startSeq;
+  // Drop the old run and its frames first: tick() must not draw them over the new venue while it loads.
+  if (run) run.worker.terminate();
+  run = null;
   recorded = [];
   el("view3d-status").textContent = "";
   const name = el("scenario").value;
   real = name.startsWith("real:") ? realDemos.get(name.slice(5)) : null;
-  if (real) await startRecording(real);
-  else await startSimulated(name);
-  recorded = [];
+  const job = real ? await loadRecording(real) : await loadSimulated(name);
+  if (seq !== startSeq) return;
+  job.grid = el("show-grid").checked;
+  el("clock").textContent = job.grid ? "starting the particle filter and the grid filter..." : "starting...";
   closeInfo();
   roomLog = [];
   lastFix = {};
   roomLogKey = null;
   viewT = 0;
   lastFrame = null;
-  demo.advance(0);
-  record();
+  await startRun(job);
+  if (seq !== startSeq) return;
   el("timeline").max = timelineEnd().toFixed(2);
   setPlaying(true, 1);
   el("rooms-panel").hidden = venue.rooms.length === 0;
@@ -191,65 +223,36 @@ async function start() {
   if (view === "3d") await show3d();
 }
 
-/// Subsampled copy of the particle view (x, y, w, level per particle), which aliases WASM memory.
-function sampleParticles(p) {
-  const n = p.length / 4;
-  const stride = Math.max(1, Math.ceil(n / MAX_RECORDED_PARTICLES));
-  const out = new Float32Array(Math.ceil(n / stride) * 4);
-  for (let k = 0, j = 0; k < n; k += stride, j += 4) {
-    out[j] = p[4 * k];
-    out[j + 1] = p[4 * k + 1];
-    out[j + 2] = p[4 * k + 2];
-    out[j + 3] = p[4 * k + 3];
+/// Appends a batch of frames from the worker to `recorded`: {t, steps, truth, est: {filter: estimate},
+/// rooms: {truth, filter: [room index]}, ble: [{id, rssi}], particles, cells}. The cloud snapshots come at
+/// 5 Hz; a frame without one keeps the previous frame's.
+function addFrames({ frames, events }) {
+  for (const fr of frames) {
+    for (const f of run.filters) {
+      const e = fr.est[f];
+      const prev = lastFix[f];
+      // A jump through a wall (a mode switch, a re-initialisation) leaves a gap in the trail, not a line through it.
+      e.jump = !!(e.valid && prev && prev.level === e.level && crossesWall(prev, e, e.level));
+      if (e.valid) lastFix[f] = e;
+    }
+    const prev = recorded[recorded.length - 1];
+    if (!fr.particles) fr.particles = prev ? prev.particles : new Float32Array(0);
+    if (!fr.cells) fr.cells = prev ? prev.cells : null;
+    recorded.push(fr);
   }
-  return out;
-}
-
-/// Appends the engine state after the last advance() to `recorded`.
-function record() {
-  const k = recorded.length;
-  const est = {};
-  const rooms = { truth: demo.currentRooms("truth") };
-  for (const f of FILTERS) {
-    const e = demo.estimate(f);
-    const prev = lastFix[f];
-    // A jump through a wall (a mode switch, a re-initialisation) leaves a gap in the trail, not a line through it.
-    e.jump = !!(e.valid && prev && prev.level === e.level && crossesWall(prev, e, e.level));
-    if (e.valid) lastFix[f] = e;
-    est[f] = e;
-    rooms[f] = demo.currentRooms(f);
-  }
-  recorded.push({
-    t: demo.time(),
-    steps: demo.steps(),
-    truth: demo.truth(),
-    est,
-    rooms,
-    ble: demo.recentBle(), // [{id, rssi}]
-    particles: k % PARTICLE_EVERY === 0 ? sampleParticles(demo.particles()) : recorded[k - 1].particles,
-  });
-  roomLog.push(...demo.roomEvents());
+  roomLog.push(...events);
 }
 
 const frameIndex = (t) => Math.max(0, Math.floor(t / FRAME_DT + 1e-6));
 const lastRecorded = () => recorded[recorded.length - 1].t;
 /// Latest time the timeline can reach: the end of the recording once the engine has finished.
-const maxTime = () => (demo.finished() ? lastRecorded() : timelineEnd());
-const timelineEnd = () => (Math.floor(demo.duration() / FRAME_DT) + 1) * FRAME_DT;
-const computing = () => recorded.length <= frameIndex(viewT) && !demo.finished();
+const maxTime = () => (run.finished ? lastRecorded() : timelineEnd());
+const timelineEnd = () => (Math.floor(run.duration / FRAME_DT) + 1) * FRAME_DT;
+const computing = () => recorded.length <= frameIndex(viewT) && !run.finished;
 
 /// The recorded frame shown at viewT (the newest one while the engine is still catching up).
 function shownFrame() {
   return Math.min(recorded.length - 1, frameIndex(viewT));
-}
-
-/// Advances the engine until frame `index` is recorded, the trace ends or the time budget runs out.
-function computeUntil(index) {
-  const deadline = performance.now() + COMPUTE_BUDGET_MS;
-  while (recorded.length <= index && !demo.finished() && performance.now() < deadline) {
-    demo.advance(FRAME_DT);
-    record();
-  }
 }
 
 function shownLevel(fr) {
@@ -374,11 +377,15 @@ function drawGrid(T) {
   ctx.fillText(`GRID ${metres} M`, 8, canvas.height - 8);
 }
 
-/// Room outlines on `level`: a faint fill, the particle filter's current rooms tinted red, the true ones
-/// outlined, and a name wherever it fits inside the room's on-screen box.
+/// Room outlines on `level`: a faint fill, each shown filter's current rooms tinted in its colour (red for the
+/// particle filter, green for the grid filter), the true ones outlined, and a name wherever it fits inside the
+/// room's on-screen box.
 function drawRooms(T, level, fr) {
   if (!venue.rooms.length) return;
-  const pfIn = new Set(el("show-pf").checked ? fr.rooms.pf : []);
+  const shown = visibleFilters();
+  const roomsOf = (f) => new Set(shown.includes(f) ? fr.rooms[f] : []);
+  const pfIn = roomsOf("pf");
+  const gridIn = roomsOf("grid");
   const truthIn = new Set(fr.rooms.truth);
   ctx.font = LABEL_FONT;
   venue.rooms.forEach((r, i) => {
@@ -388,6 +395,10 @@ function drawRooms(T, level, fr) {
     ctx.closePath();
     ctx.fillStyle = pfIn.has(i) ? "rgba(214, 39, 40, 0.14)" : "rgba(29, 78, 137, 0.035)";
     ctx.fill();
+    if (gridIn.has(i)) {
+      ctx.fillStyle = "rgba(44, 160, 44, 0.16)";
+      ctx.fill();
+    }
     if (truthIn.has(i)) {
       ctx.strokeStyle = "rgba(34, 34, 34, 0.55)";
       ctx.lineWidth = 1.5;
@@ -524,11 +535,26 @@ function draw(level, idx) {
     ctx.fillText(b.id, T.toX(b.x) + 7, T.toY(b.y) - 6);
   }
 
+  const shown = visibleFilters();
   if (el("show-particles").checked) {
-    const p = fr.particles;
-    ctx.fillStyle = "rgba(214, 39, 40, 0.25)";
-    for (let k = 0; k < p.length; k += 4) {
-      if (p[k + 3] === level) ctx.fillRect(T.toX(p[k]) - 1, T.toY(p[k + 1]) - 1, 2, 2);
+    // The grid filter's heaviest cells as squares, darker with more mass.
+    const c = shown.includes("grid") ? fr.cells : null;
+    if (c) {
+      const h = Math.max(2, run.cellSize * T.s);
+      ctx.fillStyle = COLORS.grid;
+      for (let k = 0; k < c.length; k += 4) {
+        if (c[k + 3] !== level) continue;
+        ctx.globalAlpha = 0.06 + 0.5 * Math.sqrt(c[k + 2]);
+        ctx.fillRect(T.toX(c[k]) - h / 2, T.toY(c[k + 1]) - h / 2, h, h);
+      }
+      ctx.globalAlpha = 1;
+    }
+    if (shown.includes("pf")) {
+      const p = fr.particles;
+      ctx.fillStyle = "rgba(214, 39, 40, 0.25)";
+      for (let k = 0; k < p.length; k += 4) {
+        if (p[k + 3] === level) ctx.fillRect(T.toX(p[k]) - 1, T.toY(p[k + 1]) - 1, 2, 2);
+      }
     }
   }
 
@@ -539,7 +565,7 @@ function draw(level, idx) {
     if (t > now) break;
     if (l === level) ctx.fillRect(T.toX(x) - 4, T.toY(y) - 4, 8, 8);
   }
-  for (const f of visibleFilters()) {
+  for (const f of shown) {
     const fix = (h) => (h.t > TRAIL_START_S && h.est[f].valid ? h.est[f] : null);
     if (trails) drawPath(idx, fix, T, COLORS[f], 1.3, level);
     const e = fr.est[f];
@@ -559,18 +585,21 @@ function draw(level, idx) {
 }
 
 function visibleFilters() {
-  return FILTERS.filter((f) => el(`show-${f}`).checked);
+  return run.filters.filter((f) => el(`show-${f}`).checked);
 }
 
 function updateStats(fr) {
   const t = fr.truth;
   const multi = venue.levels.length > 1;
   const levelText = multi && t.valid ? `   floor: ${venue.levels[t.level].name}` : "";
-  el("clock").textContent = `t = ${fr.t.toFixed(1)} / ${demo.duration().toFixed(0)} s   steps: ${fr.steps}` +
-    `${levelText}${computing() ? "   computing..." : ""}`;
+  // Shown whenever the view waits at the newest frame (playback is held there while the engine catches up).
+  const waiting = !run.finished && frameIndex(viewT) >= recorded.length - 1;
+  const busy = waiting ? `   computing... (engine at ${lastRecorded().toFixed(1)} s)` : "";
+  el("clock").textContent = `t = ${fr.t.toFixed(1)} / ${run.duration.toFixed(0)} s   steps: ${fr.steps}` +
+    `${levelText}${busy}`;
   const fmt = (v) => (v < 0 ? "-" : `${v.toFixed(2)} m`);
   const pct = (v) => (v < 0 ? "-" : `${(100 * v).toFixed(1)}%`);
-  el("stats").innerHTML = FILTERS.map((f) => {
+  el("stats").innerHTML = run.filters.map((f) => {
     const e = fr.est[f];
     const floor = multi ? `<td>${e.valid ? venue.levels[e.level].name : "-"} (${pct(e.floorAcc)})</td>` : "";
     return `<tr><td><span class="swatch" style="background:${COLORS[f]}"></span>${f}</td>` +
@@ -611,25 +640,26 @@ function currentFrame(fr, level, idx) {
         runs: trailRuns(idx, (h) => (h.t > TRAIL_START_S && h.est[f].valid ? h.est[f] : null)),
       })),
     ],
-    particles: el("show-particles").checked ? fr.particles : null,
-    rooms: el("show-pf").checked ? fr.rooms.pf.map((i) => venue.rooms[i].id) : [],
+    particles: el("show-particles").checked && filters.includes("pf") ? fr.particles : null,
+    cells: el("show-particles").checked && filters.includes("grid") ? fr.cells : null,
+    cellSize: run.cellSize,
+    rooms: filters.flatMap((f, stack) => fr.rooms[f].map((i) => ({ id: venue.rooms[i].id, color: COLORS[f], stack }))),
     focusLevel: level,
     levels: venue.levels,
   };
 }
 
 function tick(ts) {
-  if (demo && venue && recorded.length) {
+  if (run && venue && recorded.length) {
     if (playing) {
       const dt = lastFrame === null ? 0 : Math.min((ts - lastFrame) / 1000, 0.1);
       viewT += direction * dt * Number(el("speed").value);
     }
     viewT = Math.min(Math.max(viewT, 0), maxTime());
-    computeUntil(frameIndex(viewT));
     // Playing forwards never runs ahead of the engine; a seek waits for it instead.
     if (playing && computing()) viewT = lastRecorded();
     if (playing && direction < 0 && viewT <= 0) setPlaying(false);
-    if (playing && direction > 0 && demo.finished() && viewT >= lastRecorded()) setPlaying(false);
+    if (playing && direction > 0 && run.finished && viewT >= lastRecorded()) setPlaying(false);
     lastFrame = ts;
     const idx = shownFrame();
     const fr = recorded[idx];
@@ -652,13 +682,13 @@ function updateTimeline(fr) {
   const end = Number(bar.max);
   if (!bar.matches(":active")) bar.value = String(Math.min(viewT, end));
   bar.style.setProperty("--done", `${(100 * Math.min(lastRecorded(), end)) / end}%`);
-  el("time-label").textContent = `${fr.t.toFixed(1)} / ${demo.duration().toFixed(1)} s`;
+  el("time-label").textContent = `${fr.t.toFixed(1)} / ${run.duration.toFixed(1)} s`;
 }
 
 /// Starts or stops playback; `dir` (+1 or -1) changes the direction. Playing forwards from the end restarts.
 function setPlaying(on, dir = direction) {
   direction = dir;
-  if (on && dir > 0 && demo.finished() && viewT >= lastRecorded()) viewT = 0;
+  if (on && dir > 0 && run.finished && viewT >= lastRecorded()) viewT = 0;
   if (on && dir < 0 && viewT <= 0) on = false;
   playing = on;
   el("play").innerHTML = playing ? ICONS.pause : ICONS.play;
@@ -768,6 +798,8 @@ document.addEventListener("keydown", (ev) => {
 document.addEventListener("keyup", (ev) => handledKey(ev) && ev.preventDefault());
 
 el("restart").addEventListener("click", start);
+// The grid filter is only computed when it is shown, so switching it restarts the run.
+el("show-grid").addEventListener("change", start);
 el("scenario").addEventListener("change", () => {
   zoom = { k: 1, x: 0, y: 0 };
   start();
@@ -966,9 +998,9 @@ function renderInfo(idx) {
             ["steps", String(fr.steps)], ["time", `${fr.t.toFixed(1)} s`]];
     const inRooms = fr.rooms.truth.map((i) => venue.rooms[i].name).join(", ");
     if (venue.rooms.length) rows.push(["room", inRooms || "-"]);
-  } else if (FILTERS.includes(kind)) {
+  } else if (run.filters.includes(kind)) {
     const e = fr.est[kind];
-    title = `${kind.toUpperCase()} estimate`;
+    title = `${FILTER_TITLES[kind]} estimate`;
     if (!e.valid) rows = [["state", "no fix yet"]];
     else {
       rows = [["position", `${e.x.toFixed(2)}, ${e.y.toFixed(2)} m`], ["floor", levelName(e.level)],
@@ -983,11 +1015,9 @@ function renderInfo(idx) {
     .join("");
 }
 
-createIpeModule().then(async (m) => {
-  Module = m;
-  await loadRealDemos();
-  await start();
+loadRealDemos().then(async () => {
   requestAnimationFrame(tick);
+  await start();
 }).catch((err) => {
   el("clock").textContent = `failed to load: ${err}`;
 });
