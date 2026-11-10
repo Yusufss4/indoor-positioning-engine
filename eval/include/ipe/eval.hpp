@@ -1,13 +1,17 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "ipe/engine.hpp"
 #include "ipe/trace.hpp"
+#include "ipe/trace_player.hpp"
 #include "ipe/venue.hpp"
 
 namespace ipe::eval {
@@ -128,6 +132,15 @@ struct ReplayResult {
 /// last valid estimate is held, as a blue dot would be on screen.
 ReplayResult replay(const Venue& venue, const Trace& trace, const EngineConfig& cfg, const ReplayOptions& opts = {});
 
+/// The replay loop behind replay(), for any engine with PositioningEngine's sensor inputs and
+/// estimate(), room_tracker(), take_room_events() and step_count(); `engine` must be fresh. Particle
+/// snapshots call `append_snapshot(engine, out, max)`, found by argument-dependent lookup.
+template <class Engine>
+ReplayResult replay_with(Engine& engine, const Venue& venue, const Trace& trace, const ReplayOptions& opts = {});
+
+/// Up to about `max` of the engine's particles as (x, y, weight, level).
+void append_snapshot(const PositioningEngine& engine, std::vector<std::array<float, 4>>& out, std::size_t max);
+
 Metrics compute_metrics(const std::vector<EstimateRecord>& records, double warmup_s);
 /// Fills the smoothness fields of `m` from an evenly spaced track (spacing `period_s`). Samples before
 /// `t_from` are skipped; `records` (truth) are only used for path_ratio, `venue` (its walls) only for
@@ -150,5 +163,94 @@ void write_particles_csv(const std::string& path, const ReplayResult& result);
 void write_track_csv(const std::string& path, const ReplayResult& result);
 /// t,source,room_id,room_name,type,probability with source "estimate" or "truth", sorted by time.
 void write_room_events_csv(const std::string& path, const Venue& venue, const ReplayResult& result);
+
+template <class Engine>
+ReplayResult replay_with(Engine& engine, const Venue& venue, const Trace& trace, const ReplayOptions& opts) {
+  using clock = std::chrono::steady_clock;
+  ReplayResult result;
+  result.records.reserve(trace.truth.size());
+
+  TracePlayer player(venue, trace);
+  clock::duration busy{};
+  std::uint64_t updates = 0;
+  Estimate last_fix;
+  std::optional<RoomTracker> truth_rooms;
+  if (!venue.rooms().empty()) truth_rooms.emplace(venue, truth_room_config());
+  std::vector<std::size_t> truth_in, est_in;
+  std::size_t truth_seen = 0;
+  const double track_t0 = trace.truth.empty() ? 0.0 : trace.truth.front().t;
+  std::size_t track_ticks = 0;
+  while (!player.finished()) {
+    if (opts.track_period_s > 0.0) {
+      // The estimate as it stands after every event up to and including the tick.
+      for (double tick = track_t0 + static_cast<double>(track_ticks) * opts.track_period_s; tick < player.next_time();
+           tick = track_t0 + static_cast<double>(++track_ticks) * opts.track_period_s) {
+        const Estimate e = engine.estimate();
+        result.track.push_back({tick, e.pos, e.level, e.valid});
+      }
+    }
+    const auto start = clock::now();
+    if (player.step(engine) != TracePlayer::Event::Truth) {
+      busy += clock::now() - start;
+      ++updates;
+    } else {
+      const auto& truth = player.truth();
+      const Estimate est = engine.estimate();
+      if (est.valid) last_fix = est;
+
+      EstimateRecord rec;
+      rec.t = truth.t;
+      rec.truth = truth.pos;
+      rec.truth_level = truth.level;
+      rec.has_fix = last_fix.valid;
+      if (rec.has_fix) {
+        rec.estimate = last_fix.pos;
+        rec.sigma_m = last_fix.sigma_radius();
+        rec.cov_xx = last_fix.cov_xx;
+        rec.cov_xy = last_fix.cov_xy;
+        rec.cov_yy = last_fix.cov_yy;
+        rec.error_m = distance(last_fix.pos, truth.pos);
+        rec.est_level = last_fix.level;
+      }
+      if (truth_rooms) {
+        Estimate at_truth;
+        at_truth.pos = truth.pos;
+        at_truth.level = truth.level;
+        at_truth.valid = true;
+        truth_rooms->update(truth.t, at_truth, nullptr);
+        truth_rooms->current_rooms(truth_in);
+        engine.room_tracker()->current_rooms(est_in);
+        rec.rooms_match = truth_in == est_in ? 1 : 0;
+        for (const auto& e : engine.take_room_events()) result.room_events.push_back(e);
+      }
+      result.records.push_back(rec);
+
+      if (opts.particle_snapshot_every > 0 &&
+          truth_seen % static_cast<std::size_t>(opts.particle_snapshot_every) == 0) {
+        ParticleSnapshot snap;
+        snap.t = truth.t;
+        append_snapshot(engine, snap.particles, opts.particle_snapshot_max);
+        result.snapshots.push_back(std::move(snap));
+      }
+      ++truth_seen;
+    }
+  }
+
+  result.metrics = compute_metrics(result.records, opts.warmup_s);
+  if (!result.records.empty()) {
+    compute_smoothness(result.metrics, result.track, opts.track_period_s, result.records,
+                       result.records.front().t + opts.warmup_s, &venue);
+  }
+  if (truth_rooms && !trace.truth.empty()) {
+    for (const auto& e : engine.take_room_events()) result.room_events.push_back(e);
+    result.truth_room_events = truth_rooms->take_events();
+    score_room_events(result.metrics, result.room_events, result.truth_room_events,
+                      trace.truth.front().t + opts.warmup_s);
+  }
+  result.metrics.steps = engine.step_count();
+  result.metrics.compute_us_per_update =
+      updates ? std::chrono::duration<double, std::micro>(busy).count() / static_cast<double>(updates) : 0.0;
+  return result;
+}
 
 }  // namespace ipe::eval
