@@ -34,10 +34,14 @@ sys.path.insert(0, str(HERE.parent))
 from common.geom import (crossing_params, crossings, cut_gaps, dedupe_segments,  # noqa: E402
                          forward_heading_from_quat, point_in_rings, ring_segments, rotation_matrices, wrap)
 from common.geom import fit_heading_offset as _fit_heading_offset  # noqa: E402
+from common.fingerprints import drop_rare, fingerprint_table, unmodelled_beacons  # noqa: E402
 from common.radiomap import Transmitter, fit_samples, merge_virtual_aps, physical_ap  # noqa: E402
 from common.trace import write_manifests  # noqa: E402
 
 MAG_FIELD_UT = 45.0
+# An hour. When a walk's Wi-Fi readings are typically further than this from the scan that reports them,
+# `last_seen` is on another clock (a single stale reading can be that old on the same clock).
+CLOCK_MISMATCH_MS = 3.6e6
 
 
 # --------------------------------------------------------------------------------------------
@@ -86,7 +90,7 @@ def parse_path(path: Path) -> PathData:
                     if (bssid, last_seen) in seen_wifi:
                         continue
                     seen_wifi.add((bssid, last_seen))
-                    wifi.append((last_seen / 1000.0, physical_ap(bssid), rssi, t / 1000.0))
+                    wifi.append((last_seen, physical_ap(bssid), rssi, t))
                 elif kind == "TYPE_BEACON" and len(cols) >= 7:
                     ble.append((t / 1000.0, f"{cols[2]}_{cols[3]}_{cols[4]}", float(cols[6])))
                 elif kind == "TYPE_WAYPOINT":
@@ -103,7 +107,13 @@ def parse_path(path: Path) -> PathData:
         r = np.array([rot[t] for t in ts])
         w = np.sqrt(np.clip(1.0 - np.sum(r * r, axis=1), 0.0, None))
         pd.rotvec = np.column_stack([r, w])
-    pd.wifi = merge_virtual_aps(wifi)
+    # The competition's test files count time from the start of the walk but leave `last_seen` on the
+    # phone's clock. A reading is never newer than the scan that reports it, so the newest one marks
+    # the clock difference (to within the scan's own delay).
+    if wifi and abs(float(np.median([seen - t for seen, _, _, t in wifi]))) > CLOCK_MISMATCH_MS:
+        shift = max(seen - t for seen, _, _, t in wifi)
+        wifi = [(seen - shift, ap, rssi, t) for seen, ap, rssi, t in wifi]
+    pd.wifi = merge_virtual_aps([(seen / 1000.0, ap, rssi, t / 1000.0) for seen, ap, rssi, t in wifi])
     pd.ble = sorted(ble)
     pd.waypoints = np.array(sorted(wps)) if wps else np.zeros((0, 3))
     return pd
@@ -213,11 +223,25 @@ def load_floor(floor_dir: Path) -> Floor:
     info = json.loads((floor_dir / "floor_info.json").read_text())["map_info"]
     gj = json.loads((floor_dir / "geojson_map.json").read_text())
     floor_rings, unit_rings, room_rings = [], [], []
-    for feat in gj["features"]:
+
+    # site1 tags the floor polygon type/category "floor"; site2 gives it a "floor": "F1" property.
+    def tagged(props):
+        return props.get("type") == "floor" or props.get("category") == "floor" or "floor" in props
+
+    floor_features = {i for i, feat in enumerate(gj["features"]) if tagged(feat.get("properties", {}))}
+    if not floor_features:
+        # Many buildings of the full competition set tag nothing: there the floor polygon is the
+        # feature that spans the plan, i.e. the one with the largest bounding box (the first on a tie).
+        def box_area(feat):
+            pts = np.array([p[:2] for ring in _rings(feat["geometry"]) for p in ring])
+            return float(np.ptp(pts[:, 0]) * np.ptp(pts[:, 1])) if len(pts) else 0.0
+
+        areas = [box_area(feat) for feat in gj["features"]]
+        floor_features = {int(np.argmax(areas))}
+    for i, feat in enumerate(gj["features"]):
         rings = _rings(feat["geometry"])
         props = feat.get("properties", {})
-        # site1 tags the floor polygon type/category "floor"; site2 gives it a "floor": "F1" property.
-        if props.get("type") == "floor" or props.get("category") == "floor" or "floor" in props:
+        if i in floor_features:
             floor_rings += rings
         else:
             unit_rings += rings
@@ -302,6 +326,33 @@ def fit_radio_map(train: list[PathData], floor: Floor, args) -> list[Transmitter
                 if ok:
                     samples.setdefault(prefix + tid, []).append((p[0], p[1], rssi))
     return fit_samples(samples, (0.0, 0.0, floor.width, floor.height), args.min_samples, args.min_spread, args.max_rms)
+
+
+def wifi_scans(pd: PathData) -> list[tuple[float, dict[str, float]]]:
+    """(time, {"w:" + access point: dBm}) per Wi-Fi scan, timed by its newest reading as the trace
+    writer does; an access point heard twice in a scan keeps its strongest reading."""
+    by_scan: dict[float, list] = {}
+    for t, ap, rssi, t_scan in pd.wifi:
+        by_scan.setdefault(t_scan, []).append((t, ap, rssi))
+    out = []
+    for _, readings in sorted(by_scan.items()):
+        rssi: dict[str, float] = {}
+        for _, ap, r in readings:
+            rssi["w:" + ap] = max(rssi.get("w:" + ap, -200.0), r)
+        out.append((max(r[0] for r in readings), rssi))
+    return sorted(out, key=lambda s: s[0])
+
+
+def training_scans(train: list[PathData]) -> list[tuple[int, float, float, dict[str, float]]]:
+    """(0, x, y, readings) for every training scan taken between two waypoints."""
+    out = []
+    for pd in train:
+        scans = wifi_scans(pd)
+        if len(pd.waypoints) < 2 or not scans:
+            continue
+        xy, mask = interp_waypoints(pd, np.array([t for t, _ in scans]))
+        out += [(0, p[0], p[1], rssi) for (_, rssi), p, ok in zip(scans, xy, mask) if ok]
+    return out
 
 
 # --------------------------------------------------------------------------------------------
@@ -431,12 +482,22 @@ def convert_floor(site: str, floor_name: str, floor_dir: Path, paths: list[PathD
             for t in txs
         ],
     }
+    known = {t.id for t in txs}
+    if args.wifi and args.fingerprints:
+        scans = training_scans(train)
+        extra = unmodelled_beacons(scans, known, args.min_fingerprint_scans)
+        for b in extra:
+            del b["level"]  # single-level venue
+        venue["beacons"] += extra
+        known |= {b["id"] for b in extra}
+        scans = drop_rare(scans, known)
+        venue["floor_fingerprints"] = fingerprint_table(scans)
+        report["fingerprints"] = {"scans": len(scans), "unmodelled_beacons": len(extra)}
     floor_out = out / site / floor_name
     floor_out.mkdir(parents=True, exist_ok=True)
     venue_path = floor_out / "venue.json"
     venue_path.write_text(json.dumps(venue))
 
-    known = {t.id for t in txs}
     entries = []
     for pd in test:
         if len(pd.imu_t) < 100 or len(pd.waypoints) < 2:
@@ -448,15 +509,72 @@ def convert_floor(site: str, floor_name: str, floor_dir: Path, paths: list[PathD
     return entries, report
 
 
+def site_floors(args) -> list[tuple[str, list[tuple[str, Path, list[Path]]]]]:
+    """[(site, [(floor name, folder with the plan, path files)])] for the sample's layout
+    (<raw>/<site>/<floor>/{path_data_files/*.txt, floor_info.json, geojson_map.json}) or, with
+    --kaggle, the competition's (<dir>/train/<site>/<floor>/*.txt, <dir>/metadata/<site>/<floor>/)."""
+    out = []
+    if args.kaggle:
+        wanted = None
+        if args.test_sites:
+            rows = (args.kaggle / "sample_submission.csv").read_text().splitlines()[1:]
+            wanted = {r.split("_", 1)[0] for r in rows}
+        for site_dir in sorted(p for p in (args.kaggle / "train").iterdir() if p.is_dir()):
+            if wanted is not None and site_dir.name not in wanted:
+                continue
+            floors = [(f.name, args.kaggle / "metadata" / site_dir.name / f.name, sorted(f.glob("*.txt")))
+                      for f in sorted(p for p in site_dir.iterdir() if p.is_dir())]
+            out.append((site_dir.name, floors))
+    else:
+        for site_dir in sorted(p for p in args.raw.iterdir() if p.is_dir()):
+            floors = [(f.name, f, sorted((f / "path_data_files").glob("*.txt")))
+                      for f in sorted(p for p in site_dir.iterdir() if (p / "path_data_files").is_dir())]
+            out.append((site_dir.name, floors))
+    if args.sites:
+        out = [(site, floors) for site, floors in out if site in args.sites]
+    if args.floors:
+        out = [(site, [f for f in floors if f[0] in args.floors]) for site, floors in out]
+    return out
+
+
+def convert_site(job) -> tuple[list, list, list[str]]:
+    site, floors, args = job
+    parsed = {name: [parse_path(p) for p in files] for name, _, files in floors}
+    # Map north is a property of the site: fit it on every floor's training paths.
+    train_all = [p for ps in parsed.values() for p in ps if not is_test(p.path_id, args.test_every)]
+    offset, spread, segments = fit_heading_offset(train_all)
+    lines = [f"{site}: heading offset {math.degrees(offset):+.1f} deg "
+             f"(circular spread {math.degrees(spread):.1f} deg over {segments} segments)"]
+    manifest, reports = [], []
+    for name, plan_dir, _ in floors:
+        entries, report = convert_floor(site, name, plan_dir, parsed[name], offset, args, args.out)
+        report["heading_offset_deg"] = math.degrees(offset)
+        report["heading_spread_deg"] = math.degrees(spread)
+        lines.append(json.dumps({k: v for k, v in report.items() if k != "door_centres"}))
+        manifest += entries
+        reports.append(report)
+    return manifest, reports, lines
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--raw", type=Path, default=HERE / "raw" / "data", help="folder with <site>/<floor>/ subfolders")
+    ap.add_argument("--kaggle", type=Path,
+                    help="folder of the full Kaggle competition data (train/, metadata/, test/) instead of --raw")
+    ap.add_argument("--test-sites", action="store_true",
+                    help="with --kaggle, only the sites of the competition's test set (sample_submission.csv)")
+    ap.add_argument("--jobs", type=int, default=1, help="sites converted in parallel")
     ap.add_argument("--out", type=Path, default=HERE / "out")
     ap.add_argument("--sites", nargs="*", help="limit to these sites")
     ap.add_argument("--floors", nargs="*", help="limit to these floor names (e.g. F1 B1)")
     ap.add_argument("--wifi", action="store_true", help="also fit and replay Wi-Fi access points")
     ap.add_argument("--scans", action="store_true",
                     help="with --wifi, write each Wi-Fi scan as one batch (scan column, newest reading's time)")
+    ap.add_argument("--fingerprints", action="store_true",
+                    help="with --wifi, store the training scans with their positions in the venue, and keep the "
+                         "access points the fit rejected as fingerprint-only beacons")
+    ap.add_argument("--min-fingerprint-scans", type=int, default=10,
+                    help="training scans an access point without a fitted transmitter must appear in")
     ap.add_argument("--walls", choices=["auto", "none", "boundary", "units", "doors"], default="auto",
                     help="doors: shop outlines with gaps where training walks cross them")
     ap.add_argument("--door-width", type=float, default=3.0, help="metres; gap cut per doors crossing")
@@ -468,27 +586,27 @@ def main():
     args = ap.parse_args()
     if args.scans and not args.wifi:
         ap.error("--scans needs --wifi")
+    if args.fingerprints and not args.wifi:
+        ap.error("--fingerprints needs --wifi")
+    if args.test_sites and not args.kaggle:
+        ap.error("--test-sites needs --kaggle")
 
+    jobs = [(site, floors, args) for site, floors in site_floors(args)]
     manifest, reports = [], []
-    for site_dir in sorted(p for p in args.raw.iterdir() if p.is_dir()):
-        if args.sites and site_dir.name not in args.sites:
-            continue
-        floors = sorted(p for p in site_dir.iterdir() if (p / "path_data_files").is_dir())
-        if args.floors:
-            floors = [f for f in floors if f.name in args.floors]
-        parsed = {f.name: [parse_path(p) for p in sorted((f / "path_data_files").glob("*.txt"))] for f in floors}
-        # Map north is a property of the site: fit it on every floor's training paths.
-        train_all = [p for ps in parsed.values() for p in ps if not is_test(p.path_id, args.test_every)]
-        offset, spread, segments = fit_heading_offset(train_all)
-        print(f"{site_dir.name}: heading offset {math.degrees(offset):+.1f} deg "
-              f"(circular spread {math.degrees(spread):.1f} deg over {segments} segments)")
-        for f in floors:
-            entries, report = convert_floor(site_dir.name, f.name, f, parsed[f.name], offset, args, args.out)
-            report["heading_offset_deg"] = math.degrees(offset)
-            report["heading_spread_deg"] = math.degrees(spread)
-            print(json.dumps({k: v for k, v in report.items() if k != "door_centres"}))
+    if args.jobs > 1:
+        from concurrent.futures import ProcessPoolExecutor
+        with ProcessPoolExecutor(args.jobs) as pool:
+            results = pool.map(convert_site, jobs)
+            for entries, site_reports, lines in results:
+                print("\n".join(lines), flush=True)
+                manifest += entries
+                reports += site_reports
+    else:
+        for job in jobs:
+            entries, site_reports, lines = convert_site(job)
+            print("\n".join(lines), flush=True)
             manifest += entries
-            reports.append(report)
+            reports += site_reports
 
     write_manifests(args.out, manifest)
     (args.out / "report.json").write_text(json.dumps(reports, indent=1))
