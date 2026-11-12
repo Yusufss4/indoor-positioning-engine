@@ -97,3 +97,24 @@ def fuse(forward: list[dict], backward: list[dict], end: float, sigma_floor_m: f
         row["error_m"] = math.hypot(row["est_x"] - row["truth_x"], row["est_y"] - row["truth_y"])
         out.append(row)
     return out
+
+
+def fill_gaps(rows: list[dict]) -> None:
+    """A row without a fix takes the nearest fix in time (before the first scan, the first fix)."""
+    fixes = [r for r in rows if r["has_fix"]]
+    for r in rows:
+        if not r["has_fix"] and fixes:
+            near = min(fixes, key=lambda f: abs(f["t"] - r["t"]))
+            r.update(est_x=near["est_x"], est_y=near["est_y"], est_level=near["est_level"], has_fix=True,
+                     error_m=math.hypot(near["est_x"] - r["truth_x"], near["est_y"] - r["truth_y"]))
+
+
+def snap(rows: list[dict], points: list[list[float]], radius: float) -> None:
+    """Moves each fix onto the nearest surveyed waypoint within `radius` metres. Only meaningful where the
+    scored points are known to be surveyed waypoints, as in the Kaggle competition's test set."""
+    for r in rows:
+        if not r["has_fix"] or not points:
+            continue
+        d, x, y = min((math.hypot(px - r["est_x"], py - r["est_y"]), px, py) for px, py in points)
+        if d <= radius:
+            r.update(est_x=x, est_y=y, error_m=math.hypot(x - r["truth_x"], y - r["truth_y"]))

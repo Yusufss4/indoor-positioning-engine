@@ -63,26 +63,6 @@ def run_engine(venue: Path, trace: Path, out: Path, seed: int, args) -> list[dic
     return rows
 
 
-def fill_gaps(rows: list[dict]) -> None:
-    """Offline: a row without a fix takes the nearest fix in time (before the first scan, the first fix)."""
-    fixes = [r for r in rows if r["has_fix"]]
-    for r in rows:
-        if not r["has_fix"] and fixes:
-            near = min(fixes, key=lambda f: abs(f["t"] - r["t"]))
-            r.update(est_x=near["est_x"], est_y=near["est_y"], est_level=near["est_level"], has_fix=True,
-                     error_m=math.hypot(near["est_x"] - r["truth_x"], near["est_y"] - r["truth_y"]))
-
-
-def snap(rows: list[dict], points: list[list[float]], radius: float) -> None:
-    """Offline: moves each fix onto the nearest surveyed waypoint within `radius` metres."""
-    for r in rows:
-        if not r["has_fix"] or not points:
-            continue
-        d, x, y = min((math.hypot(px - r["est_x"], py - r["est_y"]), px, py) for px, py in points)
-        if d <= radius:
-            r.update(est_x=x, est_y=y, error_m=math.hypot(x - r["truth_x"], y - r["truth_y"]))
-
-
 def replay(entry: dict, seed: int, base: Path, args, tmp: Path) -> dict:
     venue, trace = base / entry["venue"], base / entry["trace"]
     rows = run_engine(venue, trace, tmp / f"{entry['name']}_{seed}.csv", seed, args)
@@ -92,10 +72,10 @@ def replay(entry: dict, seed: int, base: Path, args, tmp: Path) -> dict:
         back = run_engine(venue, reversed_trace, tmp / f"{entry['name']}_{seed}_back.csv", seed, args)
         rows = offline.fuse(rows, back, end, args.fuse_floor)
     if args.fill:
-        fill_gaps(rows)
+        offline.fill_gaps(rows)
     if args.snap > 0.0:
         waypoints = venue.parent / "waypoints.json"
-        snap(rows, json.loads(waypoints.read_text()) if waypoints.exists() else [], args.snap)
+        offline.snap(rows, json.loads(waypoints.read_text()) if waypoints.exists() else [], args.snap)
     fixes = [r for r in rows if r["has_fix"]]
     err = sorted(r["error_m"] for r in fixes)
     floor_ok = [r["truth_level"] == r["est_level"] for r in fixes]
