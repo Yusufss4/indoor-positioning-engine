@@ -497,6 +497,11 @@ def convert_floor(site: str, floor_name: str, floor_dir: Path, paths: list[PathD
     floor_out.mkdir(parents=True, exist_ok=True)
     venue_path = floor_out / "venue.json"
     venue_path.write_text(json.dumps(venue))
+    if args.wifi and args.fingerprints:
+        # The surveyed points of the training walks, for offline snapping (evaluate.py --snap): the
+        # surveyors of this data set walked between marked points, and the test walks use the same ones.
+        points = sorted({(round(float(x), 2), round(float(y), 2)) for pd in train for _, x, y in pd.waypoints})
+        (floor_out / "waypoints.json").write_text(json.dumps([list(q) for q in points]))
 
     entries = []
     for pd in test:

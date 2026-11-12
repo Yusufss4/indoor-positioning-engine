@@ -68,6 +68,7 @@ GridFilter::GridFilter(std::shared_ptr<const GridMap> map, GridFilterConfig cfg,
       integrity_(map_->venue().beacons().size(), {cfg.integrity_threshold_db, cfg.integrity_alpha,
                                                   cfg.integrity_min_samples, cfg.integrity_max_sigma_m}),
       floor_classifier_(map_->venue(), {cfg.floor_prior_k, cfg.floor_prior_eps}),
+      fingerprint_map_(map_->venue(), {cfg.fingerprint_k, cfg.fingerprint_strongest}),
       level_selector_(cfg.level_smoothing_s, cfg.level_hysteresis),
       altimeter_(baro_cfg) {
   const std::size_t n = map_->size();
@@ -452,7 +453,7 @@ bool GridFilter::check_beacon(std::size_t beacon_index, double rssi) {
 }
 
 void GridFilter::on_rssi(double t, std::size_t beacon_index, double rssi) {
-  if (beacon_index >= map_->venue().beacons().size()) return;
+  if (beacon_index >= map_->venue().beacons().size() || !map_->venue().beacons()[beacon_index].modelled) return;
   now_ = t;
   if (!check_beacon(beacon_index, rssi)) return;
   const RssiReading reading{beacon_index, rssi};
@@ -463,13 +464,18 @@ void GridFilter::on_rssi_scan(double t, std::span<const RssiReading> readings) {
   now_ = t;
   scan_.clear();
   for (const auto& r : readings) {
-    if (r.beacon_index >= map_->venue().beacons().size() || !check_beacon(r.beacon_index, r.rssi)) continue;
+    if (r.beacon_index >= map_->venue().beacons().size() || !map_->venue().beacons()[r.beacon_index].modelled) continue;
+    if (!check_beacon(r.beacon_index, r.rssi)) continue;
     scan_.push_back(r);
   }
-  if (scan_.empty()) return;
-  floor_prior_active_ = multi_level_ && cfg_.floor_prior_weight > 0.0 && floor_classifier_.classify(scan_, floor_p_);
+  // The fingerprints and the floor vote compare the scan as it was heard: every beacon, also those
+  // without a model and those the integrity monitor distrusts.
+  neighbour_count_ = cfg_.fingerprint_weight > 0.0 ? fingerprint_map_.nearest(readings, neighbours_) : 0;
+  if (scan_.empty() && neighbour_count_ == 0) return;
+  floor_prior_active_ = multi_level_ && cfg_.floor_prior_weight > 0.0 && floor_classifier_.classify(readings, floor_p_);
   update_rssi(t, scan_);
   floor_prior_active_ = false;
+  neighbour_count_ = 0;
 }
 
 double GridFilter::expected_rssi(std::size_t beacon, std::size_t cell, Vec2 pos) const {
@@ -511,6 +517,29 @@ void GridFilter::update_rssi(double t, std::span<const RssiReading> readings) {
   }
   if (cfg_.estimate_rssi_offset) {
     for (std::size_t c = 0; c < n; ++c) dev_var_[c] += walk2;
+  }
+  // The scan's nearest training scans as a kernel density over position and level, mixed with the uniform
+  // prior over the cells (as the particle filter's fingerprint likelihood). The model reads the same scan,
+  // so it counts for less next to them.
+  if (neighbour_count_ > 0) {
+    for (std::size_t c = 0; c < n; ++c) loglik_[c] *= cfg_.fingerprint_model_weight;
+    const double s2 = cfg_.fingerprint_sigma_m * cfg_.fingerprint_sigma_m;
+    const double norm = 1.0 / (2.0 * std::numbers::pi * s2);
+    const double eps = std::clamp(cfg_.fingerprint_eps, 1e-9, 1.0);
+    const double uniform = eps / (static_cast<double>(n) * map_->cell_m() * map_->cell_m());
+    for (std::size_t c = 0; c < n; ++c) {
+      if (mass_[c] <= 0.0) continue;
+      const int level = map_->cell(c).level;
+      double sum = 0.0;
+      for (int k = 0; k < neighbour_count_; ++k) {
+        const auto& nb = neighbours_[static_cast<std::size_t>(k)];
+        if (multi_level_ && nb.level != level) continue;
+        const double dx = cx_[c] - nb.pos.x;
+        const double dy = cy_[c] - nb.pos.y;
+        sum += nb.weight * std::exp(-0.5 * (dx * dx + dy * dy) / s2);
+      }
+      loglik_[c] += cfg_.fingerprint_weight * std::log(uniform + (1.0 - eps) * norm * sum);
+    }
   }
   // The scan's floor classification as a likelihood on each cell's level (before the recovery statistic,
   // as in the particle filter).

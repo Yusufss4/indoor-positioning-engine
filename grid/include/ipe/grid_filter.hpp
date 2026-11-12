@@ -12,6 +12,7 @@
 #include "ipe/baro.hpp"
 #include "ipe/beacon_integrity.hpp"
 #include "ipe/filter.hpp"
+#include "ipe/fingerprint_map.hpp"
 #include "ipe/floor_classifier.hpp"
 #include "ipe/level_selector.hpp"
 #include "ipe/map_estimate.hpp"
@@ -94,6 +95,19 @@ struct GridFilterConfig {
   double floor_prior_weight = -1.0;
   int floor_prior_k = 5;
   double floor_prior_eps = 0.1;
+
+  /// Fingerprint likelihood on every cell, as pf.fingerprint_weight per particle: a kernel density around
+  /// each scan's nearest training scans (venues whose fingerprints carry positions). The grid needs no
+  /// proposal from it: every cell already holds mass. `fingerprint_model_weight` scales the log-distance
+  /// model's log-likelihood in a scan that has neighbours, as the particle filter's. Negative weight:
+  /// GridEngine takes these six from the engine config's pf.fingerprint_*; a GridFilter on its own treats
+  /// it as 0.
+  double fingerprint_weight = -1.0;
+  int fingerprint_k = 10;
+  int fingerprint_strongest = 40;
+  double fingerprint_sigma_m = 4.0;
+  double fingerprint_eps = 0.05;
+  double fingerprint_model_weight = 0.3;
 };
 
 /// The venue as a lattice of cells, built once and shared read-only by every GridFilter on that venue.
@@ -288,6 +302,9 @@ class GridFilter {
   FloorClassifier floor_classifier_;
   std::vector<double> floor_p_;      ///< Level probabilities of the scan being applied.
   bool floor_prior_active_ = false;  ///< Set while update_rssi applies a classified scan.
+  FingerprintMap fingerprint_map_;
+  std::array<FingerprintNeighbour, FingerprintMap::kMaxK> neighbours_{};  ///< Of the scan being applied.
+  int neighbour_count_ = 0;                                               ///< 0: the scan has none.
   LevelSelector level_selector_;
   std::optional<MapConsistentEstimate> map_estimate_;
   BaroAltimeter altimeter_;

@@ -350,8 +350,8 @@ void ParticleFilter::update_rssi(double t, std::span<const RssiReading> readings
       const double expected = expected_rssi(beacon, p.pos, p.level) + p.rssi_offset;
       ll += rssi_model_.log_likelihood(r.rssi - expected);
     }
-    ll *= cfg_.rssi_weight;
     if (fingerprint_active_) {
+      ll *= cfg_.fingerprint_model_weight;
       const double eps = std::clamp(cfg_.fingerprint_eps, 1e-9, 1.0);
       ll += cfg_.fingerprint_weight *
             std::log(eps / placeable_total_ + (1.0 - eps) * fingerprint_density(p.pos, p.level));

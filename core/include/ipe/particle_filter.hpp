@@ -140,17 +140,18 @@ struct ParticleFilterConfig {
   /// fingerprints) turns it off.
   double fingerprint_weight = 0.0;
   int fingerprint_k = 10;
-  int fingerprint_strongest = 20;
-  double fingerprint_sigma_m = 6.0;
+  int fingerprint_strongest = 40;
+  double fingerprint_sigma_m = 4.0;
   double fingerprint_eps = 0.05;
   /// With the fingerprint likelihood on, the first scan seeds the cloud from that density (instead of a
   /// beacon ring), and recovery injections are drawn from the last scan's if it is at most
   /// `fingerprint_max_age_s` old.
   bool fingerprint_proposal = true;
   double fingerprint_max_age_s = 5.0;
-  /// Scale of the log-distance model's log-likelihood in every RSSI update. Below 1 it counts for less
-  /// next to the fingerprints (a scan's readings are not independent); 0 leaves radio to the fingerprints.
-  double rssi_weight = 1.0;
+  /// Scale of the log-distance model's log-likelihood in a scan that has fingerprint neighbours. The two
+  /// read the same scan, and counting it twice in full makes the cloud too sure. A scan without neighbours,
+  /// single packets and venues without position fingerprints keep the model at full weight.
+  double fingerprint_model_weight = 0.3;
 };
 
 /// Sequential importance resampling filter fusing PDR steps, magnetometer

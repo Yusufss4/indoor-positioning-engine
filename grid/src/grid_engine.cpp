@@ -16,16 +16,26 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
     active_floor_rel, level_change_prob_step, level_change_prob_baro, baro_update_interval_s, baro_sigma_m,
     baro_outlier_prob, baro_offset_sigma_m, baro_offset_walk_m, level_smoothing_s, level_hysteresis,
     map_consistent_estimate, beacon_integrity, integrity_threshold_db, integrity_alpha, integrity_min_samples,
-    integrity_max_sigma_m, floor_prior_weight, floor_prior_k, floor_prior_eps)
+    integrity_max_sigma_m, floor_prior_weight, floor_prior_k, floor_prior_eps, fingerprint_weight, fingerprint_k,
+    fingerprint_strongest, fingerprint_sigma_m, fingerprint_eps, fingerprint_model_weight)
 
 namespace {
 
-/// `grid` with a negative floor_prior_weight replaced by the engine config's floor prior settings.
+/// `grid` with a negative floor_prior_weight replaced by the engine config's floor prior settings, and a
+/// negative fingerprint_weight by its fingerprint settings.
 GridFilterConfig resolve(GridFilterConfig grid, const EngineConfig& base) {
   if (grid.floor_prior_weight < 0.0) {
     grid.floor_prior_weight = base.pf.floor_prior_weight;
     grid.floor_prior_k = base.pf.floor_prior_k;
     grid.floor_prior_eps = base.pf.floor_prior_eps;
+  }
+  if (grid.fingerprint_weight < 0.0) {
+    grid.fingerprint_weight = base.pf.fingerprint_weight;
+    grid.fingerprint_k = base.pf.fingerprint_k;
+    grid.fingerprint_strongest = base.pf.fingerprint_strongest;
+    grid.fingerprint_sigma_m = base.pf.fingerprint_sigma_m;
+    grid.fingerprint_eps = base.pf.fingerprint_eps;
+    grid.fingerprint_model_weight = base.pf.fingerprint_model_weight;
   }
   return grid;
 }
