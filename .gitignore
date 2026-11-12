@@ -16,3 +16,5 @@ datasets/ipin/raw/
 datasets/ipin/out*/
 datasets/uji_ble/raw/
 datasets/uji_ble/out*/
+datasets/kaggle/raw/
+datasets/kaggle/out*/
