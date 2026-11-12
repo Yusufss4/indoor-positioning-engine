@@ -161,7 +161,65 @@ void ParticleFilter::remember_packet(double t, std::size_t beacon_index, double 
   history_count_ = std::min(history_count_ + 1, capacity);
 }
 
+double ParticleFilter::fingerprint_density(Vec2 pos, int level) const {
+  const double s2 = cfg_.fingerprint_sigma_m * cfg_.fingerprint_sigma_m;
+  double sum = 0.0;
+  for (int k = 0; k < neighbour_count_; ++k) {
+    const auto& n = neighbours_[static_cast<std::size_t>(k)];
+    if (multi_level_ && n.level != level) continue;
+    const Vec2 d = pos - n.pos;
+    sum += n.weight * std::exp(-0.5 * (d.x * d.x + d.y * d.y) / s2);
+  }
+  return sum / (2.0 * std::numbers::pi * s2);
+}
+
+Particle ParticleFilter::sample_fingerprint_particle() {
+  double u = rng_.uniform();
+  int k = 0;
+  for (; k + 1 < neighbour_count_; ++k) {
+    u -= neighbours_[static_cast<std::size_t>(k)].weight;
+    if (u < 0.0) break;
+  }
+  const auto& n = neighbours_[static_cast<std::size_t>(k)];
+  Particle p;
+  p.heading = rng_.uniform(-std::numbers::pi, std::numbers::pi);
+  p.step_scale = std::max(0.5, rng_.normal(1.0, cfg_.step_scale_sigma));
+  p.rssi_offset = cfg_.estimate_rssi_offset ? rng_.normal(0.0, cfg_.rssi_offset_sigma) : 0.0;
+  p.level = multi_level_ ? n.level : 0;
+  // Around the neighbour, on ground a particle may stand on. A neighbour hemmed in on every try (a
+  // training scan interpolated across a wall) falls back to the level's uniform prior.
+  bool placed = false;
+  for (int i = 0; i < kFingerprintTries && !placed; ++i) {
+    p.pos = n.pos + Vec2{rng_.normal(0.0, cfg_.fingerprint_sigma_m), rng_.normal(0.0, cfg_.fingerprint_sigma_m)};
+    placed = placeable(p.pos, p.level);
+  }
+  if (!placed) p.pos = sample_position(multi_level_ ? p.level : -1, p.level);
+  if (multi_level_ && baro_ready_) p.baro_offset = fresh_baro_offset(p.level);
+  return p;
+}
+
+void ParticleFilter::seed_from_fingerprints() {
+  const double f = std::clamp(cfg_.init_proposal_fraction, 0.0, 1.0);
+  for (auto& p : particles_) p = rng_.bernoulli(f) ? sample_fingerprint_particle() : sample_uniform_particle();
+  // Importance weight = prior / proposal, with the prior uniform over the placeable area of all levels
+  // and the proposal the same mixture the draws came from. Kernels cut off by a wall or the venue's edge
+  // are redrawn inside, which the density here does not renormalise for: the weights are slightly low
+  // next to an edge, and the scan's likelihood, applied next, dominates them.
+  double sum = 0.0;
+  for (auto& p : particles_) {
+    p.weight = placeable(p.pos, p.level)
+                   ? 1.0 / ((1.0 - f) + f * placeable_total_ * fingerprint_density(p.pos, p.level))
+                   : 0.0;
+    sum += p.weight;
+  }
+  for (auto& p : particles_) p.weight /= sum;
+  radio_seeded_ = true;
+  localized_ = true;
+  update_estimate(now_);
+}
+
 Particle ParticleFilter::sample_recovery_particle() {
+  if (fingerprint_proposal_fresh()) return sample_fingerprint_particle();
   if (!cfg_.recovery_proposal) return sample_uniform_particle();
   std::array<std::size_t, kMaxProposalHistory> fresh{};
   std::size_t n = 0;

@@ -11,6 +11,7 @@
 #include "ipe/baro.hpp"
 #include "ipe/beacon_integrity.hpp"
 #include "ipe/filter.hpp"
+#include "ipe/fingerprint_map.hpp"
 #include "ipe/floor_classifier.hpp"
 #include "ipe/level_selector.hpp"
 #include "ipe/map_estimate.hpp"
@@ -130,6 +131,26 @@ struct ParticleFilterConfig {
   double floor_prior_eps = 0.1;
   /// Recovery injections take their level from the last classified scan if it is at most this old.
   double floor_prior_max_age_s = 5.0;
+
+  /// Fingerprint likelihood, for venues whose fingerprints carry positions (training scans). Each scan's
+  /// `fingerprint_k` nearest training scans, compared over its `fingerprint_strongest` strongest readings,
+  /// form a kernel density over position and level: Gaussians of `fingerprint_sigma_m` around the
+  /// neighbours, mixed with `fingerprint_eps` of the uniform prior. It is applied per scan as
+  /// `fingerprint_weight * log density`, next to the log-distance model. 0 (or a venue without such
+  /// fingerprints) turns it off.
+  double fingerprint_weight = 0.0;
+  int fingerprint_k = 10;
+  int fingerprint_strongest = 20;
+  double fingerprint_sigma_m = 6.0;
+  double fingerprint_eps = 0.05;
+  /// With the fingerprint likelihood on, the first scan seeds the cloud from that density (instead of a
+  /// beacon ring), and recovery injections are drawn from the last scan's if it is at most
+  /// `fingerprint_max_age_s` old.
+  bool fingerprint_proposal = true;
+  double fingerprint_max_age_s = 5.0;
+  /// Scale of the log-distance model's log-likelihood in every RSSI update. Below 1 it counts for less
+  /// next to the fingerprints (a scan's readings are not independent); 0 leaves radio to the fingerprints.
+  double rssi_weight = 1.0;
 };
 
 /// Sequential importance resampling filter fusing PDR steps, magnetometer
@@ -202,7 +223,8 @@ class ParticleFilter {
   /// Ring draws in a closed region per particle that are drawn again without using up a try.
   static constexpr int kClosedRedraws = 16;
   static constexpr double kMaxFloorDb = 40.0;
-  static constexpr int kFootprintTries = 64;  ///< Enough for a footprint covering 10% of the bounds.
+  static constexpr int kFootprintTries = 64;   ///< Enough for a footprint covering 10% of the bounds.
+  static constexpr int kFingerprintTries = 8;  ///< Draws around a fingerprint neighbour before giving up on it.
 
   [[nodiscard]] Ring ring_for(const Beacon& beacon, double rssi, double rssi_offset) const;
   /// Draws a particle whose device offset and distance from `beacon` are
@@ -211,6 +233,17 @@ class ParticleFilter {
   /// Probability the ring proposal puts a particle on `level`.
   [[nodiscard]] double ring_level_prob(int beacon_level, int level) const;
   Particle sample_recovery_particle();
+  /// Density [1/m^2] of the current scan's fingerprint neighbours at `pos` on `level`.
+  [[nodiscard]] double fingerprint_density(Vec2 pos, int level) const;
+  /// A particle near one of the current scan's fingerprint neighbours, drawn by their weights.
+  Particle sample_fingerprint_particle();
+  /// Replaces the cloud with draws from the fingerprint density mixed with the uniform prior, importance-
+  /// weighted back to the prior; the scan's likelihood is applied afterwards.
+  void seed_from_fingerprints();
+  [[nodiscard]] bool fingerprint_proposal_fresh() const {
+    return cfg_.fingerprint_proposal && neighbour_count_ > 0 &&
+           now_ - last_fingerprint_t_ <= cfg_.fingerprint_max_age_s;
+  }
   void remember_packet(double t, std::size_t beacon_index, double rssi);
   /// 10 log10 of the free-space distance at which the beacon is heard at `rssi`.
   [[nodiscard]] double apparent_range(std::size_t beacon_index, double rssi) const;
@@ -316,6 +349,12 @@ class ParticleFilter {
   std::vector<double> floor_p_;  ///< Level probabilities of the current scan.
   bool floor_prior_active_ = false;
   double last_floor_t_ = -1e300;  ///< Time of the last classified scan (floor_p_ holds its output).
+  FingerprintMap fingerprint_map_;
+  std::array<FingerprintNeighbour, FingerprintMap::kMaxK> neighbours_{};  ///< Of the last scan that had any.
+  int neighbour_count_ = 0;
+  double last_fingerprint_t_ = -1e300;
+  bool fingerprint_active_ = false;  ///< The update in progress applies `neighbours_`.
+  double placeable_total_ = 0.0;     ///< Area a particle may be placed in, all levels together [m^2].
   std::vector<double> level_weight_;
   LevelSelector level_selector_;  ///< The reported level; the filter's own decisions use the most likely one.
 };

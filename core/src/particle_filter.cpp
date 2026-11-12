@@ -31,6 +31,7 @@ ParticleFilter::ParticleFilter(const Venue& venue, ParticleFilterConfig cfg, Rss
       multi_level_(venue.multi_level()),
       altimeter_(baro_cfg),
       floor_classifier_(venue, {cfg.floor_prior_k, cfg.floor_prior_eps}),
+      fingerprint_map_(venue, {cfg.fingerprint_k, cfg.fingerprint_strongest}),
       level_selector_(cfg.level_smoothing_s, cfg.level_hysteresis) {
   floor_p_.assign(static_cast<std::size_t>(std::max(venue.level_count(), 1)), 1.0);
   cfg_.num_particles = std::max(cfg_.num_particles, 1);
@@ -46,6 +47,7 @@ ParticleFilter::ParticleFilter(const Venue& venue, ParticleFilterConfig cfg, Rss
     // Nothing to avoid: no map, and every draw stays as it was.
     if (!reachable_->any_closed()) reachable_.reset();
   }
+  for (int l = 0; l < venue.level_count(); ++l) placeable_total_ += placeable_area(l);
   initialize_uniform();
 }
 
@@ -258,7 +260,7 @@ void ParticleFilter::on_heading(double t, double heading, double sigma) {
 }
 
 void ParticleFilter::on_rssi(double t, std::size_t beacon_index, double rssi) {
-  if (beacon_index >= venue_->beacons().size()) return;
+  if (beacon_index >= venue_->beacons().size() || !venue_->beacons()[beacon_index].modelled) return;
   now_ = t;
   if (!check_beacon(beacon_index, rssi)) return;
   remember_packet(t, beacon_index, rssi);
@@ -285,12 +287,23 @@ void ParticleFilter::on_rssi_scan(double t, std::span<const RssiReading> reading
   now_ = t;
   scan_.clear();
   for (const auto& r : readings) {
-    if (r.beacon_index >= venue_->beacons().size() || !check_beacon(r.beacon_index, r.rssi)) continue;
+    if (r.beacon_index >= venue_->beacons().size() || !venue_->beacons()[r.beacon_index].modelled) continue;
+    if (!check_beacon(r.beacon_index, r.rssi)) continue;
     remember_packet(t, r.beacon_index, r.rssi);
     scan_.push_back(r);
   }
-  if (scan_.empty()) return;
-  if (cfg_.init_proposal && !radio_seeded_) {
+  // The fingerprints compare the scan as it was heard: every beacon, also those without a model and
+  // those the integrity monitor distrusts (a moved beacon is in the training scans where it is now).
+  const int found = cfg_.fingerprint_weight > 0.0 ? fingerprint_map_.nearest(readings, neighbours_) : 0;
+  if (found > 0) {
+    neighbour_count_ = found;
+    last_fingerprint_t_ = t;
+  }
+  if (scan_.empty() && found == 0) return;
+  if (found > 0 && cfg_.fingerprint_proposal && !radio_seeded_) {
+    seed_from_fingerprints();
+    flush_pending();
+  } else if (cfg_.init_proposal && !radio_seeded_ && !scan_.empty()) {
     // A scan is already a batch, so no collection window: seed from the
     // shortest apparent range among its readings and any lone packets waiting.
     const auto best_in_scan = std::min_element(scan_.begin(), scan_.end(), [&](const auto& a, const auto& b) {
@@ -307,10 +320,13 @@ void ParticleFilter::on_rssi_scan(double t, std::span<const RssiReading> reading
     seed_from_beacon(beacon, rssi);
     flush_pending();
   }
-  floor_prior_active_ = multi_level_ && cfg_.floor_prior_weight > 0.0 && floor_classifier_.classify(scan_, floor_p_);
+  // Like the fingerprint neighbours, the floor vote compares the scan as it was heard.
+  floor_prior_active_ = multi_level_ && cfg_.floor_prior_weight > 0.0 && floor_classifier_.classify(readings, floor_p_);
   if (floor_prior_active_) last_floor_t_ = t;
+  fingerprint_active_ = found > 0;
   update_rssi(t, scan_);
   floor_prior_active_ = false;
+  fingerprint_active_ = false;
 }
 
 void ParticleFilter::update_rssi(double t, std::size_t beacon_index, double rssi) {
@@ -333,6 +349,12 @@ void ParticleFilter::update_rssi(double t, std::span<const RssiReading> readings
       const Beacon& beacon = venue_->beacons()[r.beacon_index];
       const double expected = expected_rssi(beacon, p.pos, p.level) + p.rssi_offset;
       ll += rssi_model_.log_likelihood(r.rssi - expected);
+    }
+    ll *= cfg_.rssi_weight;
+    if (fingerprint_active_) {
+      const double eps = std::clamp(cfg_.fingerprint_eps, 1e-9, 1.0);
+      ll += cfg_.fingerprint_weight *
+            std::log(eps / placeable_total_ + (1.0 - eps) * fingerprint_density(p.pos, p.level));
     }
     // Floor classifier output for this scan, as a likelihood on the particle's level. It is part of the
     // recovery statistic, so a cloud on a floor the classifier rejects draws injections.

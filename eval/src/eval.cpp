@@ -31,7 +31,8 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
     level_change_prob_baro, baro_update_interval_s, baro_sigma_m, baro_outlier_prob, baro_offset_sigma_m,
     baro_offset_walk_m, baro_jump, baro_jump_radius_m, baro_jump_hold_s, baro_jump_prob, baro_reseed_keep_reference,
     floor_prior_weight, floor_prior_k, floor_prior_eps, floor_prior_max_age_s, closed_region_fraction,
-    closed_region_min_m2)
+    closed_region_min_m2, fingerprint_weight, fingerprint_k, fingerprint_strongest, fingerprint_sigma_m,
+    fingerprint_eps, fingerprint_proposal, fingerprint_max_age_s, rssi_weight)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(TrackSmootherConfig, enabled, tau_s, max_correction_mps, snap_m,
                                                 extrapolate_steps, max_step_interval_s)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(RoomEventConfig, enter_prob, exit_prob, enter_dwell_s, exit_dwell_s,
