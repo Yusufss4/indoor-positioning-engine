@@ -1,5 +1,7 @@
 #include "ipe/eval.hpp"
 
+#include "ipe/config.hpp"
+
 #include "ipe/trace_player.hpp"
 
 #include <algorithm>
@@ -13,84 +15,13 @@
 
 #include <nlohmann/json.hpp>
 
-namespace ipe {
+namespace ipe::eval {
 
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(PdrConfig, gravity, lowpass_alpha, peak_threshold, valley_threshold,
-                                                min_step_interval, weinberg_k, min_step_length, max_step_length)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(RssiModelConfig, sigma_db, outlier_prob, outlier_range_db, min_distance,
-                                                wall_aware)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(BaroConfig, lowpass_tau_s, sea_level_hpa)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
-    GridFilterConfig, cell_m, max_cells, max_reach_m, closed_region_fraction, closed_region_min_m2, heading_bins,
-    heading_sigma_deg, heading_outlier_prob, step_length_sigma, step_length_rel_sigma, estimate_rssi_offset,
-    rssi_offset_sigma, rssi_offset_walk, teleport_rate_per_s, teleport_period_s, level_change_prob_step,
-    level_change_prob_baro, baro_update_interval_s, baro_sigma_m, baro_outlier_prob, baro_offset_sigma_m,
-    baro_offset_walk_m, level_smoothing_s, level_hysteresis, map_consistent_estimate, beacon_integrity,
-    integrity_threshold_db, integrity_alpha, integrity_min_samples, integrity_max_sigma_m, floor_prior_weight,
-    floor_prior_k, floor_prior_eps, fingerprint_weight, fingerprint_k, fingerprint_strongest, fingerprint_sigma_m,
-    fingerprint_eps, fingerprint_model_weight)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(TrackSmootherConfig, enabled, tau_s, max_correction_mps, snap_m,
-                                                extrapolate_steps, max_step_interval_s)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(RoomEventConfig, enter_prob, exit_prob, enter_dwell_s, exit_dwell_s,
-                                                update_period_s)
-
-void to_json(nlohmann::json& j, const EngineConfig& c) {
-  j = nlohmann::json{{"pdr", c.pdr},
-                     {"rssi", c.rssi},
-                     {"baro", c.baro},
-                     {"filter", c.filter},
-                     {"rooms", c.rooms},
-                     {"smoothing", c.smoothing},
-                     {"mag_heading_sigma_deg", c.mag_heading_sigma_deg}};
-}
-
-void from_json(const nlohmann::json& j, EngineConfig& c) {
-  j.at("pdr").get_to(c.pdr);
-  j.at("rssi").get_to(c.rssi);
-  if (j.contains("baro")) j.at("baro").get_to(c.baro);
-  j.at("filter").get_to(c.filter);
-  if (j.contains("rooms")) j.at("rooms").get_to(c.rooms);
-  if (j.contains("smoothing")) j.at("smoothing").get_to(c.smoothing);
-  j.at("mag_heading_sigma_deg").get_to(c.mag_heading_sigma_deg);
-}
-
-namespace eval {
-namespace {
-
-void check_known_keys(const nlohmann::json& base, const nlohmann::json& patch, const std::string& path) {
-  if (!patch.is_object()) return;
-  for (const auto& [key, value] : patch.items()) {
-    const std::string full = path.empty() ? key : path + "." + key;
-    if (!base.is_object() || !base.contains(key)) throw std::invalid_argument("unknown config key '" + full + "'");
-    // A section given as a scalar would otherwise fail deep inside the JSON library.
-    if (base.at(key).is_object() && !value.is_object() && !value.is_null()) {
-      throw std::invalid_argument("config key '" + full + "' is a section and needs an object");
-    }
-    check_known_keys(base.at(key), value, full);
+void check_filter_name(std::string_view name) {
+  if (name != kFilterName) {
+    throw std::invalid_argument("unknown filter '" + std::string(name) + "' (the engine has one: " + kFilterName + ")");
   }
 }
-
-}  // namespace
-
-EngineConfig preset_config(std::string_view preset) {
-  if (preset != "grid") throw std::invalid_argument("unknown preset '" + std::string(preset) + "' (expected grid)");
-  return {};
-}
-
-const std::vector<std::string>& preset_names() {
-  static const std::vector<std::string> names = {"grid"};
-  return names;
-}
-
-void apply_config_overrides(EngineConfig& cfg, std::string_view json_patch) {
-  nlohmann::json j = cfg;
-  const auto patch = nlohmann::json::parse(json_patch);
-  check_known_keys(j, patch, "");
-  j.merge_patch(patch);
-  cfg = j.get<EngineConfig>();
-}
-
-std::string config_to_json(const EngineConfig& cfg, int indent) { return nlohmann::json(cfg).dump(indent); }
 
 double percentile(std::vector<double> values, double p) {
   if (values.empty()) return 0.0;
@@ -389,5 +320,4 @@ void write_room_events_csv(const std::string& path, const Venue& venue, const Re
   }
 }
 
-}  // namespace eval
-}  // namespace ipe
+}  // namespace ipe::eval

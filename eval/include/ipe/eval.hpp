@@ -17,16 +17,11 @@
 
 namespace ipe::eval {
 
-/// Named engine configurations. The only one is `grid`: the grid filter on the venue's walkable cells,
-/// with wall-aware RSSI and the device offset state. Variants are config patches (`--config`, `--set`) on
-/// top of it.
-EngineConfig preset_config(std::string_view preset);
-const std::vector<std::string>& preset_names();
-
-/// RFC 7386 merge patch on top of `cfg`. Unknown keys throw, so typos in
-/// experiment configs fail loudly instead of silently using defaults.
-void apply_config_overrides(EngineConfig& cfg, std::string_view json_patch);
-std::string config_to_json(const EngineConfig& cfg, int indent = 2);
+/// The name results are filed under: the engine's filter. There were several once, and result files, the
+/// baselines and the tools' `--filter` / `--presets` options still carry the layer.
+inline constexpr const char* kFilterName = "grid";
+/// Throws std::invalid_argument unless `name` is kFilterName.
+void check_filter_name(std::string_view name);
 
 struct Metrics {
   std::size_t samples = 0;    ///< Ground-truth samples evaluated (after warm-up).

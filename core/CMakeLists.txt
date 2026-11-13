@@ -1,6 +1,7 @@
 add_library(ipe_core STATIC
   src/baro.cpp
   src/beacon_integrity.cpp
+  src/config.cpp
   src/engine.cpp
   src/fingerprint_map.cpp
   src/floor_classifier.cpp

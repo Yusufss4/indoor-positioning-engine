@@ -237,7 +237,7 @@ TEST(TrackSmoother, DisabledEngineReportsTheFilterEstimate) {
   const auto venue = load_venue_file(sc.venue_path);
   const auto trace = sim::simulate(sc, venue);
   for (const bool enabled : {false, true}) {
-    EngineConfig cfg = eval::preset_config("grid");
+    EngineConfig cfg;
     cfg.smoothing.enabled = enabled;
     PositioningEngine engine(venue, cfg);
     TracePlayer player(venue, trace);

@@ -5,6 +5,7 @@
 #include <nlohmann/json.hpp>
 
 #include "cli.hpp"
+#include "ipe/config.hpp"
 #include "ipe/eval.hpp"
 #include "ipe/simulator.hpp"
 
@@ -18,7 +19,7 @@ JSON. With --scenario the trace is simulated in memory first.
 
 options:
   --filter NAME          grid, the only filter (kept for existing scripts)
-  --config FILE          JSON merge patch applied to the preset config
+  --config FILE          JSON merge patch applied to the default config
   --set JSON             inline JSON merge patch, e.g. '{"filter":{"heading_bins":72}}'
   --warmup SECONDS       exclude the first seconds from error stats (default 5)
   --out FILE             per-truth-sample estimates CSV
@@ -47,11 +48,12 @@ int main(int argc, char** argv) {
       return 0;
     }
 
-    auto cfg = ipe::eval::preset_config(args.get("filter", "grid"));
-    if (args.has("config")) ipe::eval::apply_config_overrides(cfg, read_file(args.get("config")));
-    if (args.has("set")) ipe::eval::apply_config_overrides(cfg, args.get("set"));
+    ipe::eval::check_filter_name(args.get("filter", ipe::eval::kFilterName));
+    ipe::EngineConfig cfg;
+    if (args.has("config")) ipe::apply_config_patch(cfg, read_file(args.get("config")));
+    if (args.has("set")) ipe::apply_config_patch(cfg, args.get("set"));
     if (args.has("print-config")) {
-      std::cout << ipe::eval::config_to_json(cfg) << "\n";
+      std::cout << ipe::config_to_json(cfg) << "\n";
       return 0;
     }
 

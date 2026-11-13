@@ -5,6 +5,7 @@
 #include <fstream>
 #include <sstream>
 
+#include "ipe/config.hpp"
 #include "ipe/eval.hpp"
 #include "ipe/geo.hpp"
 #include "ipe/trace.hpp"
@@ -204,8 +205,7 @@ TEST(Import, CommittedExportsAreUpToDate) {
 
 TEST(Import, WebDemoRecordingsAreConsistent) {
   // Regenerate with: datasets/msil/export_demo.py
-  auto cfg = eval::preset_config("grid");
-  eval::apply_config_overrides(cfg, slurp(test::data_path("configs/fingerprint.json")));
+  EXPECT_GT(config_from_json(slurp(test::data_path("configs/fingerprint.json"))).filter.fingerprint_weight, 0.0);
   int traces = 0;
   for (const auto& floor : fs::directory_iterator(test::data_path("real"))) {
     if (!floor.is_directory()) continue;
