@@ -1043,9 +1043,15 @@ accuracy and smoothness columns before and after, since nothing here runs withou
 - **The uncertainty is still too small** (coverage95 25–51%), and the reported floor in Nuremberg changes
   more often than before.
 
+**Kaggle.** On the full competition set the same settings take the held-out walks of the 24 test
+buildings from 13.0 to 8.4 m (Kaggle metric, causal, 1,126 walks). Replaying each walk forwards and
+backwards and combining the two gives 6.2 m, and snapping to surveyed waypoints 5.9 m. Late submissions
+of the test walks score 8.92 m (before) and 5.31 m on the private leaderboard, against the winner's
+1.50 m ([benchmarks.md](benchmarks.md#kaggle-indoor-location--navigation-2021)).
+
 **Not done.** The winners of the Kaggle competition optimise each whole walk offline and learn the
 relative motion from the sensors. The engine's offline mode here is two causal passes, forwards and
-backwards, combined ([benchmarks.md](benchmarks.md#kaggle-indoor-location--navigation-2021)).
+backwards, combined.
 
 ## Open questions
 
