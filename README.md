@@ -172,6 +172,11 @@ emcmake cmake -S . -B build-wasm -DCMAKE_BUILD_TYPE=Release && cmake --build bui
 python3 -m http.server -d build-wasm/site 8000   # open http://localhost:8000
 ```
 
+Every build copies `data/` into the site again. With the full Kaggle set converted
+([docs/benchmarks.md](docs/benchmarks.md#reproduce)), `datasets/kaggle/export_demo.py` adds one held-out
+walk per floor of its 24 test buildings to the local demo's menu (`data/real_kaggle/`, git-ignored: the
+competition's data may not be redistributed, so the deployed demo does not have them).
+
 ![web demo](docs/img/web_demo.png)
 
 The 2D view draws one floor at a time: the walker's floor by default, or any floor picked in the Floor

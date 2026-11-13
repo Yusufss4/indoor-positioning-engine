@@ -268,6 +268,7 @@ datasets/kaggle/fetch.sh
 .venv/bin/python datasets/kaggle/submit.py --converted datasets/kaggle/out_fp --check-floors
 .venv/bin/python datasets/kaggle/submit.py --converted datasets/kaggle/out_fp \
     --config data/configs/fingerprint.json --two-pass --snap 6 --out datasets/kaggle/out_fp/submission.csv
+.venv/bin/python datasets/kaggle/export_demo.py                      # local web demo: a walk per floor
 ```
 
 `evaluate.py` prints, per walk and per group, CEP50/CEP95, the floor hit rate, the IPIN metric (also the

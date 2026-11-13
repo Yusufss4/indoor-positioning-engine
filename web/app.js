@@ -1,7 +1,7 @@
 "use strict";
 
 const COLORS = {
-  truth: "#222", grid: "#2ca02c", beacon: "#7f3fbf",
+  truth: "#222", grid: "#2ca02c", beacon: "#7f3fbf", beaconUnmodelled: "#c9b3e3",
   wall: "rgba(29, 78, 137, 0.45)", ink: "#1d4e89", paper: "#fbfcfe",
 };
 const FILTER_TITLES = { grid: "Grid filter" };
@@ -59,6 +59,8 @@ const RECORDING_SOURCES = [
   { dir: "data/real/", label: "Real recordings (Microsoft Indoor Location)" },
   { dir: "data/real_ipin/", label: "Real recordings (IPIN competition, several floors)" },
   { dir: "data/real_uji/", label: "Real recordings (UJI BLE, standing still)" },
+  // Written by datasets/kaggle/export_demo.py on a machine that has the competition data; never deployed.
+  { dir: "data/real_kaggle/", label: "Real recordings (Kaggle indoor location, local only)" },
 ];
 
 async function loadJson(url) {
@@ -86,13 +88,19 @@ async function loadRealDemos() {
     } catch {
       continue;
     }
-    const group = document.createElement("optgroup");
-    group.label = index.menu || src.label;
+    // One menu group per index, or one per `group` of its entries (a building, where an index has many).
+    const groups = new Map();
     for (const d of index.demos) {
+      const label = d.group || index.menu || src.label;
+      if (!groups.has(label)) {
+        const group = document.createElement("optgroup");
+        group.label = label;
+        groups.set(label, group);
+        el("scenario").append(group);
+      }
       realDemos.set(d.id, { ...d, base });
-      group.append(new Option(d.title, `real:${d.id}`));
+      groups.get(label).append(new Option(d.title, `real:${d.id}`));
     }
-    el("scenario").append(group);
   }
 }
 
@@ -509,7 +517,8 @@ function draw(level, idx) {
       ctx.lineWidth = 2;
       ctx.stroke();
     }
-    ctx.fillStyle = COLORS.beacon;
+    // Pale: heard in the fingerprints only, with no fitted position or radio model ("model": false).
+    ctx.fillStyle = b.model === false ? COLORS.beaconUnmodelled : COLORS.beacon;
     if (dense) {
       ctx.fillRect(T.toX(b.x) - 1.5, T.toY(b.y) - 1.5, 3, 3);
       continue;
@@ -915,8 +924,9 @@ function beaconRows(b, idx) {
   const floors = Math.abs(t.level - b.level);
   const rows = [
     ["floor", levelName(b.level)],
-    ["position", `${b.x.toFixed(1)}, ${b.y.toFixed(1)} m`],
+    [b.model === false ? "heard strongest at" : "position", `${b.x.toFixed(1)}, ${b.y.toFixed(1)} m`],
   ];
+  if (b.model === false) rows.push(["radio model", "none: used in fingerprints only"]);
   if (b.tx_power !== undefined) rows.push(["tx power (1 m)", `${b.tx_power.toFixed(1)} dBm`]);
   if (b.path_loss_exp !== undefined) rows.push(["path-loss exponent", b.path_loss_exp.toFixed(2)]);
   rows.push(["walker distance", `${fmtM(d)}${floors ? `, ${floors} floor${floors > 1 ? "s" : ""} away` : ""}`]);

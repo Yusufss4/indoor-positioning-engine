@@ -273,6 +273,23 @@ def load_floor(floor_dir: Path) -> Floor:
     return floor
 
 
+WEB_MERCATOR_RADIUS_M = 6378137.0
+
+
+def georef(floor: Floor) -> dict:
+    """The venue's ``georef``: where the plan's south-west corner is on the globe.
+
+    The plans are in GCJ-02 (China's offset datum), about 500 m from WGS84 here. The offset varies by
+    under a metre across a floor, so shifting the origin is enough. The sample gives the plan in degrees;
+    the full competition set gives it in Web Mercator metres."""
+    lon, lat = floor.lon0, floor.lat0
+    if abs(lon) > 180.0 or abs(lat) > 90.0:
+        lon, lat = (math.degrees(lon / WEB_MERCATOR_RADIUS_M),
+                    math.degrees(2.0 * math.atan(math.exp(lat / WEB_MERCATOR_RADIUS_M)) - math.pi / 2.0))
+    origin_lon, origin_lat = gcj02_to_wgs84(lon, lat)
+    return {"origin_lat": origin_lat, "origin_lon": origin_lon, "rotation_deg": 0}
+
+
 def room_list(floor: Floor) -> list[dict]:
     """The venue's ``rooms``: one per unit outline (outer ring, closing point dropped), named for enter/exit
     events. Slivers under 0.5 m² are left out."""
@@ -467,14 +484,11 @@ def convert_floor(site: str, floor_name: str, floor_dir: Path, paths: list[PathD
     report["fit_rms_db_median"] = float(np.median([t.rms_db for t in txs])) if txs else float("nan")
 
     name = f"{site}_{floor_name}"
-    # The plans are in GCJ-02 (China's offset datum), about 500 m from WGS84 here. The offset varies
-    # by under a metre across a floor, so shifting the origin is enough.
-    origin_lon, origin_lat = gcj02_to_wgs84(floor.lon0, floor.lat0)
     venue = {
         "name": name,
         "bounds": [0, 0, round(floor.width, 3), round(floor.height, 3)],
         "wall_attenuation_db": args.wall_attenuation_db,
-        "georef": {"origin_lat": origin_lat, "origin_lon": origin_lon, "rotation_deg": 0},
+        "georef": georef(floor),
         "walls": [[round(float(v), 3) for v in w] for w in wall_sets[mode]],
         "rooms": room_list(floor),
         "beacons": [

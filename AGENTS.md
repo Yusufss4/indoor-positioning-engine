@@ -49,11 +49,14 @@ a regression suite measure accuracy.
 - `datasets/kaggle` - the full Kaggle "Indoor Location & Navigation" set (204 buildings; MSIL is its public
   two-building sample). `fetch.sh` needs a Kaggle token; `datasets/msil/convert.py --kaggle` converts it;
   `submit.py` builds a submission file and uploads nothing. The competition rules forbid redistribution:
-  nothing converted from it is committed, only aggregate numbers in the docs.
+  nothing converted from it is committed, only aggregate numbers in the docs. `export_demo.py` writes one
+  held-out walk per floor to `data/real_kaggle/` for the web demo; that folder is git-ignored and must
+  stay so, and the deployed demo does not have it.
 - `datasets/uji_ble` - UJI BLE fingerprints (CC BY): RSSI model study, venues in `data/uji_ble/` and
   standing-still traces ([docs/uji_ble.md](docs/uji_ble.md)).
 - `data/real_ipin`, `data/real_uji` - web demo recordings written by `export_demo.py` in those folders
-  (`data/real` is MSIL's and is rewritten by its own script). The demo reads every `demos.json`.
+  (`data/real` is MSIL's and is rewritten by its own script). The demo reads every `demos.json` that
+  `RECORDING_SOURCES` in `web/app.js` lists and skips the ones that are missing.
 - `datasets/common` - helpers shared by the real-data converters (transmitter fit, wall geometry, georef,
   trace writer, fingerprint tables). MSIL output must stay byte-identical when they change. `offline.py`
   holds the offline steps (two-pass replay, gap filling, waypoint snapping) that `evaluate.py --two-pass
