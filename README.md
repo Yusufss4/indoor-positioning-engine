@@ -117,6 +117,11 @@ Two more public datasets test what MSIL cannot:
   barely separates floors, although a Wi-Fi fingerprint finds the floor for 93–95% of scans. An opt-in
   floor model (`data/configs/ipin.json`) raises the floor hit to 86% / 70% on the validation walks, less on
   the scoring walks ([docs/ipin.md](docs/ipin.md#floor-model)).
+- **Against the competitions' leaderboards** ([docs/benchmarks.md](docs/benchmarks.md)): with the training
+  scans used as position fingerprints (opt-in, `data/configs/fingerprint.json`), the IPIN competition's
+  metric on its scoring walks falls from 15–42 m to 6–11 m per walk, which is the range of the 2023 and
+  2024 winners (5.3 and 7.9 m). On Kaggle's indoor location competition the engine stays well behind the
+  winner's 1.50 m; that page says by how much and why.
 - **UJI BLE** ([docs/uji_ble.md](docs/uji_ble.md), [`datasets/uji_ble/`](datasets/uji_ble/)): surveyed
   beacons and standing-still fingerprints. They confirm the 5 dB RSSI spread, measure about 1 dB per
   shelf edge rather than 3 dB per wall, and give 1.4–1.9 m CEP50 from BLE alone.

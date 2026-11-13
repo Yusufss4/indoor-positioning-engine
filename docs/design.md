@@ -26,6 +26,7 @@ use it, so they see identical inputs.
 | Particle filter: sampling, motion, measurement updates, resampling, recovery, estimate | `core/src/particle_filter.cpp` |
 | Beacon-driven init/recovery proposals | `core/src/particle_filter_proposal.cpp` |
 | Beacon integrity monitor | `core/src/beacon_integrity.cpp` |
+| Nearest training scans of a scan (fingerprint likelihood) | `core/src/fingerprint_map.cpp` |
 | Estimate kept on the map (dominant group of a split cloud) | `core/src/map_estimate.cpp` |
 | Closed regions no particle is placed in (rooms without a door) | `core/src/reachable_area.cpp` |
 | Reported level (averaged level weights with hysteresis) | `core/src/level_selector.cpp` |
@@ -99,6 +100,17 @@ State per particle: position, heading, step-length scale, device RSSI offset.
   as independent; tempering the scan's likelihood made the spread honest but cost accuracy at every
   setting tried, and was removed (see [real_data.md](real_data.md#scans-as-one-update)). A one-reading
   scan is bit-identical to `on_rssi`.
+- **Fingerprints** (`pf.fingerprint_weight`, off by default; `data/configs/fingerprint.json`). A venue can
+  carry training scans with the position they were taken at. For each scan `FingerprintMap` returns the
+  10 nearest training scans, compared over the scan's 40 strongest readings (missing ones at -100 dBm),
+  with weights 1 / (RMS difference + 1 dB). They form a kernel density over position and level: 4 m
+  Gaussians around the neighbours plus 5% of the uniform prior. The filter adds `fingerprint_weight` times
+  its logarithm to the scan's log-likelihood and scales the log-distance term by
+  `fingerprint_model_weight` (0.3), since both read the same scan. The first scan seeds the cloud from
+  that density, with weights prior / proposal, and recovery injections are drawn from the last scan's.
+  Beacons with `"model": false` are fingerprint dimensions only. A scan without neighbours, single
+  packets and venues without positions behave exactly as before
+  ([benchmarks.md](benchmarks.md#what-changed-in-the-engine)).
 - **Wall queries** use a uniform grid over wall segments, with a linear scan for long radio paths where
   the grid would visit most cells anyway. A property test checks the grid against brute force.
 
@@ -256,6 +268,8 @@ Emscripten) and MSVC. A golden-value test pins the generator.
   fitted slab loss is 2-4 dB ([ipin.md](ipin.md#failure-modes)). A venue can carry those fingerprints
   (`floor_fingerprints`). `pf.floor_prior_weight` then applies a k-NN floor vote per scan
   (`core/src/floor_classifier.cpp`); it is off by default.
+  With positions on those fingerprints, `pf.fingerprint_weight` applies them to position as well, which is
+  what brought the IPIN buildings to the competition winners' range ([benchmarks.md](benchmarks.md)).
 - Particles change floor only inside a connector, so the floor can only follow once the position is right.
   `pf.baro_jump` (off by default) relaxes this: after a sustained one-floor barometer change, particles
   within 25 m of a connector move onto the new floor inside it.

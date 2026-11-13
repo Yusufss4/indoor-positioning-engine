@@ -21,6 +21,12 @@ filter loses the floor in two ways:
 The data also exposed a gap in the venue model. Nuremberg's floor −1 is only a stair landing, so venue
 levels now take their own `footprint` ([formats.md](formats.md#several-floors)).
 
+**Update: position fingerprints.** The numbers above and in the sections below are the log-distance
+radio model's. With the training scans' positions in the venue and `data/configs/fingerprint.json`, the
+competition metric on the scoring walks falls from 15–42 m to 6–11 m per walk, and the floor is right for
+90–97% of the landmarks. That is the range of the competition's winners; the comparison, the method and
+what remains are in [benchmarks.md](benchmarks.md).
+
 An opt-in floor model, `data/configs/ipin.json`, targets both failure modes (see [Floor model](#floor-model)).
 On the validation walks it raises the floor hit rate:
 - Nuremberg: from 76% to 86%;
@@ -255,6 +261,10 @@ in, and both are shifted to start at 0.
   ([Floor model](#floor-model)), but this walk did not.
 
 ## Reproduce
+
+`--positions --unmodelled --out datasets/ipin/out_fp` instead of `--out datasets/ipin/out_scans --data
+data/ipin` writes the venues for the fingerprint likelihood ([benchmarks.md](benchmarks.md#reproduce));
+the committed venues in `data/ipin/` and the regression gate do not use it.
 
 ```bash
 datasets/ipin/fetch.sh

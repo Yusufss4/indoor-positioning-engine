@@ -960,6 +960,93 @@ engine. Making it the engine would need:
 - a wall count that does not scale with cells × beacons on shop-wall maps;
 - the floor prior that `ipin.json` gives the PF.
 
+## 15. Position fingerprints, measured against the competitions' leaderboards
+
+**Observation.** Both real multi-building datasets come from competitions, and the results had never
+been set against the leaderboards. Scored with the competitions' own metric, the engine was far from the
+IPIN 2023 and 2024 winners (15–32 m per scoring walk against 5.3 and 7.9 m) and from the Kaggle 2021
+winner (about 12 m against 1.50 m). [benchmarks.md](benchmarks.md) has the leaderboards and the method.
+
+**Where the error was** (`evaluate.py`, IPIN scoring walks, `msil_wifi.json`):
+- With the true floor given, the Nuremberg p75 is still 12.5–16.2 m. The floor penalty adds 3–18 m on top.
+  So the horizontal error was the larger part, not the floor.
+- Every winner of these competitions used Wi-Fi fingerprinting. The engine fitted one log-distance curve
+  per access point (RMS 5.7–6.4 dB) and dropped the access points that fit badly: 113 of 139 in
+  Nuremberg and 153 of 252 in UMinho.
+
+**Change.**
+- The venue's training scans carry the position they were taken at (`floor_fingerprints.xy`), interpolated
+  between the surveyed landmarks.
+- Access points the transmitter fit rejects stay in the venue as `"model": false`: fingerprint
+  dimensions only.
+- `FingerprintMap` returns a scan's nearest training scans. The particle filter and the grid filter apply
+  them as a kernel density over position and level (`pf.fingerprint_weight`), seed the cloud from it and
+  draw recovery injections from it ([design.md](design.md#particle-filter)).
+- All of it is off by default. `data/configs/fingerprint.json` is `ipin.json` plus `fingerprint_weight` 3.
+
+**Settings**, chosen on the IPIN validation walks only (27 walks, 3 filter seeds, median competition
+p75 [m] / median floor hit):
+
+| Setting | Nuremberg | UMinho |
+|---|---:|---:|
+| `ipin.json`, fingerprints off | 13.9 / 94% | 33.1 / 74% |
+| weight 1, kernel 6 m, 20 compared readings, model at full weight | 5.7 / 100% | 16.2 / 93% |
+| model weight 0.3 | 6.3 / 98% | 9.5 / 97% |
+| model weight 0 (fingerprints alone) | 6.1 / 98% | 13.2 / 94% |
+| weight 3, model weight 0.3 | 5.2 / 99% | 10.2 / 96% |
+| + kernel 4 m | 4.3 / 99% | 10.6 / 94% |
+| + kernel 9 m | 6.4 / 99% | 10.5 / 94% |
+| **+ kernel 4 m, 40 compared readings** | **4.6 / 98%** | **10.8 / 94%** |
+| + kernel 3 m, 40 compared readings | 4.4 / 99% | 11.2 / 97% |
+
+Weights 2 to 5, 5 to 20 neighbours, 10 to 80 compared readings and a uniform share of 1–20% move the
+medians by less than the seeds do (about 1 m in Nuremberg, 2 m in UMinho), so the middle of each range is
+the default. During the sweep the model weight scaled every RSSI update; as shipped
+(`fingerprint_model_weight`) it scales only scans that have neighbours, so single BLE packets and venues
+without positions keep the model at full weight. The frozen settings with 5 seeds give 4.7 m / 100% and
+11.0 m / 96%.
+
+**Result.** IPIN scoring walks, replayed once with the frozen settings (competition p75 [m] / floor hit;
+the particle filter with 5 seeds, the grid filter once):
+
+| Walk | `msil_wifi.json` | `ipin.json` | `fingerprint.json`, PF | `fingerprint.json`, grid |
+|---|---:|---:|---:|---:|
+| Nuremberg 2024 #1 | 15.2 / 83% | 23.4 / 82% | 6.3 / 97% | 6.6 / 97% |
+| Nuremberg 2024 #2 | 21.2 / 82% | 21.8 / 84% | 6.6 / 90% | 5.1 / 96% |
+| Nuremberg 2023 #1 | 32.2 / 69% | 32.4 / 74% | 8.9 / 95% | 8.6 / 94% |
+| Nuremberg 2023 #2 | 27.1 / 75% | 37.8 / 72% | 6.7 / 92% | 5.0 / 96% |
+| UMinho #12 (no barometer) | 26.8 / 65% | 31.8 / 74% | 10.0 / 90% | 7.7 / 95% |
+| UMinho #13 | 41.9 / 54% | 36.5 / 79% | 11.0 / 92% | 6.8 / 97% |
+
+**What is drawn** (validation walks, `ipe-regress --traces`, one seed, `ipin.json` → `fingerprint.json`):
+
+| Group | CEP50 / CEP95 [m] | Coverage95 | Jitter p95 [m] | Jumps/min | Through walls/min | Floor flips (2 real) |
+|---|---|---|---|---|---|---|
+| Nuremberg | 5.92 / 29.75 → 2.80 / 7.31 | 22% → 51% | 0.62 → 0.43 | 3.1 → 1.1 | 4.14 → 2.00 | 4.5 → 6.0 |
+| UMinho | 11.52 / 26.76 → 3.97 / 17.44 | 33% → 25% | 1.03 → 0.51 | 4.7 → 2.5 | 7.49 → 4.77 | 10.0 → 9.0 |
+
+22 of 23 UMinho walks now meet the convergence rule, against 13.
+
+**The synthetic scenarios are unchanged**: `ipe-regress --no-baseline --seeds 10` gives identical
+accuracy and smoothness columns before and after, since nothing here runs without
+`pf.fingerprint_weight` and a venue with fingerprint positions.
+
+**Findings.**
+- **The model and the fingerprints read the same scan.** At full weight each, UMinho's p75 is 16 m; with
+  the model at 0.3 it is 10 m. The model still helps a little there (13 m without it), where 99 access
+  points have a fitted position.
+- **A raw k-NN position is not better than the old filter.** On the MSIL sample a scan's weighted 5-NN
+  position is 7.1 m off at the median, the same as the log-distance filter's CEP50. The gain comes from
+  using the neighbours as a likelihood inside the filter, which the steps and the walls then sharpen.
+- **Access points without a position carry information.** Restricting the k-NN to the fitted access points
+  raises its mean error on the MSIL sample from 8.7 to 9.8 m.
+- **The uncertainty is still too small** (coverage95 25–51%), and the reported floor in Nuremberg changes
+  more often than before.
+
+**Not done.** The winners of the Kaggle competition optimise each whole walk offline and learn the
+relative motion from the sensors. The engine's offline mode here is two causal passes, forwards and
+backwards, combined ([benchmarks.md](benchmarks.md#kaggle-indoor-location--navigation-2021)).
+
 ## Open questions
 
 - A Wi-Fi scan can still move the whole cloud across a wall into a large region next to the walker's (a

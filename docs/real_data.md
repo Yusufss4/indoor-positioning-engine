@@ -15,6 +15,11 @@ points counted up to six times, a uniform start over very large floors, and one 
 reading instead of per scan. Its uncertainty is still far too small: the 95% ellipse holds the truth
 for under a fifth of the fixes in a typical walk.
 
+**Update: the competition's own metric.** This page reports CEP per walk for the log-distance model.
+[benchmarks.md](benchmarks.md#kaggle-indoor-location--navigation-2021) scores the same walks, and the full
+204-building Kaggle set, with the competition's metric, and adds position fingerprints and offline
+post-processing.
+
 ## Data
 
 [Indoor Location Competition 2.0](https://github.com/location-competition/indoor-location-competition-20)

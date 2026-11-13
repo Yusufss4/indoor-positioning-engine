@@ -30,7 +30,9 @@ truth; a replay tool and a regression suite measure accuracy.
 - `data/geojson`, `data/imdf` - generated from `data/venues` by `ipe-import`; a unit test fails when they
   are stale. `data/mappings` - GeoJSON property mapping tables.
 - `data/configs` - engine config patches for `--config` (e.g. `open_venue.json`, `msil_wifi.json`, `ipin.json`
-  = `msil_wifi.json` plus the opt-in floor model and slab-loss calibration, see [docs/ipin.md](docs/ipin.md#floor-model)).
+  = `msil_wifi.json` plus the opt-in floor model and slab-loss calibration, see [docs/ipin.md](docs/ipin.md#floor-model);
+  `fingerprint.json` = `ipin.json` plus the fingerprint likelihood, for venues converted with fingerprint
+  positions, see [docs/benchmarks.md](docs/benchmarks.md)).
 - `datasets/msil` - fetch and convert scripts for the Microsoft Indoor Location sample. The raw data and
   the converted `out/` (readings one by one) and `out_scans/` (`--scans`, one batch per Wi-Fi scan) are
   git-ignored; `tests/regression/msil_baseline.json` gates the held-out walks of `out_scans/`.
@@ -47,12 +49,19 @@ truth; a replay tool and a regression suite measure accuracy.
   `out_scans/` are git-ignored. `tests/regression/ipin_baseline.json` gates the scoring walks
   (`ipin_regression`, label `realdata`). Settings are chosen on `manifest_tune.json` (validation walks)
   only. `evaluate.py` adds floor hit rate and the competition metric.
+- `datasets/kaggle` - the full Kaggle "Indoor Location & Navigation" set (204 buildings; MSIL is its public
+  two-building sample). `fetch.sh` needs a Kaggle token; `datasets/msil/convert.py --kaggle` converts it;
+  `submit.py` builds a submission file and uploads nothing. The competition rules forbid redistribution:
+  nothing converted from it is committed, only aggregate numbers in the docs.
 - `datasets/uji_ble` - UJI BLE fingerprints (CC BY): RSSI model study, venues in `data/uji_ble/` and
   standing-still traces ([docs/uji_ble.md](docs/uji_ble.md)).
 - `data/real_ipin`, `data/real_uji` - web demo recordings written by `export_demo.py` in those folders
   (`data/real` is MSIL's and is rewritten by its own script). The demo reads every `demos.json`.
 - `datasets/common` - helpers shared by the real-data converters (transmitter fit, wall geometry, georef,
-  trace writer). MSIL output must stay byte-identical when they change.
+  trace writer, fingerprint tables). MSIL output must stay byte-identical when they change. `offline.py`
+  holds the offline steps (two-pass replay, gap filling, waypoint snapping) that `evaluate.py --two-pass
+  --fill --snap` and the Kaggle submission use; they are for competitions scored offline and must never be
+  quoted as what the engine does live.
 - `viz/` - Python plotting; `web/` - Emscripten bindings and the browser demo.
 
 ## Build and test
@@ -113,6 +122,8 @@ The companion repo `positioning-agent-tools` exposes these tools as an MCP serve
 - "Fixing" a failing regression by loosening tolerances or regenerating the baseline.
 - Adding config fields without registering them for JSON (silently ignored by presets, rejected by `--set`).
 - Treating `compute_us_per_update` from parallel runs as a performance measurement (use `--serial`).
+- Comparing with a competition leaderboard on other walks or another metric than the competition's.
+  [docs/benchmarks.md](docs/benchmarks.md) says which of our numbers are like for like.
 - Judging smoothing by CEP alone. A change to what is reported must also quote `jitter_p95_m`,
   `jumps_per_min`, `level_flips` and, on walled maps, `wall_crossings_per_min` (in `ipe-regress` tables; definitions in
   [docs/formats.md](docs/formats.md#replay-outputs)).

@@ -17,6 +17,9 @@
   `wall_attenuation_db` each in the map-aware RSSI model.
 - `tx_power` is the expected RSSI at 1 m. `path_loss_exp` is the log-distance exponent. These are the
   *surveyed* values; scenarios can make the real ones differ.
+- A beacon with `"model": false` has no usable position or path loss. The RSSI model skips it; its
+  readings only count as a dimension of the radio fingerprints (below). The real-data converters write
+  access points this way when the transmitter fit rejects them.
 
 ### Several floors
 
@@ -66,6 +69,9 @@ Instead of top-level `walls`, a multi-floor venue has `levels`, and may add `con
   `{"ids": ["w:...", ...], "scans": [[ordinal, id index, dBm, id index, dBm, ...], ...]}`. Each scan
   names its beacons by index into `ids`. Ids that are not venue beacons are dropped. The IPIN converter
   writes one per training Wi-Fi scan (`convert.py --fingerprints`).
+- With an `"xy": [[x, y], ...]` entry, one position per scan, the same scans also feed the fingerprint
+  likelihood (`pf.fingerprint_weight`, [benchmarks.md](benchmarks.md#what-changed-in-the-engine)). The
+  IPIN converter writes it with `--positions`, the MSIL converter with `--fingerprints`.
 
 ### Rooms
 
