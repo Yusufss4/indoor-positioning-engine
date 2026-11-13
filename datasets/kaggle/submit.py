@@ -9,7 +9,8 @@ For each of the test walks:
 2. the walk is written as an ipe trace with a truth row (at 0, 0) at every timestamp the submission
    asks for, and replayed through that floor's venue;
 3. the estimates at those rows become `site_path_timestamp,floor,x,y`. Rows before the first fix take
-   the first fix: the competition is scored offline, so looking ahead is within its rules.
+   the first fix: the competition is scored offline, so looking ahead is within its rules. `--two-pass`
+   and `--snap` are further offline steps (datasets/common/offline.py).
 
     python3 datasets/kaggle/submit.py --converted datasets/kaggle/out_fp --config data/configs/msil_wifi.json \\
         --out datasets/kaggle/out_fp/submission.csv
@@ -21,7 +22,6 @@ known, and prints the accuracy. Nothing here uploads anything: see `kaggle compe
 from __future__ import annotations
 
 import argparse
-import csv
 import json
 import math
 import subprocess
@@ -39,6 +39,7 @@ sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE.parent / "msil"))
 
 import convert as msil  # noqa: E402
+from common import offline  # noqa: E402
 
 FILL_DBM = -100.0
 
@@ -134,31 +135,31 @@ def _site_floors(site_dir: Path) -> SiteFloors:
     return _FLOORS[key]
 
 
-def replay(walk: dict, converted: Path, args, tmp: Path) -> list[tuple[float, float, float, bool]]:
-    """(t, x, y, has_fix) at the walk's truth rows."""
-    out = tmp / f"{walk['path']}.csv"
-    cmd = [str(args.build / "tools" / "ipe-replay"), "--venue", str(converted / walk["site"] / walk["floor"] / "venue.json"),
-           "--trace", walk["trace"], "--warmup", "0", "--out", str(out)]
+def run_engine(venue: Path, trace: Path, out: Path, args) -> list[dict]:
+    cmd = [str(args.build / "tools" / "ipe-replay"), "--venue", str(venue), "--trace", str(trace), "--warmup", "0",
+           "--out", str(out)]
     if args.config:
         cmd += ["--config", str(args.config)]
     if args.set:
         cmd += ["--set", args.set]
     subprocess.run(cmd, check=True, capture_output=True, text=True)
-    return [(float(r["t"]), float(r["est_x"]), float(r["est_y"]), r["has_fix"] == "1") for r in csv.DictReader(open(out))]
+    return offline.read_estimates(out)
 
 
-def fill_missing(rows: list[tuple[float, float, float, bool]], fallback: tuple[float, float]) -> list[tuple[float, float]]:
-    """Rows without a fix take the nearest fix in time (the first one, before it); a walk without any
-    takes `fallback`."""
-    fixes = [(t, x, y) for t, x, y, ok in rows if ok]
-    if not fixes:
-        return [fallback] * len(rows)
-    out = []
-    for t, x, y, ok in rows:
-        if not ok:
-            _, x, y = min(fixes, key=lambda f: abs(f[0] - t))
-        out.append((x, y))
-    return out
+def replay(walk: dict, converted: Path, args, tmp: Path) -> list[dict]:
+    """The estimate at each of the walk's truth rows, in time order, after the offline steps asked for."""
+    floor_dir = converted / walk["site"] / walk["floor"]
+    trace = Path(walk["trace"])
+    rows = run_engine(floor_dir / "venue.json", trace, tmp / f"{walk['path']}.csv", args)
+    if args.two_pass:
+        reversed_trace = tmp / f"{walk['path']}_reversed.csv"
+        end = offline.reverse_trace(trace, reversed_trace)
+        back = run_engine(floor_dir / "venue.json", reversed_trace, tmp / f"{walk['path']}_back.csv", args)
+        rows = offline.fuse(rows, back, end, args.fuse_floor)
+    offline.fill_gaps(rows)
+    if args.snap > 0.0 and (floor_dir / "waypoints.json").exists():
+        offline.snap(rows, json.loads((floor_dir / "waypoints.json").read_text()), args.snap)
+    return rows
 
 
 def check_floors(converted: Path, jobs: int):
@@ -195,6 +196,11 @@ def main():
     ap.add_argument("--config", type=Path)
     ap.add_argument("--set")
     ap.add_argument("--out", type=Path, help="submission CSV to write")
+    ap.add_argument("--two-pass", action="store_true",
+                    help="replay each walk forwards and backwards and combine the two (datasets/common/offline.py)")
+    ap.add_argument("--fuse-floor", type=float, default=3.0)
+    ap.add_argument("--snap", type=float, default=0.0,
+                    help="move each answer onto the nearest surveyed training waypoint within this many metres")
     ap.add_argument("--jobs", type=int, default=8)
     ap.add_argument("--check-floors", action="store_true")
     args = ap.parse_args()
@@ -229,26 +235,26 @@ def main():
         raise SystemExit(f"no floor could be voted: are there fingerprints under {floors_from}?")
 
     answers: dict[tuple[str, str, int], tuple[int, float, float]] = {}
-    no_fix_rows = no_fix_walks = 0
+    no_fix_walks = 0
     with tempfile.TemporaryDirectory() as tmp, ThreadPoolExecutor(args.jobs) as pool:
         replays = list(pool.map(lambda w: replay(w, args.converted, args, Path(tmp)) if w["trace"] else [], walks))
     for w, rows in zip(walks, replays):
         ts = stamps[(w["site"], w["path"])]
         venue = json.loads((args.converted / w["site"] / w["floor"] / "venue.json").read_text())
         centre = (venue["bounds"][2] / 2.0, venue["bounds"][3] / 2.0)
-        if len(rows) != len(ts):
-            rows = [(t / 1000.0, 0.0, 0.0, False) for t in ts]
-        no_fix_rows += sum(not r[3] for r in rows)
-        no_fix_walks += not any(r[3] for r in rows)
-        for t, (x, y) in zip(ts, fill_missing(rows, centre)):
-            answers[(w["site"], w["path"], t)] = (floor_number(w["floor"]), x, y)
+        # Truth rows come back in time order, which is the order of the walk's sorted timestamps.
+        if len(rows) != len(ts) or not any(r["has_fix"] for r in rows):
+            no_fix_walks += 1
+            rows = [{"est_x": centre[0], "est_y": centre[1]} for _ in ts]
+        for t, r in zip(sorted(ts), rows):
+            answers[(w["site"], w["path"], t)] = (floor_number(w["floor"]), r["est_x"], r["est_y"])
 
     with open(args.out, "w") as f:
         f.write("site_path_timestamp,floor,x,y\n")
         for site, path, t in order:
             floor, x, y = answers[(site, path, int(t))]
             f.write(f"{site}_{path}_{t},{floor},{x:.3f},{y:.3f}\n")
-    print(f"wrote {len(order)} rows to {args.out}; rows filled from another time: {no_fix_rows}; walks without any fix: {no_fix_walks}")
+    print(f"wrote {len(order)} rows to {args.out}; walks without any fix (answered with the floor's centre): {no_fix_walks}")
 
 
 if __name__ == "__main__":
