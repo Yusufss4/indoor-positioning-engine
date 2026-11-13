@@ -224,7 +224,11 @@ class GridFilter {
  private:
   void initialize_uniform();
   bool check_beacon(std::size_t beacon_index, double rssi);
+  /// One radio update: the terms below add a log-likelihood per cell to `loglik_`, then it is applied.
   void update_rssi(double t, std::span<const RssiReading> readings);
+  void add_radio_model_loglik(std::span<const RssiReading> readings);
+  void add_fingerprint_loglik();
+  void add_floor_vote_loglik();
   /// Mixes uniform mass in if the teleport period has passed.
   void maybe_teleport(double t);
   /// Moves `prob` of the mass of each connector cell to the levels next to it.
