@@ -265,7 +265,7 @@ TEST(Venue, EveryCommittedVenueHasRoomsInsideItsBounds) {
 }
 
 TEST(Venue, RealDataVenuesLoad) {
-  // Venues converted from public datasets (datasets/ipin, datasets/uji_ble).
+  // Venues converted from a public dataset (datasets/ipin).
   const Venue nuremberg = load_venue_file(test::data_path("ipin/nuremberg.json"));
   EXPECT_EQ(nuremberg.level_count(), 3);
   EXPECT_TRUE(nuremberg.has_level_footprints());  // floor -1 is only a stair landing
@@ -273,12 +273,6 @@ TEST(Venue, RealDataVenuesLoad) {
   const Venue uminho = load_venue_file(test::data_path("ipin/uminho.json"));
   EXPECT_EQ(uminho.level_count(), 3);
   EXPECT_FALSE(uminho.connectors().empty());
-  for (const char* name : {"lib", "geo_m4", "geo_m12", "geo_m20"}) {
-    SCOPED_TRACE(name);
-    const Venue v = load_venue_file(test::data_path(std::string("uji_ble/") + name + ".json"));
-    EXPECT_GE(v.beacons().size(), 22u);
-    EXPECT_FALSE(v.walls().empty());
-  }
 }
 
 TEST(Venue, RejectsInvalidLevelReferences) {

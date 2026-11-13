@@ -58,7 +58,6 @@ let roomLogKey = null; // what the rooms panel currently shows
 const RECORDING_SOURCES = [
   { dir: "data/real/", label: "Real recordings (Microsoft Indoor Location)" },
   { dir: "data/real_ipin/", label: "Real recordings (IPIN competition, several floors)" },
-  { dir: "data/real_uji/", label: "Real recordings (UJI BLE, standing still)" },
   // Written by datasets/kaggle/export_demo.py on a machine that has the competition data; never deployed.
   { dir: "data/real_kaggle/", label: "Real recordings (Kaggle indoor location, local only)" },
 ];
