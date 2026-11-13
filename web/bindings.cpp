@@ -52,7 +52,7 @@ struct Score {
   double floor_accuracy() const { return fixes ? static_cast<double>(floor_ok) / fixes : -1.0; }
 };
 
-/// Name of the estimate in the JS API: the grid filter (docs/grid.md).
+/// Name of the estimate in the JS API: the grid filter (docs/design.md).
 constexpr const char* kGrid = "grid";
 
 /// Grid cells handed to the page per snapshot, heaviest first, and the mass below which a cell is not drawn

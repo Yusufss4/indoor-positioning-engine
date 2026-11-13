@@ -45,7 +45,7 @@ Instead of top-level `walls`, a multi-floor venue has `levels`, and may add `con
 }
 ```
 
-- `ordinal` is the floor number as in IMDF (0 ground, -1 basement). Every `level` reference in venue and
+- `ordinal` is the floor number (0 ground, -1 basement). Every `level` reference in venue and
   scenario files is an ordinal. Inside the engine, levels are indices into the list sorted by ordinal.
 - `elevation_m` defaults to `ordinal * height_m`; `height_m` defaults to 4. Only elevation differences
   matter to the engine (barometer, 3D radio distance); `height_m` is also used for rendering.
@@ -53,7 +53,7 @@ Instead of top-level `walls`, a multi-floor venue has `levels`, and may add `con
 - A connector's `area` polygon is the only place a pedestrian (and the filter's mass) can change level. `kind`
   is `stairs`, `elevator` or `escalator`; `levels` lists two or more ordinals.
 - `georef` anchors the local frame on the globe: `origin_lat`/`origin_lon` is local (0, 0), and
-  `rotation_deg` is the counter-clockwise angle from east to local +x. It is needed for GeoJSON/IMDF export
+  `rotation_deg` is the counter-clockwise angle from east to local +x. It is needed for GeoJSON export
   and the 3D view, and is optional for everything else.
 - `footprint` (optional, `[[x, y], ...]`) is the outline of the walkable area on every floor, for buildings
   that fill only part of their bounds (an L or a U). The filter's cells then exist only inside it. Without
@@ -68,7 +68,7 @@ Instead of top-level `walls`, a multi-floor venue has `levels`, and may add `con
   names its beacons by index into `ids`. Ids that are not venue beacons are dropped. The IPIN converter
   writes one per training Wi-Fi scan (`convert.py --fingerprints`).
 - With an `"xy": [[x, y], ...]` entry, one position per scan, the same scans also feed the fingerprint
-  likelihood (`filter.fingerprint_weight`, [benchmarks.md](benchmarks.md#what-changed-in-the-engine)). The
+  likelihood (`filter.fingerprint_weight`, [design.md](design.md#updates)). The
   IPIN converter writes it with `--positions`, the MSIL converter with `--fingerprints`.
 
 ### Rooms
@@ -146,7 +146,7 @@ gt,t,x,y,heading,level,z
   and both forms are accepted.
 - A phone logger that writes this format can be replayed directly. `datasets/msil/convert.py` is a
   worked example: it rotates Android sensor data into the expected frame (see
-  [real_data.md](real_data.md#conversion-datasetsmsilconvertpy)).
+  [datasets.md](datasets.md#conversion-datasetsmsilconvertpy)).
 
 ## Config patches (`data/configs/*.json`)
 
@@ -244,16 +244,14 @@ estimated minus true time over matches (dwell included, so about 1.5 s at best).
 are 1 when there is nothing to score. `room_accuracy` is the share of scored samples whose set of
 current rooms equals the true set. All are -1 for venues without rooms. They are reported, not gated.
 
-## GeoJSON and IMDF (`ipe-import`)
+## GeoJSON (`ipe-import`)
 
-`ipe-import` converts between the venue JSON and the formats indoor-mapping platforms export.
+`ipe-import` converts between the venue JSON and GeoJSON, the format indoor-mapping platforms export.
 
 ```bash
 ipe-import export data/venues/office_two_floor.json --out office.geojson          # venue -> GeoJSON (WGS84)
 ipe-import geojson office.geojson --out venue.json                                 # GeoJSON -> venue ("ipe" scheme)
 ipe-import geojson their_export.geojson --mapping my_mapping.json --out venue.json
-ipe-import export-imdf data/venues/office_two_floor.json --out imdf_dir/          # venue -> IMDF subset
-ipe-import imdf imdf_dir/ --out venue.json                                         # IMDF -> venue
 ```
 
 Import options: `--name`, `--beacons FILE`, `--beacon-grid M`, `--level-height M`,
@@ -310,32 +308,6 @@ mean what. Supporting another platform's export means writing a table, not code.
 - `level` values can be numbers or numeric strings. Without a venue georef, the local frame is anchored at
   the south-west corner of the level outlines.
 - `ipe.json` describes the exported scheme (also the built-in default).
-
-### IMDF subset
-
-`ipe-import imdf` reads `venue.geojson`, `level.geojson` (required), `unit.geojson` and `opening.geojson`:
-
-- Level `ordinal` and `name` (the `en` label) map directly. Features refer to levels through `level_id`.
-  The venue polygon becomes the `footprint`.
-- Unit categories `structure`, `concrete`, `brick`, `drywall`, `glass`, `wood` and `column` are walls;
-  `stairs`, `elevator` and `escalator` are connectors; open areas (`walkway`, `lobby`, `opentobelow`,
-  `unenclosedarea`, ...) are skipped; every other unit is a room.
-- Openings cut doors out of the room walls.
-- IMDF has no beacons and no elevations, so these come from extensions written by `export-imdf`:
-  `ipe:georef`, `ipe:wall_attenuation_db` and `ipe:floor_attenuation_db` on the venue,
-  `ipe:elevation_m` and `ipe:height_m` on levels, `ipe:connector_id` on connector units, and a
-  `beacons.json` sidecar (`{"beacons": [{"id", "lat", "lon", "level", "tx_power", "path_loss_exp"}]}`).
-- Venue rooms are exported as `room` units with the room name as their label and an `ipe:room_id`
-  property. On import, a unit with `ipe:room_id` becomes a venue room and adds no walls; third-party
-  units are walls only.
-  Third-party IMDF works without them: levels are stacked `--level-height` apart, the local frame is
-  anchored at the south-west corner, and beacons come from `--beacons` or `--beacon-grid`.
-- `export-imdf` writes manifest, venue, level, unit (walls as `structure` units, connectors per floor)
-  and an empty opening file. It is a subset: no addresses, buildings, footprints, anchors or amenities,
-  so a strict IMDF validator will ask for more.
-
-`data/imdf/office_two_floor/` is exported from `data/venues/office_two_floor.json`; the tests import it and
-check walls, beacons, levels and connectors match within 1 cm.
 
 ### OpenStreetMap (`datasets/osm/`)
 

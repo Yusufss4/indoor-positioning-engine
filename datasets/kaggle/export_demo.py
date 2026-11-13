@@ -113,7 +113,7 @@ def main():
                 f"fingerprints, next to the log-distance model of {fitted} located access points (purple). The "
                 f"other {len(beacons) - fitted} access points (pale) fit no such model and count in the "
                 f"fingerprints only. This is the live, causal estimate; the competition score in "
-                f"docs/benchmarks.md adds offline steps the page does not run. The floor is given here.",
+                f"docs/datasets.md adds offline steps the page does not run. The floor is given here.",
         })
         demos.append(entry)
         print(f"{site[-6:]} {floor}: {src_trace.name} ({t['duration_s']:.0f} s, {len(pts)} waypoints, "

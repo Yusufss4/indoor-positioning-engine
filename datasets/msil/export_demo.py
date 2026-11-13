@@ -7,7 +7,7 @@ floor it writes the venue,
 its GeoJSON export (for the 3D view), the floor image and the trace, plus data/demo/msil/demos.json,
 which the demo reads to fill its scenario menu.
 
-The venues carry the shop walls with inferred doorways (see docs/real_data.md), the shop outlines as
+The venues carry the shop walls with inferred doorways (see docs/datasets.md), the shop outlines as
 rooms, and the floor's training scans as position fingerprints, which the demo's config
 (data/configs/fingerprint.json) uses. The sample data is MIT-licensed; its licence is copied next to the
 files.
