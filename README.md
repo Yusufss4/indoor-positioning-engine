@@ -102,7 +102,7 @@ Two more public datasets test what MSIL cannot:
   scans used as position fingerprints (opt-in, `data/configs/fingerprint.json`), the IPIN competition's
   metric on its scoring walks is 5.0–8.6 m per walk with the floor right for 94–97% of the landmarks, which
   is the range of the 2023 and 2024 winners (5.3 and 7.9 m). On Kaggle's indoor location competition the
-  engine stays well behind the winner's 1.50 m; that page says by how much and why.
+  engine stays well behind the winner's 1.50 m (5.30 m, with offline steps); that page says why.
 - **UJI BLE** ([docs/uji_ble.md](docs/uji_ble.md), [`datasets/uji_ble/`](datasets/uji_ble/)): surveyed
   beacons and standing-still fingerprints. They confirm the 5 dB RSSI spread, measure about 1 dB per
   shelf edge rather than 3 dB per wall, and give 1.4–1.9 m CEP50 from BLE alone.

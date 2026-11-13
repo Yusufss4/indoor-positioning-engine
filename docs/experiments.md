@@ -1055,7 +1055,8 @@ accuracy and smoothness columns before and after, since nothing here runs withou
 buildings from 13.0 to 8.4 m (Kaggle metric, causal, 1,126 walks). Replaying each walk forwards and
 backwards and combining the two gives 6.2 m, and snapping to surveyed waypoints 5.9 m. Late submissions
 of the test walks score 8.92 m (before) and 5.31 m on the private leaderboard, against the winner's
-1.50 m ([benchmarks.md](benchmarks.md#kaggle-indoor-location--navigation-2021)).
+1.50 m ([benchmarks.md](benchmarks.md#kaggle-indoor-location--navigation-2021)). These are the particle
+filter's numbers; experiment 16 has the grid filter's.
 
 **Not done.** The winners of the Kaggle competition optimise each whole walk offline and learn the
 relative motion from the sensors. The engine's offline mode here is two causal passes, forwards and
@@ -1106,6 +1107,14 @@ Real walks, held out:
 | IPIN scoring walks, `fingerprint.json`: competition p75 per trial [m] | 6.3, 6.6, 8.9, 6.7, 10.0, 11.0 (5 seeds) | 6.6, 5.1, 8.6, 5.0, 7.7, 6.8 |
 | the same: floor right | 90–97% | 94–97% |
 | MSIL, 109 walks, `msil_wifi.json`: median CEP50 / CEP95 (mean) [m] | 7.34 / 9.46 (11.71 / 15.67) | 6.76 / 9.41 (10.79 / 14.40) |
+| Kaggle, 1,126 held-out walks of the 24 test buildings, `fingerprint.json`: Kaggle metric causal / two passes / with snapping [m] | 8.39 / 6.20 / 5.89 | 8.33 / 6.09 / 5.70 |
+| Kaggle test walks, late submission of the last of these: public / private score [m] | 4.65 / 5.31 | 5.05 / 5.30 |
+
+The Kaggle rows were measured after the switch, with the pipeline as the particle filter had left it. The
+held-out walks favour the grid by 0.1–0.2 m, the private leaderboard is a tie, and the public one (a
+seventh of the test set) favours the particle filter by 0.4 m. Building by building on the held-out walks,
+with two passes and snapping, the grid is the better one in 15 of the 24, between 1.3 m better and 0.7 m
+worse; walk by walk the particle filter is better or equal on 590 and the grid on 531.
 
 **Change.** The particle filter is removed. `PositioningEngine` runs the grid filter, which moved from
 `grid/` into `core/`; its settings are the `filter` section of the config, in place of `pf`. `ipe-grid` is
