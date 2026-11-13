@@ -1,14 +1,18 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
+#include <cstdint>
+#include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "ipe/baro.hpp"
 #include "ipe/filter.hpp"
-#include "ipe/particle_filter.hpp"
+#include "ipe/grid_filter.hpp"
 #include "ipe/pdr.hpp"
 #include "ipe/rooms.hpp"
 #include "ipe/rssi_model.hpp"
@@ -21,18 +25,28 @@ struct EngineConfig {
   PdrConfig pdr;
   RssiModelConfig rssi;
   BaroConfig baro;
-  ParticleFilterConfig pf;
+  GridFilterConfig filter;
   RoomEventConfig rooms;
   TrackSmootherConfig smoothing;
   double mag_heading_sigma_deg = 12.0;
 };
 
-/// Platform-independent entry point: feed raw IMU samples, BLE advertisements
-/// and (optionally) barometer readings in timestamp order, read back the fused
-/// estimate. This is the surface a mobile SDK or the WebAssembly module would wrap.
+/// Platform-independent entry point: feed raw IMU samples, BLE advertisements, Wi-Fi scans and
+/// (optionally) barometer readings in timestamp order, read back the fused estimate. This is the surface
+/// a mobile SDK or the WebAssembly module wraps.
+///
+/// The pipeline: PDR turns IMU samples into steps; the grid filter (GridFilter) holds the posterior over
+/// the venue's cells and applies steps, the magnetometer heading after each step, radio and pressure; the
+/// track smoother turns its estimate into what is drawn; room events come from the mass in each room's
+/// cells.
 class PositioningEngine {
  public:
+  /// Builds the venue's cell lattice (GridMap) from `cfg.filter`.
   PositioningEngine(const Venue& venue, EngineConfig cfg);
+  /// With a lattice built before, to share one between engines on the same venue: the lattice and its
+  /// wall counts are the expensive part of start-up on a large venue. `map` must be of `venue` and of the
+  /// lattice settings in `cfg.filter`.
+  PositioningEngine(const Venue& venue, EngineConfig cfg, std::shared_ptr<const GridMap> map);
 
   void on_imu(const ImuSample& sample);
   void on_ble(double t, std::string_view beacon_id, double rssi);
@@ -43,15 +57,16 @@ class PositioningEngine {
 
   /// What to draw: the filter's estimate through the track smoother (EngineConfig::smoothing).
   [[nodiscard]] Estimate estimate() const {
-    return cfg_.smoothing.enabled ? smoother_.estimate(now_, pf_.estimate()) : pf_.estimate();
+    return cfg_.smoothing.enabled ? smoother_.estimate(now_, filter_.estimate()) : filter_.estimate();
   }
-  /// The particle filter's own estimate, unsmoothed.
-  [[nodiscard]] Estimate raw_estimate() const { return pf_.estimate(); }
+  /// The filter's own estimate, unsmoothed.
+  [[nodiscard]] Estimate raw_estimate() const { return filter_.estimate(); }
   [[nodiscard]] const Venue& venue() const { return *venue_; }
   [[nodiscard]] const EngineConfig& config() const { return cfg_; }
   [[nodiscard]] std::uint64_t step_count() const { return steps_; }
 
-  [[nodiscard]] const ParticleFilter& particle_filter() const { return pf_; }
+  [[nodiscard]] const GridFilter& filter() const { return filter_; }
+  [[nodiscard]] const GridMap& map() const { return filter_.map(); }
 
   /// Room Enter/Exit events since the last call, oldest first. Always empty
   /// for venues without rooms.
@@ -63,23 +78,22 @@ class PositioningEngine {
 
  private:
   /// Feeds the filter's estimate after a non-step update to the smoother.
-  void after_update(double t) {
-    now_ = std::max(now_, t);
-    smoother_.on_update(t, pf_.estimate());
-    update_rooms(t);
-  }
-  void update_rooms(double t) {
-    if (rooms_ && rooms_->due(t)) rooms_->update(t, pf_.estimate(), &pf_);
-  }
+  void after_update(double t);
+  void update_rooms(double t);
 
   const Venue* venue_;
   EngineConfig cfg_;
   PdrProcessor pdr_;
-  ParticleFilter pf_;
+  GridFilter filter_;
   TrackSmoother smoother_;
   double now_ = 0.0;  ///< Latest event time.
   std::optional<RoomTracker> rooms_;
+  std::vector<double> room_prob_;
   std::uint64_t steps_ = 0;
 };
+
+/// Up to `max` of the heaviest cells as (centroid x, y, mass, level): what a replay records as a snapshot
+/// of the posterior.
+void append_snapshot(const PositioningEngine& engine, std::vector<std::array<float, 4>>& out, std::size_t max);
 
 }  // namespace ipe

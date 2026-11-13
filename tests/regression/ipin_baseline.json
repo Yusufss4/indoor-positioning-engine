@@ -1,63 +1,63 @@
 {
   "results": {
     "all": {
-      "pf": {
+      "grid": {
         "availability": 1.0,
-        "cep50_m": 8.907,
-        "cep95_m": 28.538,
-        "convergence_s": 510.25,
-        "coverage95": 0.328,
-        "jitter_p50_m": 0.054,
-        "jitter_p95_m": 0.708,
-        "jumps_per_min": 4.558,
-        "mean_m": 10.558,
-        "median_cep50_m": 7.533,
-        "median_cep95_m": 22.813,
-        "median_coverage95": 0.274,
-        "median_mean_m": 9.32,
+        "cep50_m": 4.146,
+        "cep95_m": 11.852,
+        "convergence_s": 78.167,
+        "coverage95": 0.182,
+        "jitter_p50_m": 0.047,
+        "jitter_p95_m": 0.531,
+        "jumps_per_min": 1.405,
+        "mean_m": 5.146,
+        "median_cep50_m": 3.894,
+        "median_cep95_m": 11.346,
+        "median_coverage95": 0.188,
+        "median_mean_m": 5.037,
         "traces": 6,
         "unconverged_runs": 0,
-        "wall_crossings_per_min": 4.151
+        "wall_crossings_per_min": 1.876
       }
     },
     "nuremberg_holdout": {
-      "pf": {
+      "grid": {
         "availability": 1.0,
-        "cep50_m": 6.537,
-        "cep95_m": 20.72,
-        "convergence_s": 674.625,
-        "coverage95": 0.233,
-        "jitter_p50_m": 0.05,
-        "jitter_p95_m": 0.592,
-        "jumps_per_min": 3.628,
-        "mean_m": 8.439,
-        "median_cep50_m": 6.591,
-        "median_cep95_m": 21.877,
-        "median_coverage95": 0.208,
-        "median_mean_m": 9.018,
+        "cep50_m": 3.912,
+        "cep95_m": 10.549,
+        "convergence_s": 99.625,
+        "coverage95": 0.169,
+        "jitter_p50_m": 0.042,
+        "jitter_p95_m": 0.477,
+        "jumps_per_min": 1.175,
+        "mean_m": 4.806,
+        "median_cep50_m": 3.508,
+        "median_cep95_m": 10.616,
+        "median_coverage95": 0.162,
+        "median_mean_m": 4.553,
         "traces": 4,
         "unconverged_runs": 0,
-        "wall_crossings_per_min": 2.947
+        "wall_crossings_per_min": 1.732
       }
     },
     "uminho_holdout": {
-      "pf": {
+      "grid": {
         "availability": 1.0,
-        "cep50_m": 13.649,
-        "cep95_m": 44.175,
-        "convergence_s": 181.5,
-        "coverage95": 0.517,
-        "jitter_p50_m": 0.114,
-        "jitter_p95_m": 9.618,
-        "jumps_per_min": 9.307,
-        "mean_m": 14.796,
-        "median_cep50_m": 13.649,
-        "median_cep95_m": 44.175,
-        "median_coverage95": 0.517,
-        "median_mean_m": 14.796,
+        "cep50_m": 4.614,
+        "cep95_m": 14.459,
+        "convergence_s": 35.25,
+        "coverage95": 0.209,
+        "jitter_p50_m": 0.11,
+        "jitter_p95_m": 0.845,
+        "jumps_per_min": 4.145,
+        "mean_m": 5.825,
+        "median_cep50_m": 4.614,
+        "median_cep95_m": 14.459,
+        "median_coverage95": 0.209,
+        "median_mean_m": 5.825,
         "traces": 2,
         "unconverged_runs": 0,
-        "wall_crossings_per_min": 10.55
+        "wall_crossings_per_min": 7.549
       }
     }
   },

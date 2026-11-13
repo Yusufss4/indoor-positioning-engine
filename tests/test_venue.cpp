@@ -316,3 +316,26 @@ TEST(Venue, ParsesFloorFingerprints) {
                                "floor_fingerprints": {"ids": [], "scans": [[0, 1]]}})"),
                std::exception);
 }
+
+TEST(Venue, ParsesFingerprintPositionsAndUnmodelledBeacons) {
+  const Venue v = parse_venue(R"({
+    "bounds": [0, 0, 10, 10],
+    "beacons": [{"id": "a", "x": 1, "y": 1}, {"id": "b", "x": 9, "y": 9, "model": false}],
+    "floor_fingerprints": {"ids": ["a", "b"], "scans": [[0, 0, -50, 1, -70], [0, 1, -40]],
+                           "xy": [[2.5, 3.5], [8, 9]]}
+  })");
+  EXPECT_TRUE(v.beacons()[0].modelled);
+  EXPECT_FALSE(v.beacons()[1].modelled);
+  const auto& fp = v.floor_fingerprints();
+  ASSERT_TRUE(fp.has_positions());
+  EXPECT_DOUBLE_EQ(fp.pos[0].x, 2.5);
+  EXPECT_DOUBLE_EQ(fp.pos[1].y, 9.0);
+  // Positions are optional, but when given there is one per scan.
+  EXPECT_FALSE(parse_venue(R"({"bounds": [0, 0, 1, 1], "beacons": [{"id": "a", "x": 0, "y": 0}],
+                               "floor_fingerprints": {"ids": ["a"], "scans": [[0, 0, -50]]}})")
+                   .floor_fingerprints()
+                   .has_positions());
+  EXPECT_THROW(parse_venue(R"({"bounds": [0, 0, 1, 1], "beacons": [{"id": "a", "x": 0, "y": 0}],
+                               "floor_fingerprints": {"ids": ["a"], "scans": [[0, 0, -50]], "xy": []}})"),
+               std::runtime_error);
+}

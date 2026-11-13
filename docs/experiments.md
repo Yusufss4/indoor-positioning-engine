@@ -3,6 +3,14 @@
 Each entry: the observation, the hypothesis, the change, and the measured effect across all scenarios.
 Numbers are means over seeds (`ipe-regress --no-baseline --seeds N`).
 
+**Read this first.** Experiments 2 to 15 were run on a particle filter, which was the engine until
+experiment 16 replaced it with the grid filter of experiment 14. They are kept as the record of how the
+models, the map handling and the metrics got here, and most of their findings carry over because the two
+filters share those. What does not exist any more: every `pf.*` setting, the `pf` preset, `ipe-grid`, the
+beacon-ring proposals (4, 9), augmented-MCL recovery as the particle filter had it (2), the online loss
+calibration (10) and the barometer jump ([ipin.md](ipin.md#floor-model)). The commands in those entries
+ran on the code of their time.
+
 ## 2. Moved beacon hijacking the particle filter (`office_field_issue`)
 
 **Observation.** The particle filter's CEP95 on this scenario was 5.41 m (5 seeds), with a 17 m error
@@ -960,19 +968,199 @@ engine. Making it the engine would need:
 - a wall count that does not scale with cells × beacons on shop-wall maps;
 - the floor prior that `ipin.json` gives the PF.
 
+## 15. Position fingerprints, measured against the competitions' leaderboards
+
+**Observation.** Both real multi-building datasets come from competitions, and the results had never
+been set against the leaderboards. Scored with the competitions' own metric, the engine was far from the
+IPIN 2023 and 2024 winners (15–32 m per scoring walk against 5.3 and 7.9 m) and from the Kaggle 2021
+winner (about 12 m against 1.50 m). [benchmarks.md](benchmarks.md) has the leaderboards and the method.
+
+**Where the error was** (`evaluate.py`, IPIN scoring walks, `msil_wifi.json`):
+- With the true floor given, the Nuremberg p75 is still 12.5–16.2 m. The floor penalty adds 3–18 m on top.
+  So the horizontal error was the larger part, not the floor.
+- Every winner of these competitions used Wi-Fi fingerprinting. The engine fitted one log-distance curve
+  per access point (RMS 5.7–6.4 dB) and dropped the access points that fit badly: 113 of 139 in
+  Nuremberg and 153 of 252 in UMinho.
+
+**Change.**
+- The venue's training scans carry the position they were taken at (`floor_fingerprints.xy`), interpolated
+  between the surveyed landmarks.
+- Access points the transmitter fit rejects stay in the venue as `"model": false`: fingerprint
+  dimensions only.
+- `FingerprintMap` returns a scan's nearest training scans. The particle filter and the grid filter apply
+  them as a kernel density over position and level (`pf.fingerprint_weight`), seed the cloud from it and
+  draw recovery injections from it ([design.md](design.md#particle-filter)).
+- All of it is off by default. `data/configs/fingerprint.json` is `ipin.json` plus `fingerprint_weight` 3.
+
+**Settings**, chosen on the IPIN validation walks only (27 walks, 3 filter seeds, median competition
+p75 [m] / median floor hit):
+
+| Setting | Nuremberg | UMinho |
+|---|---:|---:|
+| `ipin.json`, fingerprints off | 13.9 / 94% | 33.1 / 74% |
+| weight 1, kernel 6 m, 20 compared readings, model at full weight | 5.7 / 100% | 16.2 / 93% |
+| model weight 0.3 | 6.3 / 98% | 9.5 / 97% |
+| model weight 0 (fingerprints alone) | 6.1 / 98% | 13.2 / 94% |
+| weight 3, model weight 0.3 | 5.2 / 99% | 10.2 / 96% |
+| + kernel 4 m | 4.3 / 99% | 10.6 / 94% |
+| + kernel 9 m | 6.4 / 99% | 10.5 / 94% |
+| **+ kernel 4 m, 40 compared readings** | **4.6 / 98%** | **10.8 / 94%** |
+| + kernel 3 m, 40 compared readings | 4.4 / 99% | 11.2 / 97% |
+
+Weights 2 to 5, 5 to 20 neighbours, 10 to 80 compared readings and a uniform share of 1–20% move the
+medians by less than the seeds do (about 1 m in Nuremberg, 2 m in UMinho), so the middle of each range is
+the default. During the sweep the model weight scaled every RSSI update; as shipped
+(`fingerprint_model_weight`) it scales only scans that have neighbours, so single BLE packets and venues
+without positions keep the model at full weight. The frozen settings with 5 seeds give 4.7 m / 100% and
+11.0 m / 96%.
+
+**Result.** IPIN scoring walks, replayed once with the frozen settings (competition p75 [m] / floor hit;
+the particle filter with 5 seeds, the grid filter once):
+
+| Walk | `msil_wifi.json` | `ipin.json` | `fingerprint.json`, PF | `fingerprint.json`, grid |
+|---|---:|---:|---:|---:|
+| Nuremberg 2024 #1 | 15.2 / 83% | 23.4 / 82% | 6.3 / 97% | 6.6 / 97% |
+| Nuremberg 2024 #2 | 21.2 / 82% | 21.8 / 84% | 6.6 / 90% | 5.1 / 96% |
+| Nuremberg 2023 #1 | 32.2 / 69% | 32.4 / 74% | 8.9 / 95% | 8.6 / 94% |
+| Nuremberg 2023 #2 | 27.1 / 75% | 37.8 / 72% | 6.7 / 92% | 5.0 / 96% |
+| UMinho #12 (no barometer) | 26.8 / 65% | 31.8 / 74% | 10.0 / 90% | 7.7 / 95% |
+| UMinho #13 | 41.9 / 54% | 36.5 / 79% | 11.0 / 92% | 6.8 / 97% |
+
+**What is drawn** (validation walks, `ipe-regress --traces`, one seed, `ipin.json` → `fingerprint.json`):
+
+| Group | CEP50 / CEP95 [m] | Coverage95 | Jitter p95 [m] | Jumps/min | Through walls/min | Floor flips (2 real) |
+|---|---|---|---|---|---|---|
+| Nuremberg | 5.92 / 29.75 → 2.80 / 7.31 | 22% → 51% | 0.62 → 0.43 | 3.1 → 1.1 | 4.14 → 2.00 | 4.5 → 6.0 |
+| UMinho | 11.52 / 26.76 → 3.97 / 17.44 | 33% → 25% | 1.03 → 0.51 | 4.7 → 2.5 | 7.49 → 4.77 | 10.0 → 9.0 |
+
+22 of 23 UMinho walks now meet the convergence rule, against 13.
+
+**The synthetic scenarios are unchanged**: `ipe-regress --no-baseline --seeds 10` gives identical
+accuracy and smoothness columns before and after, since nothing here runs without
+`pf.fingerprint_weight` and a venue with fingerprint positions.
+
+**Findings.**
+- **The model and the fingerprints read the same scan.** At full weight each, UMinho's p75 is 16 m; with
+  the model at 0.3 it is 10 m. The model still helps a little there (13 m without it), where 99 access
+  points have a fitted position.
+- **A raw k-NN position is not better than the old filter.** On the MSIL sample a scan's weighted 5-NN
+  position is 7.1 m off at the median, the same as the log-distance filter's CEP50. The gain comes from
+  using the neighbours as a likelihood inside the filter, which the steps and the walls then sharpen.
+- **Access points without a position carry information.** Restricting the k-NN to the fitted access points
+  raises its mean error on the MSIL sample from 8.7 to 9.8 m.
+- **The uncertainty is still too small** (coverage95 25–51%), and the reported floor in Nuremberg changes
+  more often than before.
+
+**Kaggle.** On the full competition set the same settings take the held-out walks of the 24 test
+buildings from 13.0 to 8.4 m (Kaggle metric, causal, 1,126 walks). Replaying each walk forwards and
+backwards and combining the two gives 6.2 m, and snapping to surveyed waypoints 5.9 m. Late submissions
+of the test walks score 8.92 m (before) and 5.31 m on the private leaderboard, against the winner's
+1.50 m ([benchmarks.md](benchmarks.md#kaggle-indoor-location--navigation-2021)). These are the particle
+filter's numbers; experiment 16 has the grid filter's.
+
+**Not done.** The winners of the Kaggle competition optimise each whole walk offline and learn the
+relative motion from the sensors. The engine's offline mode here is two causal passes, forwards and
+backwards, combined.
+
+## 16. One filter: the grid filter becomes the engine
+
+**Question.** The engine carried two filters: the particle filter that the tools and gates ran, and the
+grid filter of experiment 14 that the web demo ran. Experiment 14 left the grid as a prototype because of
+its compute on mall floors. With fingerprints (experiment 15) both got better. Is one of them enough?
+
+**Check on the mall floors**, the one place where the grid had not been clearly better. MSIL sample, tune
+half, 111 walks, `fingerprint.json`, every waypoint scored (gaps filled):
+
+| | Particle filter (3 seeds) | Grid filter |
+|---|---:|---:|
+| Kaggle metric [m] | 8.70 | 8.76 |
+| Median CEP50 / CEP95 [m] | 5.44 / 10.70 | 5.49 / 10.26 |
+| Walks on which it is the better one | 57 | 54 |
+| One walk on one desktop core, share of its duration | 0–9% | 3–60% |
+
+A tie on accuracy. The grid's time includes building the lattice (0.3 s) and the wall counts per access
+point, which dominate a 3 s walk.
+
+**Everywhere else the grid was already better.** Synthetic scenarios, 10 seeds, particle filter → grid
+(`ipe-regress --no-baseline --seeds 10`, before and after the switch):
+
+| Scenario | CEP50 [m] | CEP95 [m] | Converged [s] | Coverage95 | Jitter p95 [m] | Jumps/min | Through walls/min | Floor ok |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| airport_hall_sparse | 1.21 → 1.01 | 5.95 → 3.76 | 35.9 → 34.5 | 73% → 68% | 0.29 → 0.20 | 0.7 → 0.2 | 0.31 → 0.05 | - |
+| baro_drift_long | 0.62 → 0.54 | 1.95 → 1.42 | 13.3 → 1.0 | 87% → 78% | 0.39 → 0.28 | 1.3 → 0.6 | 1.15 → 0.17 | 99.1% → 99.2% |
+| kit_tour | 0.74 → 0.65 | 6.58 → 2.67 | 8.0 → 0.7 | 76% → 65% | 0.35 → 0.26 | 1.4 → 0.9 | 1.13 → 1.19 | 98.9% → 99.0% |
+| office_device_offset | 0.74 → 0.49 | 2.03 → 1.15 | 5.7 → 5.2 | 83% → 92% | 0.36 → 0.31 | 0.4 → 0.1 | 1.22 → 0.73 | - |
+| office_elevator | 0.58 → 0.54 | 1.70 → 1.28 | 1.3 → 2.5 | 91% → 76% | 0.40 → 0.22 | 1.7 → 0.9 | 1.24 → 0.12 | 99.0% → 99.0% |
+| office_field_issue | 0.70 → 0.56 | 1.95 → 1.68 | 2.5 → 5.7 | 86% → 83% | 0.44 → 0.30 | 0.4 → 0.1 | 1.13 → 0.49 | - |
+| office_floor_bleed | 0.88 → 0.68 | 3.87 → 1.50 | 8.0 → 1.8 | 80% → 66% | 1.79 → 0.32 | 3.6 → 1.0 | 5.51 → 0.52 | 96.6% → 97.9% |
+| office_mag_disturbance | 1.14 → 0.94 | 2.71 → 2.65 | 3.8 → 6.1 | 63% → 53% | 0.49 → 0.37 | 0.8 → 0.3 | 2.80 → 2.60 | - |
+| office_nlos_heavy | 0.64 → 0.57 | 1.83 → 1.28 | 2.7 → 3.8 | 91% → 84% | 0.35 → 0.29 | 0.4 → 0.0 | 0.93 → 0.34 | - |
+| office_nominal | 0.64 → 0.55 | 1.56 → 1.14 | 1.7 → 2.2 | 88% → 85% | 0.35 → 0.29 | 0.1 → 0.0 | 0.64 → 0.39 | - |
+| office_stairs_up_down | 0.78 → 0.58 | 3.24 → 1.63 | 11.1 → 1.2 | 79% → 75% | 0.46 → 0.30 | 1.9 → 0.8 | 2.01 → 0.08 | 98.9% → 99.1% |
+| office_step_scale | 0.73 → 0.78 | 1.88 → 1.77 | 2.1 → 3.3 | 83% → 62% | 0.34 → 0.28 | 0.0 → 0.0 | 1.00 → 0.78 | - |
+| **mean** | 0.78 → 0.66 | 2.94 → 1.83 | 8.0 → 5.7 | | 0.50 → 0.29 | 1.06 → 0.41 | 1.59 → 0.62 | |
+
+Real walks, held out:
+
+| Data | Particle filter | Grid filter |
+|---|---|---|
+| IPIN scoring walks, `fingerprint.json`: competition p75 per trial [m] | 6.3, 6.6, 8.9, 6.7, 10.0, 11.0 (5 seeds) | 6.6, 5.1, 8.6, 5.0, 7.7, 6.8 |
+| the same: floor right | 90–97% | 94–97% |
+| MSIL, 109 walks, `msil_wifi.json`: median CEP50 / CEP95 (mean) [m] | 7.34 / 9.46 (11.71 / 15.67) | 6.76 / 9.41 (10.79 / 14.40) |
+| Kaggle, 1,126 held-out walks of the 24 test buildings, `fingerprint.json`: Kaggle metric causal / two passes / with snapping [m] | 8.39 / 6.20 / 5.89 | 8.33 / 6.09 / 5.70 |
+| Kaggle test walks, late submission of the last of these: public / private score [m] | 4.65 / 5.31 | 5.05 / 5.30 |
+
+The Kaggle rows were measured after the switch, with the pipeline as the particle filter had left it. The
+held-out walks favour the grid by 0.1–0.2 m, the private leaderboard is a tie, and the public one (a
+seventh of the test set) favours the particle filter by 0.4 m. Building by building on the held-out walks,
+with two passes and snapping, the grid is the better one in 15 of the 24, between 1.3 m better and 0.7 m
+worse; walk by walk the particle filter is better or equal on 590 and the grid on 531.
+
+**Change.** The particle filter is removed. `PositioningEngine` runs the grid filter, which moved from
+`grid/` into `core/`; its settings are the `filter` section of the config, in place of `pf`. `ipe-grid` is
+gone: `ipe-replay` and `ipe-regress` run the engine, and the regression runner builds one lattice per
+venue and shares it between replays. `evaluate.py` lost `--seeds` and `--tool`: a walk is replayed once.
+All three baselines were regenerated for the preset `grid`, and the IPIN gate now runs `fingerprint.json`
+on the venues with fingerprint positions.
+
+**What got worse.**
+- **`office_step_scale`**: CEP50 0.73 → 0.78 m. The grid has no per-user step scale; a wider along-track
+  noise stands in for it (experiment 14).
+- **Convergence** is 0.5–3.2 s later on five single-floor offices (2.5 → 5.7 s on `office_field_issue`)
+  and on `office_elevator`. The other four multi-floor walks converge 6–12 s sooner.
+- **Coverage95** falls on 11 of 12 scenarios (82% → 74% on average, 62% on `office_step_scale`): the
+  reported ellipse is tighter than the errors. On the real walks of the gates it is 13–21%.
+- **MSIL per floor**: median CEP95 is more than 10% worse on site2_F4 (one walk); median CEP50 on site2_F2
+  (two walks) and site2_F4.
+- **Compute.** About 25 times the particle filter on a mall floor. The synthetic gate takes 40 s instead of
+  4 s; the two real-data gates about 9 minutes together.
+- **Gone with the particle filter**: the barometer-driven move to the nearest stairs, the kept barometer
+  reference for re-seeds and the online slab-loss calibration. The grid reached better floor accuracy on
+  the IPIN walks without them, through the floor vote and the fingerprints' levels.
+
+**What got simpler.** No seed and no seed noise: every A/B comparison of a recorded walk is exact, and a
+gate's baseline is a number, not a distribution. No start proposal and no rule for when to use it, no
+injection of recovery hypotheses, no re-seeding, no rejection sampling around closed rooms. About 1,200
+lines of filter code and 780 lines of its tests are gone.
+
 ## Open questions
 
-- A Wi-Fi scan can still move the whole cloud across a wall into a large region next to the walker's (a
-  parallel corridor), where it lasts longer than in a closed room (experiment 13). Forbidding injections
-  across walls blocks the escape from a wrong corridor that recovery is for. A likelihood that does not
-  treat a scan's readings as independent would attack the cause.
-- The beacon-driven init proposal is now chosen by particle density (experiment 9), but venues between
-  0.6 and 1 particle per m^2 are where it is mixed. A wall-aware ring (rejection sampling against the
-  full likelihood) might remove the office cost and let it be on everywhere.
-- A wider BLE likelihood (sigma 7 dB) improves 9 of 12 simulated scenarios, but the two-floor walks then
-  take twice as long to lock on (experiment 12). If the floor decision could be kept sharp while the
-  horizontal update is softened, the gain might be had without the cost.
+- **Compute on large floors.** The filter touches every cell at every update. A sparse active set (cells
+  below a mass floor left alone) saved nothing on Wi-Fi, where most cells stay above any useful floor
+  (experiment 14). Coarser cells away from the mass, or a hierarchy, are untried.
+- **Uncertainty.** Coverage95 is 53–92% on the simulated walks and under a quarter on real Wi-Fi. The
+  model counts a scan's readings and consecutive packets as independent. Tempering a scan made the spread
+  honest and cost accuracy at every setting tried ([real_data.md](real_data.md#scans-as-one-update)); the
+  fingerprint likelihood has the same problem in a different place.
+- **Stairs taken away from the estimate.** Mass changes level only inside a connector. A
+  barometer-driven move to the nearest stairs helped the particle filter on IPIN; the grid has no such
+  step ([grid.md](grid.md#updates)).
+- **A per-user step length.** A three-value scale state fixed `office_step_scale` and cost most other
+  offices (experiment 14).
+- **Whole-walk optimisation for offline use.** Two causal passes, forwards and backwards, are what the
+  Kaggle numbers use; a grid makes an exact forward-backward smoother possible, at the cost of keeping
+  every step's posterior ([benchmarks.md](benchmarks.md#what-the-winners-do-that-the-engine-does-not)).
 - `office_nlos_heavy`: the wall-aware model assumes 3.5 dB per wall while the truth is 7 dB. Learning the
-  wall loss online failed both as a particle state and as a venue-wide calibration (experiment 10); the
-  device offset and the wall loss trade off too easily. Per-wall-type losses from the map are the
+  wall loss online failed both as a per-hypothesis state and as a venue-wide calibration (experiment 10);
+  the device offset and the wall loss trade off too easily. Per-wall-type losses from the map are the
   alternative.

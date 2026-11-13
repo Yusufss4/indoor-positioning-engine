@@ -54,7 +54,7 @@ def main():
                 f"{title}: a phone (Galaxy A5) standing still at a surveyed point (black square) for {e['fingerprints']} "
                 "BLE scans, about one per second. Grey outlines are the mapped shelves and pillars, dots the surveyed "
                 "beacons. The point was held out of the path-loss fit; the filter has no steps to go on, only BLE. "
-                "Default particle filter config. Results over all points are in docs/uji_ble.md."),
+                "Default engine config. Results over all points are in docs/uji_ble.md."),
         })
         print(f"{vname}: {src.name} ({e['fingerprints']} fingerprints)")
     index = {

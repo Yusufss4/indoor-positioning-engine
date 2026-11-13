@@ -11,8 +11,6 @@
 
 namespace ipe {
 
-class ParticleFilter;
-
 struct RoomEventConfig {
   double enter_prob = 0.6;        ///< Room probability that starts the enter dwell.
   double exit_prob = 0.3;         ///< Room probability that starts the exit dwell.
@@ -49,9 +47,9 @@ class RoomTracker {
   [[nodiscard]] bool due(double t) const {
     return !state_.empty() && (!updated_ || t >= last_update_ + cfg_.update_period_s);
   }
-  /// Throttled to update_period_s. `pf` is the particle cloud behind `estimate`; null for a known
-  /// position such as the ground truth, which then counts fully for the rooms containing it.
-  void update(double t, const Estimate& estimate, const ParticleFilter* pf);
+  /// Throttled to update_period_s. For a known position such as the ground truth: it counts fully for
+  /// the rooms containing it.
+  void update(double t, const Estimate& estimate);
   /// Runs the state machines on given per-room probabilities (one per venue room).
   void update(double t, std::span<const double> probabilities);
 

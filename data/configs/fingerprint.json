@@ -1,0 +1,12 @@
+{
+  "rssi": {
+    "sigma_db": 8.0
+  },
+  "filter": {
+    "floor_prior_weight": 3.0,
+    "fingerprint_weight": 3.0
+  },
+  "smoothing": {
+    "max_correction_mps": 1.5
+  }
+}

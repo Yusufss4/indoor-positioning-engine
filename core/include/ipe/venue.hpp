@@ -18,6 +18,9 @@ struct Beacon {
   int level = 0;                ///< Level index (see Venue::levels()).
   double tx_power_dbm = -59.0;  ///< Expected RSSI at 1 m.
   double path_loss_exp = 2.0;   ///< Log-distance path-loss exponent.
+  /// False for a transmitter whose position and path loss are not known well enough for the log-distance
+  /// model (venue JSON `"model": false`). Its readings only count as a dimension of the radio fingerprints.
+  bool modelled = true;
 };
 
 /// One floor of the venue. Levels are stored sorted by `ordinal`; everywhere
@@ -39,16 +42,19 @@ std::string_view to_string(ConnectorKind kind);
 /// Accepts "stairs", "elevator" and "escalator". Throws std::invalid_argument otherwise.
 ConnectorKind parse_connector_kind(std::string_view name);
 
-/// Radio fingerprints with a known floor (e.g. training Wi-Fi scans), for a floor classifier. Stored flat:
-/// fingerprint i holds the readings [begin[i], begin[i + 1]) of `beacon` / `rssi`.
+/// Radio fingerprints with a known floor (e.g. training Wi-Fi scans), for a floor classifier and, when they
+/// also carry the position they were taken at, for the fingerprint likelihood. Stored flat: fingerprint i
+/// holds the readings [begin[i], begin[i + 1]) of `beacon` / `rssi`.
 struct FloorFingerprints {
   std::vector<int> level;            ///< Level index of each fingerprint.
   std::vector<std::uint32_t> begin;  ///< Size level.size() + 1.
   std::vector<std::uint32_t> beacon;
   std::vector<float> rssi;
+  std::vector<Vec2> pos;  ///< Where each fingerprint was taken; empty when the venue gives no positions.
 
   [[nodiscard]] std::size_t size() const { return level.size(); }
   [[nodiscard]] bool empty() const { return level.empty(); }
+  [[nodiscard]] bool has_positions() const { return !pos.empty() && pos.size() == level.size(); }
 };
 
 /// A vertical connection (stairwell, lift, escalator). Its footprint is the

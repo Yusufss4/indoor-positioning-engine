@@ -2,13 +2,14 @@ add_library(ipe_core STATIC
   src/baro.cpp
   src/beacon_integrity.cpp
   src/engine.cpp
+  src/fingerprint_map.cpp
   src/floor_classifier.cpp
   src/geometry.cpp
+  src/grid_filter.cpp
+  src/grid_map.cpp
   src/georef.cpp
   src/level_selector.cpp
   src/map_estimate.cpp
-  src/particle_filter.cpp
-  src/particle_filter_proposal.cpp
   src/reachable_area.cpp
   src/pdr.cpp
   src/rooms.cpp

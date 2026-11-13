@@ -4,6 +4,7 @@
 #include <array>
 #include <chrono>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -16,9 +17,9 @@
 
 namespace ipe::eval {
 
-/// Named engine configurations. The only one is `pf`: the particle filter with
-/// wall constraint, wall-aware RSSI and the device offset state. Variants are
-/// config patches (`--config`, `--set`) on top of it.
+/// Named engine configurations. The only one is `grid`: the grid filter on the venue's walkable cells,
+/// with wall-aware RSSI and the device offset state. Variants are config patches (`--config`, `--set`) on
+/// top of it.
 EngineConfig preset_config(std::string_view preset);
 const std::vector<std::string>& preset_names();
 
@@ -104,21 +105,22 @@ struct TrackSample {
   bool valid = false;
 };
 
-struct ParticleSnapshot {
+/// The heaviest cells of the posterior at one truth sample.
+struct CellSnapshot {
   double t = 0.0;
-  std::vector<std::array<float, 4>> particles;  ///< x, y, weight, level
+  std::vector<std::array<float, 4>> cells;  ///< centroid x, y, mass, level
 };
 
 struct ReplayOptions {
-  double warmup_s = 5.0;            ///< Samples before this are excluded from error statistics.
-  int particle_snapshot_every = 0;  ///< Every N truth samples; 0 disables.
-  std::size_t particle_snapshot_max = 300;
+  double warmup_s = 5.0;   ///< Samples before this are excluded from error statistics.
+  int snapshot_every = 0;  ///< A posterior snapshot every N truth samples; 0 disables.
+  std::size_t snapshot_max = 300;
   double track_period_s = 0.2;  ///< Spacing of ReplayResult::track; 0 disables it and the smoothness metrics.
 };
 
 struct ReplayResult {
   std::vector<EstimateRecord> records;
-  std::vector<ParticleSnapshot> snapshots;
+  std::vector<CellSnapshot> snapshots;
   /// The estimate every `track_period_s` of trace time, from the first truth sample on: what a client
   /// polling the engine would draw.
   std::vector<TrackSample> track;
@@ -129,17 +131,14 @@ struct ReplayResult {
 
 /// Feeds the trace through a fresh engine in timestamp order and scores the
 /// estimate against ground truth at every truth sample. Between fixes the
-/// last valid estimate is held, as a blue dot would be on screen.
-ReplayResult replay(const Venue& venue, const Trace& trace, const EngineConfig& cfg, const ReplayOptions& opts = {});
+/// last valid estimate is held, as a blue dot would be on screen. `map`, if given, is the venue's lattice
+/// for `cfg.filter`, built before and shared between replays (PositioningEngine).
+ReplayResult replay(const Venue& venue, const Trace& trace, const EngineConfig& cfg, const ReplayOptions& opts = {},
+                    std::shared_ptr<const GridMap> map = nullptr);
 
-/// The replay loop behind replay(), for any engine with PositioningEngine's sensor inputs and
-/// estimate(), room_tracker(), take_room_events() and step_count(); `engine` must be fresh. Particle
-/// snapshots call `append_snapshot(engine, out, max)`, found by argument-dependent lookup.
+/// The replay loop behind replay(); `engine` must be fresh.
 template <class Engine>
 ReplayResult replay_with(Engine& engine, const Venue& venue, const Trace& trace, const ReplayOptions& opts = {});
-
-/// Up to about `max` of the engine's particles as (x, y, weight, level).
-void append_snapshot(const PositioningEngine& engine, std::vector<std::array<float, 4>>& out, std::size_t max);
 
 Metrics compute_metrics(const std::vector<EstimateRecord>& records, double warmup_s);
 /// Fills the smoothness fields of `m` from an evenly spaced track (spacing `period_s`). Samples before
@@ -158,7 +157,8 @@ void score_room_events(Metrics& m, const std::vector<RoomEvent>& estimated, cons
 
 std::string metrics_to_json(const Metrics& m, int indent = 2);
 void write_estimates_csv(const std::string& path, const ReplayResult& result);
-void write_particles_csv(const std::string& path, const ReplayResult& result);
+/// t,x,y,weight,level: the snapshots' cells.
+void write_cells_csv(const std::string& path, const ReplayResult& result);
 /// t,x,y,level,valid: the replay's evenly spaced estimate track.
 void write_track_csv(const std::string& path, const ReplayResult& result);
 /// t,source,room_id,room_name,type,probability with source "estimate" or "truth", sorted by time.
@@ -217,7 +217,7 @@ ReplayResult replay_with(Engine& engine, const Venue& venue, const Trace& trace,
         at_truth.pos = truth.pos;
         at_truth.level = truth.level;
         at_truth.valid = true;
-        truth_rooms->update(truth.t, at_truth, nullptr);
+        truth_rooms->update(truth.t, at_truth);
         truth_rooms->current_rooms(truth_in);
         engine.room_tracker()->current_rooms(est_in);
         rec.rooms_match = truth_in == est_in ? 1 : 0;
@@ -225,11 +225,10 @@ ReplayResult replay_with(Engine& engine, const Venue& venue, const Trace& trace,
       }
       result.records.push_back(rec);
 
-      if (opts.particle_snapshot_every > 0 &&
-          truth_seen % static_cast<std::size_t>(opts.particle_snapshot_every) == 0) {
-        ParticleSnapshot snap;
+      if (opts.snapshot_every > 0 && truth_seen % static_cast<std::size_t>(opts.snapshot_every) == 0) {
+        CellSnapshot snap;
         snap.t = truth.t;
-        append_snapshot(engine, snap.particles, opts.particle_snapshot_max);
+        append_snapshot(engine, snap.cells, opts.snapshot_max);
         result.snapshots.push_back(std::move(snap));
       }
       ++truth_seen;

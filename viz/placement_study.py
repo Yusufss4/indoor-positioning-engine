@@ -91,7 +91,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--build", default=str(ROOT / "build"))
     ap.add_argument("--seeds", type=int, default=10, help="seeds per layout and replicate")
-    ap.add_argument("--preset", default="pf")
+    ap.add_argument("--preset", default="grid")
     ap.add_argument("--scenarios", default=",".join(DEFAULT_SCENARIOS))
     ap.add_argument("--windows", default="0,5,10,20", help="ipe-plan --window values to compare")
     ap.add_argument("--out", help="directory for placement_study.json")

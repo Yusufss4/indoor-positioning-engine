@@ -2,6 +2,8 @@
 
 #include <cmath>
 #include <numbers>
+#include <numeric>
+#include <stdexcept>
 
 namespace ipe {
 
@@ -11,47 +13,74 @@ double Estimate::sigma_radius() const {
 }
 
 PositioningEngine::PositioningEngine(const Venue& venue, EngineConfig cfg)
+    : PositioningEngine(venue, cfg, std::make_shared<const GridMap>(venue, cfg.filter)) {}
+
+PositioningEngine::PositioningEngine(const Venue& venue, EngineConfig cfg, std::shared_ptr<const GridMap> map)
     : venue_(&venue),
       cfg_(cfg),
       pdr_(cfg.pdr),
-      pf_(venue, cfg.pf, cfg.rssi, cfg.baro),
+      filter_(std::move(map), cfg.filter, cfg.rssi, cfg.baro),
       smoother_(venue, cfg.smoothing) {
-  if (!venue.rooms().empty()) rooms_.emplace(venue, cfg.rooms);
+  if (&filter_.map().venue() != &venue) throw std::invalid_argument("PositioningEngine: the map is of another venue");
+  if (!venue.rooms().empty()) {
+    rooms_.emplace(venue, cfg.rooms);
+    room_prob_.assign(venue.rooms().size(), 0.0);
+  }
 }
 
 void PositioningEngine::on_imu(const ImuSample& sample) {
   now_ = std::max(now_, sample.t);
   if (const auto step = pdr_.process(sample)) {
     ++steps_;
-    const Estimate before = pf_.estimate();
-    pf_.on_step(*step);
-    smoother_.on_step(step->t, before, pf_.estimate(), pf_.step_motion());
+    const Estimate before = filter_.estimate();
+    filter_.on_step(*step);
+    smoother_.on_step(step->t, before, filter_.estimate(), filter_.step_motion());
     if (step->mag_valid) {
-      pf_.on_heading(step->t, step->mag_heading, deg2rad(cfg_.mag_heading_sigma_deg));
-      smoother_.on_update(step->t, pf_.estimate());
+      filter_.on_heading(step->t, step->mag_heading, deg2rad(cfg_.mag_heading_sigma_deg));
+      smoother_.on_update(step->t, filter_.estimate());
     }
   }
   update_rooms(sample.t);
 }
 
 void PositioningEngine::on_ble(double t, std::string_view beacon_id, double rssi) {
-  if (const auto idx = venue_->beacon_index(beacon_id)) pf_.on_rssi(t, *idx, rssi);
+  if (const auto idx = venue_->beacon_index(beacon_id)) filter_.on_rssi(t, *idx, rssi);
   after_update(t);
 }
 
 void PositioningEngine::on_ble(double t, std::size_t beacon_index, double rssi) {
-  pf_.on_rssi(t, beacon_index, rssi);
+  filter_.on_rssi(t, beacon_index, rssi);
   after_update(t);
 }
 
 void PositioningEngine::on_scan(double t, std::span<const RssiReading> readings) {
-  pf_.on_rssi_scan(t, readings);
+  filter_.on_rssi_scan(t, readings);
   after_update(t);
 }
 
 void PositioningEngine::on_pressure(double t, double hpa) {
-  pf_.on_pressure(t, hpa);
+  filter_.on_pressure(t, hpa);
   after_update(t);
+}
+
+void PositioningEngine::after_update(double t) {
+  now_ = std::max(now_, t);
+  smoother_.on_update(t, filter_.estimate());
+  update_rooms(t);
+}
+
+void PositioningEngine::update_rooms(double t) {
+  if (!rooms_ || !rooms_->due(t)) return;
+  // A room's probability is the mass in its cells; without a fix every room is at 0.
+  std::fill(room_prob_.begin(), room_prob_.end(), 0.0);
+  if (filter_.estimate().valid) {
+    const GridMap& map = filter_.map();
+    const auto mass = filter_.mass();
+    for (std::size_t c = 0; c < map.size(); ++c) {
+      for (const std::uint32_t r : map.rooms(c)) room_prob_[r] += mass[c];
+    }
+  }
+  rooms_->update(t, room_prob_);
 }
 
 std::vector<RoomEvent> PositioningEngine::take_room_events() {
@@ -62,6 +91,22 @@ std::vector<std::size_t> PositioningEngine::current_rooms() const {
   std::vector<std::size_t> out;
   if (rooms_) rooms_->current_rooms(out);
   return out;
+}
+
+void append_snapshot(const PositioningEngine& engine, std::vector<std::array<float, 4>>& out, std::size_t max) {
+  const GridFilter& f = engine.filter();
+  const auto mass = f.mass();
+  std::vector<std::size_t> order(mass.size());
+  std::iota(order.begin(), order.end(), std::size_t{0});
+  const std::size_t k = std::min(max, order.size());
+  std::partial_sort(order.begin(), order.begin() + static_cast<std::ptrdiff_t>(k), order.end(),
+                    [&](std::size_t a, std::size_t b) { return mass[a] > mass[b] || (mass[a] == mass[b] && a < b); });
+  for (std::size_t i = 0; i < k; ++i) {
+    const std::size_t c = order[i];
+    const Vec2 p = f.centroid(c);
+    out.push_back({static_cast<float>(p.x), static_cast<float>(p.y), static_cast<float>(mass[c]),
+                   static_cast<float>(f.map().cell(c).level)});
+  }
 }
 
 }  // namespace ipe

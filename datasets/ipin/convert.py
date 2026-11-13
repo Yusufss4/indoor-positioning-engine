@@ -31,6 +31,7 @@ sys.path.append(str(HERE.parent / "osm"))
 
 import maps  # noqa: E402
 from common.geom import crossing_params, crossings, cut_gaps, fit_heading_offset, forward_heading_from_quat, point_in_rings, rotation_matrices, wrap  # noqa: E402
+from common.fingerprints import drop_rare, fingerprint_table, unmodelled_beacons  # noqa: E402
 from common.radiomap import Transmitter, fit_samples, path_loss  # noqa: E402
 from common.trace import TraceWriter, write_manifests  # noqa: E402
 from logfile import Walk, parse, read_gt_csv  # noqa: E402
@@ -268,31 +269,28 @@ def radio_samples(train: list[tuple[Walk, np.ndarray]], wifi: bool, ble: bool = 
     return samples
 
 
-def floor_fingerprints(train: list[tuple[Walk, np.ndarray]], known: set[str]) -> dict:
-    """One fingerprint per training Wi-Fi scan: the scan's floor is the landmarks' when it falls between
-    two landmarks on the same floor; other scans are dropped. Only the venue's own access points are
-    kept, as integer dBm. Written compactly (docs/formats.md): {"ids": [id, ...], "scans": [[ordinal,
-    id index, dBm, ...], ...]}."""
+def training_scans(train: list[tuple[Walk, np.ndarray]]) -> list[tuple[int, float, float, dict[str, float]]]:
+    """(ordinal, x, y, {"w:" + mac: dBm}) per training Wi-Fi scan that falls between two landmarks on
+    the same floor, where the straight line between them gives its position; other scans are dropped.
+    An access point heard twice in a scan keeps its strongest reading."""
     out = []
     for w, gt in train:
         by_scan: dict[float, list] = {}
         for t, mac, rssi, scan in w.wifi:
-            if "w:" + mac in known and t >= 0:
+            if t >= 0:
                 by_scan.setdefault(scan, []).append((t, mac, rssi))
         if not by_scan:
             continue
         scans = sorted(by_scan.items())
         t = np.array([max(rd[0] for rd in readings) for _, readings in scans])
-        _, lv, ok = interp_same_level(gt, t)
-        for (_, readings), o, good in zip(scans, lv, ok):
+        xy, lv, ok = interp_same_level(gt, t)
+        for (_, readings), p, o, good in zip(scans, xy, lv, ok):
             if good:
-                rssi = {}
+                rssi: dict[str, float] = {}
                 for _, mac, r in readings:
                     rssi["w:" + mac] = max(rssi.get("w:" + mac, -200), int(round(r)))
-                out.append((int(o), sorted(rssi.items())))
-    ids = sorted({k for _, rssi in out for k, _ in rssi})
-    index = {k: i for i, k in enumerate(ids)}
-    return {"ids": ids, "scans": [[o] + [v for k, r in rssi for v in (index[k], r)] for o, rssi in out]}
+                out.append((int(o), float(p[0]), float(p[1]), rssi))
+    return out
 
 
 def fit_radio_map(samples: dict[str, list], box, elev: dict, known: dict[str, tuple[float, float, int]], args):
@@ -531,10 +529,21 @@ def convert_site(site: str, cfg: dict, args) -> tuple[list, list, list, dict]:
     }
     if footprint:
         venue["footprint"] = footprint
+    known_ids = {t.id for t in txs}
     if args.wifi and args.fingerprints:
-        venue["floor_fingerprints"] = floor_fingerprints(gts["train"], {t.id for t in txs})
-        report["floor_fingerprints"] = len(venue["floor_fingerprints"]["scans"])
-        print(f"  floor fingerprints: {report['floor_fingerprints']} training scans")
+        # Training scans with their floor, and with --positions where they were taken. --unmodelled keeps
+        # the access points the log-distance fit rejected as fingerprint-only beacons.
+        scans = training_scans(gts["train"])
+        if args.unmodelled:
+            extra = unmodelled_beacons(scans, known_ids, args.min_fingerprint_scans)
+            venue["beacons"] += extra
+            known_ids |= {b["id"] for b in extra}
+            report["unmodelled_beacons"] = len(extra)
+        scans = drop_rare(scans, known_ids)
+        venue["floor_fingerprints"] = fingerprint_table(scans, positions=args.positions)
+        report["floor_fingerprints"] = len(scans)
+        print(f"  floor fingerprints: {len(scans)} training scans" + (" with positions" if args.positions else "") +
+              (f", {report['unmodelled_beacons']} fingerprint-only access points" if args.unmodelled else ""))
     site_out = args.out / site
     site_out.mkdir(parents=True, exist_ok=True)
     venue_path = site_out / "venue.json"
@@ -558,7 +567,6 @@ def convert_site(site: str, cfg: dict, args) -> tuple[list, list, list, dict]:
                 polys.append((footprint, (0, 0, 255)))
             maps.debug_png(dbg / f"{site}_L{o}.png", masks[o], levels[o], pts, polys)
 
-    known_ids = {t.id for t in txs}
     entries = {"tune": [], "holdout": []}
     report["skipped"] = []
     for split in ("tune", "holdout"):
@@ -593,6 +601,12 @@ def main():
     ap.add_argument("--debug", action="store_true", help="write per-floor wall/landmark PNGs to <out>/debug")
     ap.add_argument("--fingerprints", action="store_true",
                     help="with --wifi, store the training scans as floor fingerprints in the venue")
+    ap.add_argument("--positions", action="store_true",
+                    help="with --fingerprints, also store where each training scan was taken (fingerprint likelihood)")
+    ap.add_argument("--unmodelled", action="store_true",
+                    help="with --fingerprints, keep access points without a fitted transmitter as fingerprint-only beacons")
+    ap.add_argument("--min-fingerprint-scans", type=int, default=10,
+                    help="training scans an access point without a fitted transmitter must appear in")
     ap.add_argument("--data", type=Path, help="also write each site's venue here as <site>.json (data/ipin)")
     args = ap.parse_args()
     if args.scans and not args.wifi:

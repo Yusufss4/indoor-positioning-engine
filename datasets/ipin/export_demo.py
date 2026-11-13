@@ -130,9 +130,8 @@ def main():
                 "the only ground truth; the floor menu follows the walker. Walls were extracted from the "
                 "competition's floor plans and the Wi-Fi access points (purple) located from the training walks. "
                 "This walk is from the set the settings were chosen on; the held-out scoring walks are in "
-                "docs/ipin.md. The particle filter uses data/configs/ipin.json: the Wi-Fi settings plus the floor "
-                "model (barometer jump to the nearest stairs, kept barometer reference, Wi-Fi fingerprint floor "
-                "prior)."),
+                "docs/ipin.md. The engine uses data/configs/ipin.json: the Wi-Fi settings plus the Wi-Fi "
+                "fingerprint floor prior."),
         })
         print(f"{site}: {src.name} ({duration:.0f} s from {start:.0f} s, {len(pts)} landmarks, {t['phone']})")
 

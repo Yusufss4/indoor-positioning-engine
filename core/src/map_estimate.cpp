@@ -6,14 +6,14 @@
 
 namespace ipe {
 
-MapConsistentEstimate::MapConsistentEstimate(const Venue& venue, std::size_t particle_capacity) : venue_(&venue) {
+MapConsistentEstimate::MapConsistentEstimate(const Venue& venue, std::size_t point_capacity) : venue_(&venue) {
   const auto& b = venue.bounds();
   // Coarser cells for huge venues keep the histogram under a million cells.
   cell_m_ = std::max(kCellM, std::sqrt(b.width() * b.height() / 1e6));
   nx_ = std::max(1, static_cast<int>(std::ceil(b.width() / cell_m_)));
   ny_ = std::max(1, static_cast<int>(std::ceil(b.height() / cell_m_)));
   weight_.assign(static_cast<std::size_t>(nx_) * static_cast<std::size_t>(ny_), 0.0);
-  touched_.reserve(particle_capacity);
+  touched_.reserve(point_capacity);
 }
 
 std::size_t MapConsistentEstimate::cell(Vec2 p) const {
@@ -23,13 +23,13 @@ std::size_t MapConsistentEstimate::cell(Vec2 p) const {
   return static_cast<std::size_t>(y) * static_cast<std::size_t>(nx_) + static_cast<std::size_t>(x);
 }
 
-Vec2 MapConsistentEstimate::position(std::span<const Particle> particles, Vec2 mean, int level, bool multi_level) {
-  const auto counts = [&](const Particle& p) { return p.weight > 0.0 && (!multi_level || p.level == level); };
+Vec2 MapConsistentEstimate::position(std::span<const WeightedPoint> points, Vec2 mean, int level, bool multi_level) {
+  const auto counts = [&](const WeightedPoint& p) { return p.weight > 0.0 && (!multi_level || p.level == level); };
 
-  // The mean is fine if it is walkable and in sight of the particle closest to it.
-  const Particle* nearest = nullptr;
+  // The mean is fine if it is walkable and in sight of the point closest to it.
+  const WeightedPoint* nearest = nullptr;
   double best_d2 = std::numeric_limits<double>::infinity();
-  for (const auto& p : particles) {
+  for (const auto& p : points) {
     if (!counts(p)) continue;
     const double d2 = (p.pos - mean).norm2();
     if (d2 < best_d2) {
@@ -41,7 +41,7 @@ Vec2 MapConsistentEstimate::position(std::span<const Particle> particles, Vec2 m
   if (venue_->inside(mean, multi_level ? level : -1) && !venue_->crosses_wall(nearest->pos, mean, level)) return mean;
 
   // Dominant mode: the heaviest 3x3 block of a coarse weight histogram.
-  for (const auto& p : particles) {
+  for (const auto& p : points) {
     if (!counts(p)) continue;
     const std::size_t c = cell(p.pos);
     if (weight_[c] == 0.0) touched_.push_back(c);
@@ -66,21 +66,21 @@ Vec2 MapConsistentEstimate::position(std::span<const Particle> particles, Vec2 m
   touched_.clear();
 
   const auto bx = static_cast<long>(best_cell % nx), by = static_cast<long>(best_cell / nx);
-  const auto in_block = [&](const Particle& p) {
+  const auto in_block = [&](const WeightedPoint& p) {
     const std::size_t c = cell(p.pos);
     return std::abs(static_cast<long>(c % nx) - bx) <= 1 && std::abs(static_cast<long>(c / nx) - by) <= 1;
   };
   Vec2 centre{};
   double w_block = 0.0;
-  for (const auto& p : particles) {
+  for (const auto& p : points) {
     if (!counts(p) || !in_block(p)) continue;
     centre += p.pos * p.weight;
     w_block += p.weight;
   }
   centre = centre * (1.0 / w_block);
-  const Particle* anchor = nullptr;
+  const WeightedPoint* anchor = nullptr;
   best_d2 = std::numeric_limits<double>::infinity();
-  for (const auto& p : particles) {
+  for (const auto& p : points) {
     if (!counts(p) || !in_block(p)) continue;
     const double d2 = (p.pos - centre).norm2();
     if (d2 < best_d2) {
@@ -88,10 +88,10 @@ Vec2 MapConsistentEstimate::position(std::span<const Particle> particles, Vec2 m
       anchor = &p;
     }
   }
-  // The block can still straddle a wall: keep the particles on the anchor's side.
+  // The block can still straddle a wall: keep the points on the anchor's side.
   Vec2 mode{};
   double w_mode = 0.0;
-  for (const auto& p : particles) {
+  for (const auto& p : points) {
     if (!counts(p) || !in_block(p) || venue_->crosses_wall(anchor->pos, p.pos, level)) continue;
     mode += p.pos * p.weight;
     w_mode += p.weight;

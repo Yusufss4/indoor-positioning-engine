@@ -1,6 +1,6 @@
 """Plotting helpers for indoor-positioning-engine outputs.
 
-Reads the venue JSON, the estimates CSV and the particle snapshot CSV that
+Reads the venue JSON, the estimates CSV and the cell snapshot CSV that
 `ipe-replay` writes, and renders maps, error curves and animations.
 """
 
@@ -20,7 +20,7 @@ from matplotlib.animation import FuncAnimation, PillowWriter  # noqa: E402
 
 COLORS = {
     "truth": "#222222",
-    "pf": "#d62728",
+    "grid": "#d62728",
 }
 
 
@@ -66,8 +66,8 @@ class Estimates:
         )
 
 
-def load_particles(path: str | Path) -> dict[float, np.ndarray]:
-    """Returns {t: array of (x, y, w)} from a particle snapshot CSV."""
+def load_cells(path: str | Path) -> dict[float, np.ndarray]:
+    """Returns {t: array of (x, y, w)} from a cell snapshot CSV (`ipe-replay --cells`)."""
     snaps: dict[float, list[tuple[float, float, float]]] = {}
     with open(path, newline="") as f:
         for row in csv.DictReader(f):
@@ -174,17 +174,17 @@ def plot_benchmark(results: dict, out: str | Path, metric: str = "cep95_m") -> N
     plt.close(fig)
 
 
-def animate_particles(venue: Venue, est: Estimates, particles: dict[float, np.ndarray], out: str | Path,
+def animate_cells(venue: Venue, est: Estimates, cells: dict[float, np.ndarray], out: str | Path,
                       t_max: float | None = None, fps: int = 10, title: str = "") -> None:
-    """GIF of the particle cloud, estimate and ground truth over time."""
-    times = sorted(t for t in particles if t_max is None or t <= t_max)
+    """GIF of the posterior's heaviest cells, the estimate and the ground truth over time."""
+    times = sorted(t for t in cells if t_max is None or t <= t_max)
     fig, ax = plt.subplots(figsize=(8, 5.2))
     draw_venue(ax, venue, beacon_labels=False)
-    cloud = ax.scatter([], [], s=3, color=COLORS["pf"], alpha=0.35, zorder=2)
+    cloud = ax.scatter([], [], s=3, color=COLORS["grid"], alpha=0.35, zorder=2)
     (trail,) = ax.plot([], [], color=COLORS["truth"], lw=1.5, zorder=3)
-    (est_trail,) = ax.plot([], [], color=COLORS["pf"], lw=1.2, alpha=0.8, zorder=3)
+    (est_trail,) = ax.plot([], [], color=COLORS["grid"], lw=1.2, alpha=0.8, zorder=3)
     truth_dot = ax.scatter([], [], s=50, color=COLORS["truth"], zorder=5, label="truth")
-    est_dot = ax.scatter([], [], s=50, color=COLORS["pf"], edgecolor="white", zorder=6, label="PF estimate")
+    est_dot = ax.scatter([], [], s=50, color=COLORS["grid"], edgecolor="white", zorder=6, label="Estimate")
     label = ax.text(0.01, 0.99, "", transform=ax.transAxes, va="top", fontsize=9,
                     bbox=dict(facecolor="white", alpha=0.8, edgecolor="none"))
     ax.legend(loc="upper right", fontsize=8)
@@ -193,7 +193,7 @@ def animate_particles(venue: Venue, est: Estimates, particles: dict[float, np.nd
 
     def frame(k: int):
         t = times[k]
-        p = particles[t]
+        p = cells[t]
         cloud.set_offsets(p[:, :2])
         idx = int(np.searchsorted(est.t, t))
         idx = min(idx, len(est.t) - 1)

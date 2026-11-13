@@ -208,7 +208,8 @@ class Map3D {
     this.static = {
       walls: byType("wall").map((f) => ({ level: indexOf.get(f.properties.level), geometry: f.geometry })),
       beacons: byType("beacon").map((f) => ({ level: indexOf.get(f.properties.level), id: f.properties.id,
-                                               lngLat: f.geometry.coordinates })),
+                                               lngLat: f.geometry.coordinates,
+                                               modelled: f.properties.model !== false })),
       connectors: geojson.features
         .filter((f) => ["stairs", "elevator", "escalator"].includes(f.properties.feature_type))
         .map((f) => ({ levels: f.properties.levels.map((o) => indexOf.get(o)), geometry: f.geometry,
@@ -279,8 +280,9 @@ class Map3D {
         if (b.level !== i) continue;
         const [x, y] = this.toLocal(b.lngLat);
         const h = this.wallHeight(i);
-        fs.push(extruded(ring(this.frame, x, y, 0.3, 4), this.z(i, h - 0.35), this.z(i, h), "#7f3fbf",
-                         { kind: "beacon", id: b.id, level: i }));
+        // Pale: a fingerprint-only access point, drawn where it was heard strongest.
+        fs.push(extruded(ring(this.frame, x, y, 0.3, 4), this.z(i, h - 0.35), this.z(i, h),
+                         b.modelled ? "#7f3fbf" : "#c9b3e3", { kind: "beacon", id: b.id, level: i }));
       }
       this.map.getSource(`level-${i}`).setData({ type: "FeatureCollection", features: fs });
     });

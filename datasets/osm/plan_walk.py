@@ -153,7 +153,7 @@ def main():
     ap.add_argument("--name", required=True)
     ap.add_argument("--description", help="default: the description already in --out, if any")
     ap.add_argument("--seed", type=int, default=1)
-    ap.add_argument("--demo-config", help="particle-filter config patch the web demo applies, relative to --out")
+    ap.add_argument("--demo-config", help="engine config patch the web demo applies, relative to --out")
     ap.add_argument("--out", type=Path, required=True)
     args = ap.parse_args()
 

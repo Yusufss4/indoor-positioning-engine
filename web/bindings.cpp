@@ -15,7 +15,6 @@
 #include <vector>
 
 #include "ipe/eval.hpp"
-#include "ipe/grid_engine.hpp"
 #include "ipe/simulator.hpp"
 #include "ipe/trace.hpp"
 #include "ipe/trace_player.hpp"
@@ -24,8 +23,11 @@ using emscripten::val;
 
 namespace {
 
-/// Live scoring at the truth samples, as replay does it (after a 5 s warm-up).
+/// Live scoring at the truth samples, as replay does it (eval's compute_metrics): after a 5 s warm-up that
+/// counts from the first truth sample, which a recording does not have at t = 0.
 struct Score {
+  bool started = false;
+  double t0 = 0.0;  ///< Time of the first truth sample.
   double error_sum = 0.0;
   int error_count = 0;
   std::vector<double> errors;
@@ -33,7 +35,11 @@ struct Score {
   int fixes = 0;
 
   void add(const ipe::Estimate& e, const ipe::TruthSample& truth) {
-    if (!e.valid || truth.t < 5.0) return;
+    if (!started) {
+      started = true;
+      t0 = truth.t;
+    }
+    if (!e.valid || truth.t - t0 < 5.0) return;
     ++fixes;
     if (e.level != truth.level) return;
     ++floor_ok;
@@ -226,14 +232,11 @@ class Demo {
   }
 
   void init(const std::string& config_patch) {
-    // The engine's default config (preset "pf"), patched. The grid filter takes PDR, the RSSI model, the
-    // barometer, the smoother, the rooms and the floor prior from it (as ipe-grid --config does), and its own
-    // settings at their defaults.
-    auto cfg = ipe::eval::preset_config("pf");
+    // The engine's default config, patched. The lattice is built here and kept, so the page can draw it.
+    auto cfg = ipe::eval::preset_config("grid");
     if (!config_patch.empty()) ipe::eval::apply_config_overrides(cfg, config_patch);
-    const ipe::GridFilterConfig gcfg;
-    grid_map_ = std::make_shared<const ipe::GridMap>(venue_, gcfg);
-    grid_ = std::make_unique<ipe::GridEngine>(venue_, grid_map_, cfg, gcfg);
+    grid_map_ = std::make_shared<const ipe::GridMap>(venue_, cfg.filter);
+    grid_ = std::make_unique<ipe::PositioningEngine>(venue_, cfg, grid_map_);
     // venue_ and trace_ are members and the Demo is never moved, so the player's references stay valid.
     player_.emplace(venue_, trace_);
     if (!venue_.rooms().empty()) truth_rooms_.emplace(venue_, ipe::truth_room_config());
@@ -247,7 +250,7 @@ class Demo {
       at_truth.pos = truth_.pos;
       at_truth.level = truth_.level;
       at_truth.valid = true;
-      truth_rooms_->update(truth_.t, at_truth, nullptr);
+      truth_rooms_->update(truth_.t, at_truth);
       for (const auto& e : truth_rooms_->take_events()) recent_rooms_.push_back({"truth", e});
     }
     score_.add(grid_->estimate(), truth_);
@@ -273,7 +276,7 @@ class Demo {
   ipe::Venue venue_;
   ipe::Trace trace_;
   std::shared_ptr<const ipe::GridMap> grid_map_;
-  std::unique_ptr<ipe::GridEngine> grid_;
+  std::unique_ptr<ipe::PositioningEngine> grid_;
   std::optional<ipe::TracePlayer> player_;
   Score score_;
   std::vector<std::size_t> recent_ble_;

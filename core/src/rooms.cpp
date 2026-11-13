@@ -3,8 +3,6 @@
 #include <algorithm>
 #include <stdexcept>
 
-#include "ipe/particle_filter.hpp"
-
 namespace ipe {
 
 std::string_view to_string(RoomEventType type) { return type == RoomEventType::Enter ? "enter" : "exit"; }
@@ -24,22 +22,11 @@ RoomTracker::RoomTracker(const Venue& venue, RoomEventConfig cfg)
   events_.reserve(16);
 }
 
-void RoomTracker::update(double t, const Estimate& estimate, const ParticleFilter* pf) {
+void RoomTracker::update(double t, const Estimate& estimate) {
   if (!due(t)) return;
   std::fill(prob_.begin(), prob_.end(), 0.0);
   const auto& rooms = venue_->rooms();
-  if (estimate.valid && pf) {
-    double total = 0.0;
-    for (const auto& p : pf->particles()) {
-      total += p.weight;
-      for (std::size_t r : venue_->room_candidates(p.pos, p.level)) {
-        if (rooms[r].contains(p.pos)) prob_[r] += p.weight;
-      }
-    }
-    if (total > 0.0) {
-      for (double& v : prob_) v /= total;
-    }
-  } else if (estimate.valid) {
+  if (estimate.valid) {
     for (std::size_t r : venue_->room_candidates(estimate.pos, estimate.level)) {
       if (rooms[r].contains(estimate.pos)) prob_[r] = 1.0;
     }
@@ -104,7 +91,7 @@ std::vector<RoomEvent> truth_room_events(const Venue& venue, std::span<const Tru
     e.pos = s.pos;
     e.level = s.level;
     e.valid = true;
-    tracker.update(s.t, e, nullptr);
+    tracker.update(s.t, e);
   }
   return tracker.take_events();
 }

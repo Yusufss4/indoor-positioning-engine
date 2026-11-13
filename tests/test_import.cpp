@@ -237,14 +237,16 @@ TEST(Import, CommittedExportsAreUpToDate) {
 
 TEST(Import, WebDemoRecordingsAreConsistent) {
   // Regenerate with: datasets/msil/export_demo.py
-  auto cfg = eval::preset_config("pf");
-  eval::apply_config_overrides(cfg, slurp(test::data_path("configs/msil_wifi.json")));
+  auto cfg = eval::preset_config("grid");
+  eval::apply_config_overrides(cfg, slurp(test::data_path("configs/fingerprint.json")));
   int traces = 0;
   for (const auto& floor : fs::directory_iterator(test::data_path("real"))) {
     if (!floor.is_directory()) continue;
     SCOPED_TRACE(floor.path().string());
     const Venue v = load_venue_file((floor.path() / "venue.json").string());
     EXPECT_TRUE(v.georef().has_value());
+    // The demo runs fingerprint.json, which does nothing without fingerprint positions.
+    EXPECT_TRUE(v.floor_fingerprints().has_positions());
     EXPECT_EQ(geo::export_geojson(v), slurp((floor.path() / "venue.geojson").string()));
     EXPECT_TRUE(fs::exists(floor.path() / "floor.png"));
     for (const auto& file : fs::directory_iterator(floor.path())) {

@@ -3,8 +3,6 @@
 #include <array>
 
 #include "ipe/level_selector.hpp"
-#include "ipe/particle_filter.hpp"
-#include "test_util.hpp"
 
 using namespace ipe;
 
@@ -49,20 +47,4 @@ TEST(LevelSelector, ResetForgetsTheHistory) {
   sel.update(0.0, std::array{0.9, 0.1});
   sel.reset();
   EXPECT_EQ(sel.update(0.1, std::array{0.2, 0.8}), 1);
-}
-
-TEST(ParticleFilter, LevelHysteresisOffReportsTheMostLikelyLevel) {
-  // With the hysteresis off, the reported level is the one holding the most weight after every update.
-  const Venue v = test::two_level_venue();
-  ParticleFilterConfig cfg;
-  cfg.num_particles = 400;
-  cfg.level_smoothing_s = 0.0;
-  cfg.level_hysteresis = 0.0;
-  ParticleFilter pf(v, cfg, {});
-  for (int k = 0; k < 40; ++k) {
-    pf.on_rssi(k * 0.1, static_cast<std::size_t>(k % 8), -70.0);
-    std::array<double, 2> w{};
-    for (const auto& p : pf.particles()) w[static_cast<std::size_t>(p.level)] += p.weight;
-    EXPECT_EQ(pf.estimate().level, w[1] > w[0] ? 1 : 0);
-  }
 }

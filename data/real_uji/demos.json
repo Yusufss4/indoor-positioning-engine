@@ -10,7 +10,7 @@
    "venue": "lib/venue.json",
    "trace": "lib/uji_lib_A5_c3_p068.csv",
    "waypoints": 6,
-   "description": "UJI library, bookshelves, -12 dBm: a phone (Galaxy A5) standing still at a surveyed point (black square) for 6 BLE scans, about one per second. Grey outlines are the mapped shelves and pillars, dots the surveyed beacons. The point was held out of the path-loss fit; the filter has no steps to go on, only BLE. Default particle filter config. Results over all points are in docs/uji_ble.md."
+   "description": "UJI library, bookshelves, -12 dBm: a phone (Galaxy A5) standing still at a surveyed point (black square) for 6 BLE scans, about one per second. Grey outlines are the mapped shelves and pillars, dots the surveyed beacons. The point was held out of the path-loss fit; the filter has no steps to go on, only BLE. Default engine config. Results over all points are in docs/uji_ble.md."
   },
   {
    "id": "uji_geo_m4",
@@ -18,7 +18,7 @@
    "venue": "geo_m4/venue.json",
    "trace": "geo_m4/uji_geo_m4_A5_c1_p066.csv",
    "waypoints": 13,
-   "description": "UJI lab, -4 dBm: a phone (Galaxy A5) standing still at a surveyed point (black square) for 13 BLE scans, about one per second. Grey outlines are the mapped shelves and pillars, dots the surveyed beacons. The point was held out of the path-loss fit; the filter has no steps to go on, only BLE. Default particle filter config. Results over all points are in docs/uji_ble.md."
+   "description": "UJI lab, -4 dBm: a phone (Galaxy A5) standing still at a surveyed point (black square) for 13 BLE scans, about one per second. Grey outlines are the mapped shelves and pillars, dots the surveyed beacons. The point was held out of the path-loss fit; the filter has no steps to go on, only BLE. Default engine config. Results over all points are in docs/uji_ble.md."
   },
   {
    "id": "uji_geo_m12",
@@ -26,7 +26,7 @@
    "venue": "geo_m12/venue.json",
    "trace": "geo_m12/uji_geo_m12_A5_c1_p066.csv",
    "waypoints": 13,
-   "description": "UJI lab, -12 dBm: a phone (Galaxy A5) standing still at a surveyed point (black square) for 13 BLE scans, about one per second. Grey outlines are the mapped shelves and pillars, dots the surveyed beacons. The point was held out of the path-loss fit; the filter has no steps to go on, only BLE. Default particle filter config. Results over all points are in docs/uji_ble.md."
+   "description": "UJI lab, -12 dBm: a phone (Galaxy A5) standing still at a surveyed point (black square) for 13 BLE scans, about one per second. Grey outlines are the mapped shelves and pillars, dots the surveyed beacons. The point was held out of the path-loss fit; the filter has no steps to go on, only BLE. Default engine config. Results over all points are in docs/uji_ble.md."
   },
   {
    "id": "uji_geo_m20",
@@ -34,7 +34,7 @@
    "venue": "geo_m20/venue.json",
    "trace": "geo_m20/uji_geo_m20_A5_c1_p066.csv",
    "waypoints": 13,
-   "description": "UJI lab, -20 dBm: a phone (Galaxy A5) standing still at a surveyed point (black square) for 13 BLE scans, about one per second. Grey outlines are the mapped shelves and pillars, dots the surveyed beacons. The point was held out of the path-loss fit; the filter has no steps to go on, only BLE. Default particle filter config. Results over all points are in docs/uji_ble.md."
+   "description": "UJI lab, -20 dBm: a phone (Galaxy A5) standing still at a surveyed point (black square) for 13 BLE scans, about one per second. Grey outlines are the mapped shelves and pillars, dots the surveyed beacons. The point was held out of the path-loss fit; the filter has no steps to go on, only BLE. Default engine config. Results over all points are in docs/uji_ble.md."
   }
  ]
 }

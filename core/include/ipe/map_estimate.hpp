@@ -4,26 +4,26 @@
 #include <span>
 #include <vector>
 
-#include "ipe/particle.hpp"
 #include "ipe/venue.hpp"
+#include "ipe/weighted_point.hpp"
 
 namespace ipe {
 
-/// Keeps a reported position on the map. The weighted mean of a particle
-/// cloud split across a wall can fall on the wall, in an empty room or behind
-/// a wall from every particle; then the mean of the dominant group is used
+/// Keeps a reported position on the map. The weighted mean of a posterior
+/// split across a wall can fall on the wall, in an empty room or behind
+/// a wall from every point; then the mean of the dominant group is used
 /// instead: the heaviest 3x3 block of a coarse weight histogram, keeping only
-/// the block's particles on the same side of the walls as the one nearest the
+/// the block's points on the same side of the walls as the one nearest the
 /// block's centre. O(N) per call; the histogram is allocated once.
 class MapConsistentEstimate {
  public:
-  /// `particle_capacity` sizes the touched-cell list so calls do not allocate.
-  MapConsistentEstimate(const Venue& venue, std::size_t particle_capacity);
+  /// `point_capacity` sizes the touched-cell list so calls do not allocate.
+  MapConsistentEstimate(const Venue& venue, std::size_t point_capacity);
 
-  /// `mean` if it is walkable and in sight of its nearest particle on `level`,
-  /// else the dominant group's mean (or a particle, if even that is off the map).
-  /// With `multi_level`, only particles on `level` count.
-  Vec2 position(std::span<const Particle> particles, Vec2 mean, int level, bool multi_level);
+  /// `mean` if it is walkable and in sight of its nearest point on `level`,
+  /// else the dominant group's mean (or a point, if even that is off the map).
+  /// With `multi_level`, only points on `level` count.
+  Vec2 position(std::span<const WeightedPoint> points, Vec2 mean, int level, bool multi_level);
 
  private:
   static constexpr double kCellM = 2.0;

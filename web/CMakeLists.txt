@@ -3,7 +3,7 @@ if(NOT EMSCRIPTEN)
 endif()
 
 add_executable(ipe_wasm bindings.cpp)
-target_link_libraries(ipe_wasm PRIVATE ipe_eval ipe_grid)
+target_link_libraries(ipe_wasm PRIVATE ipe_eval)
 # The page runs the module in a Web Worker (worker.js), so it must load there.
 target_link_options(ipe_wasm PRIVATE
   -lembind
@@ -14,9 +14,11 @@ target_link_options(ipe_wasm PRIVATE
   -sDISABLE_EXCEPTION_CATCHING=0)
 target_compile_options(ipe_wasm PRIVATE -sDISABLE_EXCEPTION_CATCHING=0)
 
-# Assemble a self-contained static site: wasm module, page and venue data.
+# Assemble a self-contained static site: wasm module, page and venue data. Its own target, so that a build
+# also picks up changed pages and data when the module itself is up to date.
 set(IPE_SITE_DIR ${CMAKE_BINARY_DIR}/site)
-add_custom_command(TARGET ipe_wasm POST_BUILD
+add_custom_target(ipe_site ALL
+  DEPENDS ipe_wasm
   COMMAND ${CMAKE_COMMAND} -E make_directory ${IPE_SITE_DIR}
   COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE_DIR:ipe_wasm>/ipe_wasm.js $<TARGET_FILE_DIR:ipe_wasm>/ipe_wasm.wasm
           ${IPE_SITE_DIR}

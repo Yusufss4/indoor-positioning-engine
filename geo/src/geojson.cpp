@@ -158,13 +158,12 @@ std::string export_geojson(const Venue& v, const ExportOptions& opts) {
   }
   for (const Beacon& b : v.beacons()) {
     const Level& l = v.level(b.level);
-    fs.push_back(
-        feature(ojson{{"type", "Point"}, {"coordinates", position(g, b.pos)}}, {{"feature_type", "beacon"},
-                                                                                {"id", b.id},
-                                                                                {"level", l.ordinal},
-                                                                                {"elevation_m", l.elevation_m},
-                                                                                {"tx_power", b.tx_power_dbm},
-                                                                                {"path_loss_exp", b.path_loss_exp}}));
+    ojson props{{"feature_type", "beacon"},   {"id", b.id},
+                {"level", l.ordinal},         {"elevation_m", l.elevation_m},
+                {"tx_power", b.tx_power_dbm}, {"path_loss_exp", b.path_loss_exp}};
+    // Fingerprint-only transmitters say so; a viewer should not draw them as located.
+    if (!b.modelled) props["model"] = false;
+    fs.push_back(feature(ojson{{"type", "Point"}, {"coordinates", position(g, b.pos)}}, std::move(props)));
   }
   return feature_collection(fs);
 }

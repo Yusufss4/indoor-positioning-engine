@@ -364,6 +364,7 @@ Venue parse_venue(std::string_view json_text) {
     beacon.level = index_of(jb.value("level", levels.front().ordinal), "beacon " + beacon.id);
     beacon.tx_power_dbm = jb.value("tx_power", -59.0);
     beacon.path_loss_exp = jb.value("path_loss_exp", 2.0);
+    beacon.modelled = jb.value("model", true);
     beacons.push_back(std::move(beacon));
   }
 
@@ -406,8 +407,8 @@ Venue parse_venue(std::string_view json_text) {
   }
   if (!footprint.empty() && footprint.size() < 3) throw std::runtime_error("venue: footprint needs 3 or more points");
 
-  // {"ids": [beacon id, ...], "scans": [[ordinal, id index, dBm, id index, dBm, ...], ...]}; ids that are not
-  // venue beacons are dropped.
+  // {"ids": [beacon id, ...], "scans": [[ordinal, id index, dBm, id index, dBm, ...], ...], "xy": [[x, y], ...]};
+  // ids that are not venue beacons are dropped. "xy" is optional: one position per scan.
   FloorFingerprints fingerprints;
   if (j.contains("floor_fingerprints")) {
     const auto& jf = j.at("floor_fingerprints");
@@ -432,6 +433,17 @@ Venue parse_venue(std::string_view json_text) {
         fingerprints.rssi.push_back(scan[k + 1].get<float>());
       }
       fingerprints.begin.push_back(static_cast<std::uint32_t>(fingerprints.beacon.size()));
+    }
+    if (jf.contains("xy")) {
+      const auto& jxy = jf.at("xy");
+      if (!jxy.is_array() || jxy.size() != fingerprints.level.size()) {
+        throw std::runtime_error("venue: floor fingerprint \"xy\" needs one [x, y] per scan");
+      }
+      for (const auto& q : jxy) {
+        if (!q.is_array() || q.size() != 2)
+          throw std::runtime_error("venue: floor fingerprint positions must be [x, y]");
+        fingerprints.pos.push_back({q[0].get<double>(), q[1].get<double>()});
+      }
     }
   }
 
