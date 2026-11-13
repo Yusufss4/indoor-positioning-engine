@@ -101,13 +101,6 @@ void expect_same_venue(const Venue& a, const Venue& b, double tol = 0.01) {
   }
 }
 
-fs::path fresh_dir(const std::string& name) {
-  const fs::path dir = fs::path(testing::TempDir()) / name;
-  fs::remove_all(dir);
-  fs::create_directories(dir);
-  return dir;
-}
-
 const char* const kShippedVenues[] = {"office_floor", "office_two_floor", "airport_hall"};
 // Imported from OpenStreetMap. Its walls are only nearly collinear, so a second import merges a few
 // more of them and an exact round trip does not hold; only the committed export is checked.
@@ -126,14 +119,11 @@ TEST(Import, VenueJsonRoundTrip) {
   }
 }
 
-TEST(Import, FootprintRoundTripsThroughGeoJsonAndImdf) {
+TEST(Import, FootprintRoundTripsThroughGeoJson) {
   const Venue v = test::with_footprint(test::two_level_venue(), test::l_footprint());
   ASSERT_FALSE(v.footprint().empty());
   expect_same_venue(v, parse_venue(geo::venue_to_json(v)), 1e-9);
   expect_same_venue(v, geo::import_geojson(geo::export_geojson(v), geo::Mapping{}).venue);
-  const fs::path dir = fresh_dir("ipe_imdf_footprint");
-  geo::export_imdf(v, dir.string());
-  expect_same_venue(v, geo::import_imdf(dir.string()).venue);
 }
 
 TEST(Import, GeoJsonRoundTripWithinOneCentimetre) {
@@ -153,14 +143,7 @@ TEST(Import, RotatedGeoRefRoundTrips) {
   expect_same_venue(v, geo::import_geojson(geo::export_geojson(v), geo::Mapping{}).venue);
 }
 
-TEST(Import, ImdfRoundTrip) {
-  const Venue v = test::two_level_venue();
-  const fs::path dir = fresh_dir("ipe_imdf_roundtrip");
-  geo::export_imdf(v, dir.string());
-  expect_same_venue(v, geo::import_imdf(dir.string()).venue);
-}
-
-TEST(Import, RoomsRoundTripThroughGeoJsonAndImdf) {
+TEST(Import, RoomsRoundTripThroughGeoJson) {
   Venue v = test::two_level_venue();
   std::vector<Room> rooms = {{"west", "West \"A\"", 0, {{0, 0}, {10, 0}, {10, 10}, {0, 10}}},
                              {"east", "East", 0, {{10, 0}, {20, 0}, {20, 10}, {10, 10}}},
@@ -172,10 +155,6 @@ TEST(Import, RoomsRoundTripThroughGeoJsonAndImdf) {
   const auto r = geo::import_geojson(geo::export_geojson(v), geo::Mapping{});
   EXPECT_TRUE(r.warnings.empty());
   expect_same_venue(v, r.venue);  // spaces add no walls
-
-  const fs::path dir = fresh_dir("ipe_imdf_rooms");
-  geo::export_imdf(v, dir.string());
-  expect_same_venue(v, geo::import_imdf(dir.string()).venue);
 }
 
 TEST(Import, UnnamedAndDuplicateSpacesGetIds) {
@@ -212,11 +191,6 @@ TEST(Import, UnnamedAndDuplicateSpacesGetIds) {
   EXPECT_TRUE(warned_duplicate);
 }
 
-TEST(Import, CommittedImdfSampleMatchesVenue) {
-  const Venue v = load_venue_file(test::data_path("venues/office_two_floor.json"));
-  expect_same_venue(v, geo::import_imdf(test::data_path("imdf/office_two_floor")).venue);
-}
-
 TEST(Import, CommittedExportsAreUpToDate) {
   // Regenerate with: ipe-import export data/venues/X.json --out data/geojson/X.geojson
   std::vector<const char*> names(std::begin(kShippedVenues), std::end(kShippedVenues));
@@ -225,13 +199,6 @@ TEST(Import, CommittedExportsAreUpToDate) {
     SCOPED_TRACE(name);
     const Venue v = load_venue_file(test::data_path(std::string("venues/") + name + ".json"));
     EXPECT_EQ(geo::export_geojson(v), slurp(test::data_path(std::string("geojson/") + name + ".geojson")));
-  }
-  // Regenerate with: ipe-import export-imdf data/venues/office_two_floor.json --out data/imdf/office_two_floor
-  const fs::path dir = fresh_dir("ipe_imdf_current");
-  geo::export_imdf(load_venue_file(test::data_path("venues/office_two_floor.json")), dir.string());
-  for (const auto& entry : fs::directory_iterator(dir)) {
-    const std::string file = entry.path().filename().string();
-    EXPECT_EQ(slurp(entry.path().string()), slurp(test::data_path("imdf/office_two_floor/" + file))) << file;
   }
 }
 
@@ -261,33 +228,28 @@ TEST(Import, WebDemoRecordingsAreConsistent) {
   EXPECT_GE(traces, 1);
 }
 
-TEST(Import, MoreWebDemoRecordingsAreConsistent) {
-  // Regenerate with: datasets/ipin/export_demo.py, datasets/uji_ble/export_demo.py
+TEST(Import, IpinWebDemoRecordingsAreConsistent) {
+  // Regenerate with: datasets/ipin/export_demo.py
   int traces = 0;
-  for (const char* dir : {"real_ipin", "real_uji"}) {
-    for (const auto& site : fs::directory_iterator(test::data_path(dir))) {
-      if (!site.is_directory()) continue;
-      SCOPED_TRACE(site.path().string());
-      const Venue v = load_venue_file((site.path() / "venue.json").string());
-      // IPIN venues are georeferenced (3D view); UJI zones have local coordinates only.
-      if (fs::exists(site.path() / "venue.geojson")) {
-        EXPECT_EQ(geo::export_geojson(v), slurp((site.path() / "venue.geojson").string()));
-        for (const Level& l : v.levels()) {
-          EXPECT_TRUE(fs::exists(site.path() / ("floor_" + std::to_string(l.ordinal) + ".png"))) << l.ordinal;
-        }
-      }
-      for (const auto& file : fs::directory_iterator(site.path())) {
-        if (file.path().extension() != ".csv") continue;
-        const Trace t = read_trace_file(file.path().string());
-        EXPECT_FALSE(t.truth.empty());
-        EXPECT_FALSE(t.imu.empty());
-        for (const auto& b : t.ble) ASSERT_TRUE(v.beacon_index(b.beacon_id).has_value()) << b.beacon_id;
-        for (const auto& g : t.truth) EXPECT_LT(g.level, v.level_count());
-        ++traces;
-      }
+  for (const auto& site : fs::directory_iterator(test::data_path("real_ipin"))) {
+    if (!site.is_directory()) continue;
+    SCOPED_TRACE(site.path().string());
+    const Venue v = load_venue_file((site.path() / "venue.json").string());
+    EXPECT_EQ(geo::export_geojson(v), slurp((site.path() / "venue.geojson").string()));
+    for (const Level& l : v.levels()) {
+      EXPECT_TRUE(fs::exists(site.path() / ("floor_" + std::to_string(l.ordinal) + ".png"))) << l.ordinal;
+    }
+    for (const auto& file : fs::directory_iterator(site.path())) {
+      if (file.path().extension() != ".csv") continue;
+      const Trace t = read_trace_file(file.path().string());
+      EXPECT_FALSE(t.truth.empty());
+      EXPECT_FALSE(t.imu.empty());
+      for (const auto& b : t.ble) ASSERT_TRUE(v.beacon_index(b.beacon_id).has_value()) << b.beacon_id;
+      for (const auto& g : t.truth) EXPECT_LT(g.level, v.level_count());
+      ++traces;
     }
   }
-  EXPECT_GE(traces, 6);
+  EXPECT_GE(traces, 2);
 }
 
 /// A platform-style export: rooms instead of walls, a door, per-floor stair

@@ -43,6 +43,5 @@ ojson polygon(const GeoRef& g, const std::vector<Vec2>& ring);
 std::string feature_collection(const std::vector<ojson>& features);
 
 std::string read_file(const std::string& path);
-void write_file(const std::string& path, const std::string& text);
 
 }  // namespace ipe::geo::detail

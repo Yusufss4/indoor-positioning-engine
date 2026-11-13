@@ -165,10 +165,4 @@ std::string read_file(const std::string& path) {
   return ss.str();
 }
 
-void write_file(const std::string& path, const std::string& text) {
-  std::ofstream out(path, std::ios::binary);
-  if (!out) throw std::runtime_error("cannot write " + path);
-  out << text;
-}
-
 }  // namespace ipe::geo::detail

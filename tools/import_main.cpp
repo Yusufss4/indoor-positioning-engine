@@ -1,4 +1,3 @@
-#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -10,16 +9,13 @@
 
 namespace {
 constexpr const char* kUsage = R"(usage:
-  ipe-import imdf DIR [--out VENUE.json] [import options]
   ipe-import geojson FILE.geojson [--mapping MAPPING.json] [--out VENUE.json] [import options]
   ipe-import export VENUE.json [--out FILE.geojson] [--wall-thickness M]
-  ipe-import export-imdf VENUE.json --out DIR [--wall-thickness M]
 
-Converts between the venue JSON used by the engine and map formats of indoor
-mapping platforms. "imdf" reads an IMDF directory, "geojson" reads any GeoJSON
-FeatureCollection through a mapping table (default: the "ipe" scheme written
-by "export"; see data/mappings/). Output goes to stdout without --out.
-Warnings go to stderr.
+Converts between the venue JSON used by the engine and GeoJSON, the format
+indoor mapping platforms export. "geojson" reads any GeoJSON FeatureCollection
+through a mapping table (default: the "ipe" scheme written by "export"; see
+data/mappings/). Output goes to stdout without --out. Warnings go to stderr.
 
 import options:
   --name NAME              venue name
@@ -101,21 +97,13 @@ int main(int argc, char** argv) {
     // Args skips its argv[0]; hand it the command line after the input path.
     const ipe::cli::Args args(argc - 2, argv + 2, {});
 
-    if (command == "imdf") {
-      const auto r = ipe::geo::import_imdf(input, import_options(args));
-      report(r);
-      emit(args, ipe::geo::venue_to_json(r.venue));
-    } else if (command == "geojson") {
+    if (command == "geojson") {
       const auto mapping = args.has("mapping") ? ipe::geo::load_mapping_file(args.get("mapping")) : ipe::geo::Mapping{};
       const auto r = ipe::geo::import_geojson(read_text(input), mapping, import_options(args));
       report(r);
       emit(args, ipe::geo::venue_to_json(r.venue));
     } else if (command == "export") {
       emit(args, ipe::geo::export_geojson(ipe::load_venue_file(input), export_options(args)));
-    } else if (command == "export-imdf") {
-      const std::string dir = args.require("out");
-      std::filesystem::create_directories(dir);
-      ipe::geo::export_imdf(ipe::load_venue_file(input), dir, export_options(args));
     } else {
       throw std::invalid_argument("unknown command: " + command);
     }
