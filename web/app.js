@@ -43,7 +43,7 @@ let view = "3d";
 let map3d = null;
 let map3dReady = null; // promise of map3d.init(), shared by overlapping show3d() calls
 let show3dRequest = 0;
-let realDemos = new Map(); // id -> entry of a recordings index (data/real*/demos.json), with its base URL
+let realDemos = new Map(); // id -> entry of a recordings index (data/demo/*/demos.json), with its base URL
 let real = null; // entry being replayed, null for simulated scenarios
 let backgrounds = null; // floor plan image of a recording per level index (null: none)
 let waypoints = []; // [t, x, y, level] surveyor waypoints of a recording
@@ -56,10 +56,10 @@ let roomLogKey = null; // what the rooms panel currently shows
 
 /// Recording indexes, in menu order. Each lists venues, traces and floor plans relative to its folder.
 const RECORDING_SOURCES = [
-  { dir: "data/real/", label: "Real recordings (Microsoft Indoor Location)" },
-  { dir: "data/real_ipin/", label: "Real recordings (IPIN competition, several floors)" },
+  { dir: "data/demo/msil/", label: "Real recordings (Microsoft Indoor Location)" },
+  { dir: "data/demo/ipin/", label: "Real recordings (IPIN competition, several floors)" },
   // Written by datasets/kaggle/export_demo.py on a machine that has the competition data; never deployed.
-  { dir: "data/real_kaggle/", label: "Real recordings (Kaggle indoor location, local only)" },
+  { dir: "data/demo/kaggle/", label: "Real recordings (Kaggle indoor location, local only)" },
 ];
 
 async function loadJson(url) {

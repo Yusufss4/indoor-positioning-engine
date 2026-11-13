@@ -373,7 +373,7 @@ TEST(GridMap, WallCountsMatchTheVenueOnRandomSnappedWalls) {
 
 TEST(GridMap, WallCountsMatchTheVenueOnAShopWallMall) {
   // A mall floor with shop walls, where the counts matter most (1 m cells and every third cell, for time).
-  const Venue v = load_venue_file(IPE_DATA_DIR "/real/site1_F2/venue.json");
+  const Venue v = load_venue_file(IPE_DATA_DIR "/demo/msil/site1_F2/venue.json");
   GridFilterConfig cfg;
   cfg.cell_m = 1.0;
   cfg.closed_region_fraction = 0.0;

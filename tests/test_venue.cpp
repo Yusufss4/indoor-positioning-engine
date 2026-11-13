@@ -245,7 +245,7 @@ TEST(Venue, EveryCommittedVenueHasRoomsInsideItsBounds) {
   for (const char* name : {"office_floor", "office_two_floor", "airport_hall", "kit_informatikbau"}) {
     files.push_back(test::data_path(std::string("venues/") + name + ".json"));
   }
-  for (const auto& floor : std::filesystem::directory_iterator(test::data_path("real"))) {
+  for (const auto& floor : std::filesystem::directory_iterator(test::data_path("demo/msil"))) {
     if (floor.is_directory()) files.push_back((floor.path() / "venue.json").string());
   }
   ASSERT_GT(files.size(), 4u);

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Copies one IPIN walk per building into data/real_ipin/ for the web demo.
+"""Copies one IPIN walk per building into data/demo/ipin/ for the web demo.
 
 The pick is mechanical, not chosen for good results: per site, the shortest validation walk that
 has a barometer and visits every floor. (Scoring walks run 25-35 minutes, 6-24 MB each.) For each
 site it writes the venue (data/ipin/<site>.json), its GeoJSON export for the 3D view, one plan image per
 floor (the competition's map, which covers exactly the venue's bounds), the trace, and
-data/real_ipin/demos.json, which the demo reads to fill its scenario menu.
+data/demo/ipin/demos.json, which the demo reads to fill its scenario menu.
 
     .venv/bin/python datasets/ipin/convert.py --wifi --scans --out datasets/ipin/out_scans --data data/ipin
     .venv/bin/python datasets/ipin/export_demo.py
@@ -16,13 +16,16 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
-import subprocess
+import sys
 from pathlib import Path
 
 from PIL import Image
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
+sys.path.insert(0, str(HERE.parent))
+from common.demo import export_geojson, view_box, write_index  # noqa: E402
+
 VIEW_PAD_M = 8.0
 MAX_IMAGE_PX = 2400
 # Seconds cut from the start of each demo walk. The surveyor taps the first landmark about 61 s in, so
@@ -61,7 +64,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out-dir", type=Path, default=HERE / "out_scans", help="convert.py output")
     ap.add_argument("--raw", type=Path, default=HERE / "raw")
-    ap.add_argument("--dest", type=Path, default=ROOT / "data" / "real_ipin")
+    ap.add_argument("--dest", type=Path, default=ROOT / "data" / "demo" / "ipin")
     ap.add_argument("--build", type=Path, default=ROOT / "build")
     args = ap.parse_args()
 
@@ -83,8 +86,7 @@ def main():
         site_dir = args.dest / site
         site_dir.mkdir()
         shutil.copy(ROOT / "data" / "ipin" / f"{site}.json", site_dir / "venue.json")
-        subprocess.run([str(args.build / "tools" / "ipe-import"), "export", str(site_dir / "venue.json"),
-                        "--out", str(site_dir / "venue.geojson")], check=True, capture_output=True)
+        export_geojson(args.build, site_dir / "venue.json", site_dir / "venue.geojson")
         images = {}
         for o in ordinals:
             img = Image.open(args.raw / cfg["packages"][0] / cfg["maps"][str(o)]).convert("L")
@@ -103,11 +105,7 @@ def main():
             for ln in src.read_text().splitlines())
 
         venue = json.loads((site_dir / "venue.json").read_text())
-        bounds = venue["bounds"]
         pts = [tuple(map(float, ln.split(",")[2:4])) for ln in trimmed if ln.startswith("gt,")]
-        xs, ys = [p[0] for p in pts], [p[1] for p in pts]
-        view = [max(bounds[0], min(xs) - VIEW_PAD_M), max(bounds[1], min(ys) - VIEW_PAD_M),
-                min(bounds[2], max(xs) + VIEW_PAD_M), min(bounds[3], max(ys) + VIEW_PAD_M)]
         title = cfg["description"].split(" (")[0]
         demos.append({
             "id": f"ipin_{site}",
@@ -116,8 +114,8 @@ def main():
             "geojson": f"{site}/venue.geojson",
             "images": images,
             "trace": f"{site}/{src.name}",
-            "config": "../configs/ipin.json",
-            "view": [round(v, 1) for v in view],
+            "config": "../../configs/ipin.json",
+            "view": view_box(venue["bounds"], pts, VIEW_PAD_M),
             "duration_s": round(duration, 1),
             "waypoints": len(pts) - (1 if interpolated else 0),
             "description": (
@@ -130,7 +128,7 @@ def main():
                 "the only ground truth; the floor menu follows the walker. Walls were extracted from the "
                 "competition's floor plans and the Wi-Fi access points (purple) located from the training walks. "
                 "This walk is from the set the settings were chosen on; the held-out scoring walks are in "
-                "docs/ipin.md. The engine uses data/configs/ipin.json: the Wi-Fi settings plus the Wi-Fi "
+                "docs/datasets.md. The engine uses data/configs/ipin.json: the Wi-Fi settings plus the Wi-Fi "
                 "fingerprint floor prior."),
         })
         print(f"{site}: {src.name} ({duration:.0f} s from {start:.0f} s, {len(pts)} landmarks, {t['phone']})")
@@ -143,8 +141,7 @@ def main():
         "default": demos[0]["id"],
         "demos": demos,
     }
-    (args.dest / "demos.json").write_text(json.dumps(index, indent=1) + "\n")
-    print(f"wrote {args.dest / 'demos.json'}")
+    write_index(args.dest, index)
 
 
 if __name__ == "__main__":

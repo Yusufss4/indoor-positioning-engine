@@ -13,7 +13,7 @@ to CEP50/CEP95:
 The engine is causal, and so is everything above by default. --two-pass, --fill and --snap are offline
 post-processing for competitions scored offline (Kaggle); they are not what a phone can show live.
 
-    python3 datasets/ipin/evaluate.py datasets/ipin/out_scans/manifest_tune.json \
+    python3 datasets/evaluate.py datasets/ipin/out_scans/manifest_tune.json \
         --config data/configs/fingerprint.json [--set JSON] [--json out.json]
 """
 
@@ -29,10 +29,9 @@ import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "datasets"))
+ROOT = Path(__file__).resolve().parents[1]
 
-from common import offline  # noqa: E402
+from common import offline
 
 FLOOR_PENALTY_M = 15.0  # per floor of error, in both the IPIN and the Kaggle metric
 

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Copies held-out walks into data/real/ for the web demo.
+"""Copies held-out walks into data/demo/msil/ for the web demo.
 
 Picks the longest held-out walk on every floor whose longest held-out walk lasts at least
 --min-duration seconds, so the selection is mechanical rather than picked for good results. For each
 floor it writes the venue,
-its GeoJSON export (for the 3D view), the floor image and the trace, plus data/real/demos.json,
+its GeoJSON export (for the 3D view), the floor image and the trace, plus data/demo/msil/demos.json,
 which the demo reads to fill its scenario menu.
 
 The venues carry the shop walls with inferred doorways (see docs/real_data.md), the shop outlines as
@@ -22,23 +22,15 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
-import subprocess
 from pathlib import Path
 
-from convert import load_floor, room_list
+from convert import load_floor, room_list  # puts datasets/ on the path
+
+from common.demo import export_geojson, longest_per_group, view_box, waypoints, write_index
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 VIEW_PAD_M = 25.0
-
-
-def waypoints(trace: Path) -> list[tuple[float, float]]:
-    pts = []
-    for line in trace.read_text().splitlines():
-        if line.startswith("gt,"):
-            _, _, x, y, *_ = line.split(",")
-            pts.append((float(x), float(y)))
-    return pts
 
 
 def main():
@@ -46,7 +38,7 @@ def main():
     ap.add_argument("--out-dir", type=Path, default=HERE / "out_doors_fp",
                     help="converter output folder (convert.py --wifi --scans --walls doors --fingerprints)")
     ap.add_argument("--raw", type=Path, default=HERE / "raw")
-    ap.add_argument("--dest", type=Path, default=ROOT / "data" / "real")
+    ap.add_argument("--dest", type=Path, default=ROOT / "data" / "demo" / "msil")
     ap.add_argument("--build", type=Path, default=ROOT / "build")
     ap.add_argument("--min-duration", type=float, default=60.0,
                     help="skip floors whose longest held-out walk is shorter than this [s]")
@@ -54,11 +46,7 @@ def main():
     ap.add_argument("--default", default="site1_F2", help="floor whose walk the demo opens with")
     args = ap.parse_args()
 
-    traces = json.loads((args.out_dir / "manifest_holdout.json").read_text())["traces"]
-    longest = {}
-    for t in traces:
-        if t["group"] not in longest or t["duration_s"] > longest[t["group"]]["duration_s"]:
-            longest[t["group"]] = t
+    longest = longest_per_group(json.loads((args.out_dir / "manifest_holdout.json").read_text())["traces"])
     picks = [t for t in sorted(longest.values(), key=lambda t: -t["duration_s"])
              if t["duration_s"] >= args.min_duration][: args.count]
     picks.sort(key=lambda t: t["group"])
@@ -87,16 +75,11 @@ def main():
         (floor_dir / "venue.json").write_text(json.dumps(venue))
         shutil.copy(args.raw / "data" / site / floor / "floor_image.png", floor_dir / "floor.png")
         shutil.copy(src_trace, floor_dir / src_trace.name)
-        subprocess.run([str(args.build / "tools" / "ipe-import"), "export", str(floor_dir / "venue.json"),
-                        "--out", str(floor_dir / "venue.geojson")], check=True, capture_output=True)
+        export_geojson(args.build, floor_dir / "venue.json", floor_dir / "venue.geojson")
 
-        bounds = venue["bounds"]
         fitted = sum(b.get("model", True) for b in venue["beacons"])
         scans = len(venue.get("floor_fingerprints", {}).get("xy", []))
         pts = waypoints(src_trace)
-        xs, ys = [p[0] for p in pts], [p[1] for p in pts]
-        view = [max(bounds[0], min(xs) - VIEW_PAD_M), max(bounds[1], min(ys) - VIEW_PAD_M),
-                min(bounds[2], max(xs) + VIEW_PAD_M), min(bounds[3], max(ys) + VIEW_PAD_M)]
         demos.append({
             "id": f"{group}_{src_trace.stem[:8]}",
             "title": f"{site} {floor}, {t['duration_s']:.0f} s walk",
@@ -104,8 +87,8 @@ def main():
             "geojson": f"{group}/venue.geojson",
             "image": f"{group}/floor.png",
             "trace": f"{group}/{src_trace.name}",
-            "config": "../configs/fingerprint.json",
-            "view": [round(v, 1) for v in view],
+            "config": "../../configs/fingerprint.json",
+            "view": view_box(venue["bounds"], pts, VIEW_PAD_M),
             "duration_s": round(t["duration_s"], 1),
             "waypoints": len(pts),
             "description":
@@ -127,8 +110,7 @@ def main():
         "default": next((d["id"] for d in demos if d["id"].startswith(args.default + "_")), demos[0]["id"]),
         "demos": demos,
     }
-    (args.dest / "demos.json").write_text(json.dumps(index, indent=1) + "\n")
-    print(f"wrote {args.dest / 'demos.json'}")
+    write_index(args.dest, index)
 
 
 if __name__ == "__main__":

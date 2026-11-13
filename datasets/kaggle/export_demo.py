@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Copies one held-out walk per floor of the converted Kaggle set into data/real_kaggle/ for the web demo.
+"""Copies one held-out walk per floor of the converted Kaggle set into data/demo/kaggle/ for the web demo.
 
 The pick is mechanical, not chosen for good results: on every floor, the longest held-out walk that has a
 Wi-Fi scan, where it lasts at least --min-duration seconds (five held-out walks have none; one floor has no
 other). For each floor it writes the venue as it was scored (fitted access
 points, fingerprint-only access points and the training scans with their positions), its GeoJSON export
-for the 3D view, the floor image and the trace, plus data/real_kaggle/demos.json, which the demo reads to
+for the 3D view, the floor image and the trace, plus data/demo/kaggle/demos.json, which the demo reads to
 fill its scenario menu, one group per building.
 
-The competition's rules do not allow its data to be redistributed, so data/real_kaggle/ is git-ignored:
+The competition's rules do not allow its data to be redistributed, so data/demo/kaggle/ is git-ignored:
 it exists on the machine that downloaded the data, and the deployed demo does not have it.
 
     .venv/bin/python datasets/msil/convert.py --kaggle datasets/kaggle/raw --test-sites --wifi --scans \
@@ -21,24 +21,17 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 sys.path.insert(0, str(HERE.parent / "msil"))
-from convert import georef, load_floor  # noqa: E402
+from convert import georef, load_floor  # noqa: E402  (puts datasets/ on the path)
+
+from common.demo import export_geojson, longest_per_group, view_box, waypoints, write_index  # noqa: E402
+
 VIEW_PAD_M = 25.0
-
-
-def waypoints(trace: Path) -> list[tuple[float, float]]:
-    pts = []
-    for line in trace.read_text().splitlines():
-        if line.startswith("gt,"):
-            _, _, x, y, *_ = line.split(",")
-            pts.append((float(x), float(y)))
-    return pts
 
 
 def floor_key(name: str) -> tuple[int, str]:
@@ -53,20 +46,15 @@ def main():
     ap.add_argument("--out-dir", type=Path, default=HERE / "out_fp",
                     help="converter output folder (convert.py --kaggle ... --fingerprints)")
     ap.add_argument("--raw", type=Path, default=HERE / "raw")
-    ap.add_argument("--dest", type=Path, default=ROOT / "data" / "real_kaggle")
+    ap.add_argument("--dest", type=Path, default=ROOT / "data" / "demo" / "kaggle")
     ap.add_argument("--build", type=Path, default=ROOT / "build")
     ap.add_argument("--min-duration", type=float, default=30.0,
                     help="skip floors whose longest held-out walk is shorter than this [s]")
     ap.add_argument("--sites", nargs="*", help="only these buildings (ids, or the ends of ids)")
     args = ap.parse_args()
 
-    traces = json.loads((args.out_dir / "manifest_holdout.json").read_text())["traces"]
-    longest = {}
-    for t in traces:
-        if t["scans"] == 0:
-            continue  # inertial sensors only: nothing to position with
-        if t["group"] not in longest or t["duration_s"] > longest[t["group"]]["duration_s"]:
-            longest[t["group"]] = t
+    longest = longest_per_group(json.loads((args.out_dir / "manifest_holdout.json").read_text())["traces"],
+                                need_scans=True)
     picks = [t for t in longest.values() if t["duration_s"] >= args.min_duration]
     if args.sites:
         picks = [t for t in picks if any(t["group"].split("_", 1)[0].endswith(s) for s in args.sites)]
@@ -101,25 +89,20 @@ def main():
             "venue": f"{rel}/venue.json",
             "geojson": f"{rel}/venue.geojson",
             "trace": f"{rel}/{src_trace.name}",
-            "config": "../configs/fingerprint.json",
+            "config": "../../configs/fingerprint.json",
         }
         image = args.raw / "metadata" / site / floor / "floor_image.png"
         if image.exists():
             shutil.copy(image, floor_dir / "floor.png")
             entry["image"] = f"{rel}/floor.png"
-        subprocess.run([str(args.build / "tools" / "ipe-import"), "export", str(floor_dir / "venue.json"),
-                        "--out", str(floor_dir / "venue.geojson")], check=True, capture_output=True)
+        export_geojson(args.build, floor_dir / "venue.json", floor_dir / "venue.geojson")
 
-        bounds = venue["bounds"]
         pts = waypoints(src_trace)
-        xs, ys = [p[0] for p in pts], [p[1] for p in pts]
-        view = [max(bounds[0], min(xs) - VIEW_PAD_M), max(bounds[1], min(ys) - VIEW_PAD_M),
-                min(bounds[2], max(xs) + VIEW_PAD_M), min(bounds[3], max(ys) + VIEW_PAD_M)]
         beacons = venue["beacons"]
         fitted = sum(b.get("model", True) for b in beacons)
         scans = len(venue.get("floor_fingerprints", {}).get("xy", []))
         entry.update({
-            "view": [round(v, 1) for v in view],
+            "view": view_box(venue["bounds"], pts, VIEW_PAD_M),
             "duration_s": round(t["duration_s"], 1),
             "waypoints": len(pts),
             "description":
@@ -143,8 +126,8 @@ def main():
         "default": demos[0]["id"],
         "demos": demos,
     }
-    (args.dest / "demos.json").write_text(json.dumps(index, indent=1, ensure_ascii=False) + "\n")
-    print(f"wrote {args.dest / 'demos.json'}: {len(demos)} floors in {len({d['group'] for d in demos})} buildings")
+    write_index(args.dest, index, ensure_ascii=False)
+    print(f"{len(demos)} floors in {len({d['group'] for d in demos})} buildings")
 
 
 if __name__ == "__main__":

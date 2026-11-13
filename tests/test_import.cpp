@@ -207,7 +207,7 @@ TEST(Import, WebDemoRecordingsAreConsistent) {
   // Regenerate with: datasets/msil/export_demo.py
   EXPECT_GT(config_from_json(slurp(test::data_path("configs/fingerprint.json"))).filter.fingerprint_weight, 0.0);
   int traces = 0;
-  for (const auto& floor : fs::directory_iterator(test::data_path("real"))) {
+  for (const auto& floor : fs::directory_iterator(test::data_path("demo/msil"))) {
     if (!floor.is_directory()) continue;
     SCOPED_TRACE(floor.path().string());
     const Venue v = load_venue_file((floor.path() / "venue.json").string());
@@ -231,7 +231,7 @@ TEST(Import, WebDemoRecordingsAreConsistent) {
 TEST(Import, IpinWebDemoRecordingsAreConsistent) {
   // Regenerate with: datasets/ipin/export_demo.py
   int traces = 0;
-  for (const auto& site : fs::directory_iterator(test::data_path("real_ipin"))) {
+  for (const auto& site : fs::directory_iterator(test::data_path("demo/ipin"))) {
     if (!site.is_directory()) continue;
     SCOPED_TRACE(site.path().string());
     const Venue v = load_venue_file((site.path() / "venue.json").string());

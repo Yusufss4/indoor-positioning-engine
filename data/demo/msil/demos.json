@@ -10,7 +10,7 @@
    "geojson": "site1_B1/venue.geojson",
    "image": "site1_B1/floor.png",
    "trace": "site1_B1/5dda14bf9191710006b57220.csv",
-   "config": "../configs/fingerprint.json",
+   "config": "../../configs/fingerprint.json",
    "view": [
     154.4,
     148.2,
@@ -28,7 +28,7 @@
    "geojson": "site1_F1/venue.geojson",
    "image": "site1_F1/floor.png",
    "trace": "site1_F1/5dd9fd519191710006b570e4.csv",
-   "config": "../configs/fingerprint.json",
+   "config": "../../configs/fingerprint.json",
    "view": [
     165.3,
     94.5,
@@ -46,7 +46,7 @@
    "geojson": "site1_F2/venue.geojson",
    "image": "site1_F2/floor.png",
    "trace": "site1_F2/5dda5afcc5b77e0006b17719.csv",
-   "config": "../configs/fingerprint.json",
+   "config": "../../configs/fingerprint.json",
    "view": [
     170.1,
     52.6,
@@ -64,7 +64,7 @@
    "geojson": "site1_F3/venue.geojson",
    "image": "site1_F3/floor.png",
    "trace": "site1_F3/5dda74569191710006b574c6.csv",
-   "config": "../configs/fingerprint.json",
+   "config": "../../configs/fingerprint.json",
    "view": [
     97.1,
     35.5,
@@ -82,7 +82,7 @@
    "geojson": "site1_F4/venue.geojson",
    "image": "site1_F4/floor.png",
    "trace": "site1_F4/5ddb656fc5b77e0006b1792e.csv",
-   "config": "../configs/fingerprint.json",
+   "config": "../../configs/fingerprint.json",
    "view": [
     145.5,
     22.2,
@@ -100,7 +100,7 @@
    "geojson": "site2_F1/venue.geojson",
    "image": "site2_F1/floor.png",
    "trace": "site2_F1/5dd35c9844333f00067aa0e0.csv",
-   "config": "../configs/fingerprint.json",
+   "config": "../../configs/fingerprint.json",
    "view": [
     63.8,
     117.7,
@@ -118,7 +118,7 @@
    "geojson": "site2_F3/venue.geojson",
    "image": "site2_F3/floor.png",
    "trace": "site2_F3/5dd3902e27889b0006b76ae6.csv",
-   "config": "../configs/fingerprint.json",
+   "config": "../../configs/fingerprint.json",
    "view": [
     6.6,
     35.4,
@@ -136,7 +136,7 @@
    "geojson": "site2_F6/venue.geojson",
    "image": "site2_F6/floor.png",
    "trace": "site2_F6/5dd4ae3327889b0006b77697.csv",
-   "config": "../configs/fingerprint.json",
+   "config": "../../configs/fingerprint.json",
    "view": [
     140.8,
     21.5,
@@ -154,7 +154,7 @@
    "geojson": "site2_F7/venue.geojson",
    "image": "site2_F7/floor.png",
    "trace": "site2_F7/5dd4d36fd48f840006f1447a.csv",
-   "config": "../configs/fingerprint.json",
+   "config": "../../configs/fingerprint.json",
    "view": [
     127.0,
     68.0,
@@ -172,7 +172,7 @@
    "geojson": "site2_F8/venue.geojson",
    "image": "site2_F8/floor.png",
    "trace": "site2_F8/5dd4daa2d48f840006f144e5.csv",
-   "config": "../configs/fingerprint.json",
+   "config": "../../configs/fingerprint.json",
    "view": [
     55.6,
     110.8,
