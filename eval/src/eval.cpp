@@ -21,18 +21,15 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(RssiModelConfig, sigma_db, outli
                                                 wall_aware)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(BaroConfig, lowpass_tau_s, sea_level_hpa)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
-    ParticleFilterConfig, num_particles, seed, step_length_sigma, step_scale_sigma, step_scale_walk, heading_sigma_deg,
-    heading_outlier_prob, map_consistent_estimate, level_smoothing_s, level_hysteresis, estimate_rssi_offset,
-    rssi_offset_sigma, rssi_offset_walk, calibrate_floor_loss, loss_calibration_rate, loss_calibration_clip_db,
-    loss_calibration_min_rssi_dbm, beacon_integrity, integrity_threshold_db, integrity_alpha, integrity_min_samples,
-    integrity_max_sigma_m, resample_ess_ratio, roughening_m, recovery, recovery_alpha_slow, recovery_alpha_fast,
-    recovery_max_fraction, init_proposal, init_proposal_auto_density, init_proposal_fraction, init_window_s,
-    recovery_proposal, proposal_history, proposal_max_age_s, proposal_level_jump, level_change_prob_step,
-    level_change_prob_baro, baro_update_interval_s, baro_sigma_m, baro_outlier_prob, baro_offset_sigma_m,
-    baro_offset_walk_m, baro_jump, baro_jump_radius_m, baro_jump_hold_s, baro_jump_prob, baro_reseed_keep_reference,
-    floor_prior_weight, floor_prior_k, floor_prior_eps, floor_prior_max_age_s, closed_region_fraction,
-    closed_region_min_m2, fingerprint_weight, fingerprint_k, fingerprint_strongest, fingerprint_sigma_m,
-    fingerprint_eps, fingerprint_proposal, fingerprint_max_age_s, fingerprint_model_weight)
+    GridFilterConfig, cell_m, max_cells, max_reach_m, closed_region_fraction, closed_region_min_m2, heading_bins,
+    heading_sigma_deg, heading_outlier_prob, step_length_sigma, step_length_rel_sigma, step_scale_bins,
+    step_scale_spread, step_scale_sigma, step_scale_switch, estimate_rssi_offset, rssi_offset_sigma, rssi_offset_walk,
+    teleport_rate_per_s, teleport_period_s, recovery_alpha_slow, recovery_alpha_fast, recovery_max_fraction,
+    active_floor_rel, level_change_prob_step, level_change_prob_baro, baro_update_interval_s, baro_sigma_m,
+    baro_outlier_prob, baro_offset_sigma_m, baro_offset_walk_m, level_smoothing_s, level_hysteresis,
+    map_consistent_estimate, beacon_integrity, integrity_threshold_db, integrity_alpha, integrity_min_samples,
+    integrity_max_sigma_m, floor_prior_weight, floor_prior_k, floor_prior_eps, fingerprint_weight, fingerprint_k,
+    fingerprint_strongest, fingerprint_sigma_m, fingerprint_eps, fingerprint_model_weight)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(TrackSmootherConfig, enabled, tau_s, max_correction_mps, snap_m,
                                                 extrapolate_steps, max_step_interval_s)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(RoomEventConfig, enter_prob, exit_prob, enter_dwell_s, exit_dwell_s,
@@ -42,7 +39,7 @@ void to_json(nlohmann::json& j, const EngineConfig& c) {
   j = nlohmann::json{{"pdr", c.pdr},
                      {"rssi", c.rssi},
                      {"baro", c.baro},
-                     {"pf", c.pf},
+                     {"filter", c.filter},
                      {"rooms", c.rooms},
                      {"smoothing", c.smoothing},
                      {"mag_heading_sigma_deg", c.mag_heading_sigma_deg}};
@@ -52,7 +49,7 @@ void from_json(const nlohmann::json& j, EngineConfig& c) {
   j.at("pdr").get_to(c.pdr);
   j.at("rssi").get_to(c.rssi);
   if (j.contains("baro")) j.at("baro").get_to(c.baro);
-  j.at("pf").get_to(c.pf);
+  j.at("filter").get_to(c.filter);
   if (j.contains("rooms")) j.at("rooms").get_to(c.rooms);
   if (j.contains("smoothing")) j.at("smoothing").get_to(c.smoothing);
   j.at("mag_heading_sigma_deg").get_to(c.mag_heading_sigma_deg);
@@ -66,6 +63,10 @@ void check_known_keys(const nlohmann::json& base, const nlohmann::json& patch, c
   for (const auto& [key, value] : patch.items()) {
     const std::string full = path.empty() ? key : path + "." + key;
     if (!base.is_object() || !base.contains(key)) throw std::invalid_argument("unknown config key '" + full + "'");
+    // A section given as a scalar would otherwise fail deep inside the JSON library.
+    if (base.at(key).is_object() && !value.is_object() && !value.is_null()) {
+      throw std::invalid_argument("config key '" + full + "' is a section and needs an object");
+    }
     check_known_keys(base.at(key), value, full);
   }
 }
@@ -73,12 +74,12 @@ void check_known_keys(const nlohmann::json& base, const nlohmann::json& patch, c
 }  // namespace
 
 EngineConfig preset_config(std::string_view preset) {
-  if (preset != "pf") throw std::invalid_argument("unknown preset '" + std::string(preset) + "' (expected pf)");
+  if (preset != "grid") throw std::invalid_argument("unknown preset '" + std::string(preset) + "' (expected grid)");
   return {};
 }
 
 const std::vector<std::string>& preset_names() {
-  static const std::vector<std::string> names = {"pf"};
+  static const std::vector<std::string> names = {"grid"};
   return names;
 }
 
@@ -286,17 +287,10 @@ void score_room_events(Metrics& m, const std::vector<RoomEvent>& estimated, cons
   m.room_event_latency_median_s = latencies.empty() ? -1.0 : percentile(latencies, 0.5);
 }
 
-void append_snapshot(const PositioningEngine& engine, std::vector<std::array<float, 4>>& out, std::size_t max) {
-  const auto& ps = engine.particle_filter().particles();
-  const std::size_t stride = std::max<std::size_t>(1, ps.size() / std::max<std::size_t>(1, max));
-  for (std::size_t k = 0; k < ps.size(); k += stride) {
-    out.push_back({static_cast<float>(ps[k].pos.x), static_cast<float>(ps[k].pos.y), static_cast<float>(ps[k].weight),
-                   static_cast<float>(ps[k].level)});
-  }
-}
-
-ReplayResult replay(const Venue& venue, const Trace& trace, const EngineConfig& cfg, const ReplayOptions& opts) {
-  PositioningEngine engine(venue, cfg);
+ReplayResult replay(const Venue& venue, const Trace& trace, const EngineConfig& cfg, const ReplayOptions& opts,
+                    std::shared_ptr<const GridMap> map) {
+  if (!map) map = std::make_shared<const GridMap>(venue, cfg.filter);
+  PositioningEngine engine(venue, cfg, std::move(map));
   return replay_with(engine, venue, trace, opts);
 }
 
@@ -353,13 +347,13 @@ void write_track_csv(const std::string& path, const ReplayResult& result) {
   std::fclose(f);
 }
 
-void write_particles_csv(const std::string& path, const ReplayResult& result) {
+void write_cells_csv(const std::string& path, const ReplayResult& result) {
   std::FILE* f = std::fopen(path.c_str(), "w");
   if (!f) throw std::runtime_error("cannot write " + path);
   std::fprintf(f, "t,x,y,w,level\n");
   for (const auto& s : result.snapshots) {
-    for (const auto& p : s.particles) {
-      std::fprintf(f, "%.3f,%.3f,%.3f,%.6g,%d\n", s.t, p[0], p[1], p[2], static_cast<int>(p[3]));
+    for (const auto& c : s.cells) {
+      std::fprintf(f, "%.3f,%.3f,%.3f,%.6g,%d\n", s.t, c[0], c[1], c[2], static_cast<int>(c[3]));
     }
   }
   std::fclose(f);

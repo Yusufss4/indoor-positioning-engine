@@ -7,8 +7,11 @@
 #include <future>
 #include <map>
 #include <memory>
+#include <mutex>
+#include <semaphore>
 #include <sstream>
 #include <stdexcept>
+#include <thread>
 
 #include <nlohmann/json.hpp>
 
@@ -27,19 +30,58 @@ std::vector<EngineConfig> preset_configs(const BenchmarkOptions& opts) {
   return configs;
 }
 
-/// Preset names, then estimator names: the order of every per-trace result list.
-std::vector<std::string> case_names(const BenchmarkOptions& opts) {
-  std::vector<std::string> names = opts.presets;
-  for (const auto& e : opts.estimators) names.push_back(e.name);
-  return names;
-}
+/// At most one job per hardware thread at a time. Every job gets its own thread up front (std::async), and
+/// an engine on a mall-size venue holds over 100 MB, so unbounded they would all be alive at once.
+class JobLimit {
+ public:
+  JobLimit() : slots_(static_cast<std::ptrdiff_t>(std::max(1U, std::thread::hardware_concurrency()))) {}
+  template <class Fn>
+  auto run(Fn&& fn) {
+    slots_.acquire();
+    struct Release {
+      std::counting_semaphore<>& s;
+      ~Release() { s.release(); }
+    } release{slots_};
+    return fn();
+  }
 
-/// Metrics of one trace through every preset, then every estimator.
+ private:
+  std::counting_semaphore<> slots_;
+};
+
+/// The lattice of each (venue, preset), built on first use and shared between the replays of that venue:
+/// on a large venue it is most of an engine's start-up cost.
+class MapCache {
+ public:
+  std::shared_ptr<const GridMap> get(const Venue& venue, std::size_t preset, const GridFilterConfig& cfg) {
+    std::shared_ptr<Slot> slot;
+    {
+      const std::lock_guard lock(mutex_);
+      auto& entry = slots_[{&venue, preset}];
+      if (!entry) entry = std::make_shared<Slot>();
+      slot = entry;
+    }
+    const std::lock_guard lock(slot->mutex);
+    if (!slot->map) slot->map = std::make_shared<const GridMap>(venue, cfg);
+    return slot->map;
+  }
+
+ private:
+  struct Slot {
+    std::mutex mutex;
+    std::shared_ptr<const GridMap> map;
+  };
+  std::mutex mutex_;
+  std::map<std::pair<const Venue*, std::size_t>, std::shared_ptr<Slot>> slots_;
+};
+
+/// Metrics of one trace through every preset.
 std::vector<Metrics> replay_all(const Venue& venue, const Trace& trace, const std::vector<EngineConfig>& configs,
-                                const BenchmarkOptions& opts) {
+                                const BenchmarkOptions& opts, MapCache& maps) {
   std::vector<Metrics> out;
-  for (const auto& cfg : configs) out.push_back(replay(venue, trace, cfg, opts.replay).metrics);
-  for (const auto& e : opts.estimators) out.push_back(e.run(venue, trace, opts.replay).metrics);
+  for (std::size_t i = 0; i < configs.size(); ++i) {
+    out.push_back(replay(venue, trace, configs[i], opts.replay, maps.get(venue, i, configs[i].filter)).metrics);
+  }
   return out;
 }
 
@@ -105,17 +147,21 @@ std::vector<BenchmarkCase> run_benchmark(const std::string& scenario_dir, const 
   }
 
   const std::vector<EngineConfig> configs = preset_configs(opts);
+  MapCache maps;
 
   // One job per (scenario, seed): simulate once, replay through every preset.
   struct JobResult {
     std::size_t scenario;
     std::vector<Metrics> per_preset;
   };
+  JobLimit limit;
   auto job = [&](std::size_t si, int k) {
-    const auto& sc = scenarios[si];
-    const Venue& venue = *venues.at(sc.venue_path);
-    const Trace trace = sim::simulate(sc, venue, sc.seed + static_cast<std::uint64_t>(k));
-    return JobResult{si, replay_all(venue, trace, configs, opts)};
+    return limit.run([&] {
+      const auto& sc = scenarios[si];
+      const Venue& venue = *venues.at(sc.venue_path);
+      const Trace trace = sim::simulate(sc, venue, sc.seed + static_cast<std::uint64_t>(k));
+      return JobResult{si, replay_all(venue, trace, configs, opts, maps)};
+    });
   };
 
   std::vector<JobResult> job_results;
@@ -129,7 +175,7 @@ std::vector<BenchmarkCase> run_benchmark(const std::string& scenario_dir, const 
       for (int k = 0; k < opts.seeds; ++k) job_results.push_back(job(si, k));
   }
 
-  const std::vector<std::string> names = case_names(opts);
+  const std::vector<std::string>& names = opts.presets;
   std::vector<BenchmarkCase> cases;
   for (std::size_t si = 0; si < scenarios.size(); ++si) {
     for (std::size_t pi = 0; pi < names.size(); ++pi) {
@@ -206,11 +252,15 @@ std::vector<BenchmarkCase> run_trace_benchmark(const std::string& manifest_path,
   if (entries.empty()) throw std::runtime_error("no traces in " + manifest_path);
 
   const std::vector<EngineConfig> configs = preset_configs(opts);
+  MapCache maps;
 
+  JobLimit limit;
   auto job = [&](std::size_t i) {
-    const Venue& venue = *venues.at(entries[i].venue);
-    const Trace trace = read_trace_file(entries[i].trace);
-    return replay_all(venue, trace, configs, opts);
+    return limit.run([&] {
+      const Venue& venue = *venues.at(entries[i].venue);
+      const Trace trace = read_trace_file(entries[i].trace);
+      return replay_all(venue, trace, configs, opts, maps);
+    });
   };
   std::vector<std::vector<Metrics>> results(entries.size());
   if (opts.parallel) {
@@ -222,7 +272,7 @@ std::vector<BenchmarkCase> run_trace_benchmark(const std::string& manifest_path,
   }
 
   groups.push_back("all");
-  const std::vector<std::string> names = case_names(opts);
+  const std::vector<std::string>& names = opts.presets;
   std::vector<BenchmarkCase> cases;
   for (const auto& group : groups) {
     for (std::size_t pi = 0; pi < names.size(); ++pi) {

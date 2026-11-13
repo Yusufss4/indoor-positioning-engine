@@ -16,21 +16,24 @@
 #include "ipe/floor_classifier.hpp"
 #include "ipe/level_selector.hpp"
 #include "ipe/map_estimate.hpp"
-#include "ipe/particle.hpp"
 #include "ipe/pdr.hpp"
 #include "ipe/rssi_model.hpp"
 #include "ipe/venue.hpp"
+#include "ipe/weighted_point.hpp"
 
 namespace ipe {
 
-/// Settings of the grid filter (a prototype next to the particle filter, see docs/grid.md). Where a field
-/// has a particle filter counterpart, the default is the particle filter's.
+/// Settings of the grid filter, the engine's filter (docs/design.md): the posterior on a lattice of the
+/// venue's walkable cells.
 struct GridFilterConfig {
   // The lattice (GridMap). Changing these builds another map.
-  double cell_m = 0.5;                  ///< Cell size [m]; coarser when the walkable area needs more than max_cells.
-  double max_cells = 200000;            ///< Walkable cells over all levels, at most.
-  double max_reach_m = 2.0;             ///< Longest move of one step from a cell centre (transition mask radius).
-  double closed_region_fraction = 0.1;  ///< Rooms without a door are not cells (as pf.closed_region_*).
+  double cell_m = 0.5;        ///< Cell size [m]; coarser when the walkable area needs more than max_cells.
+  double max_cells = 200000;  ///< Walkable cells over all levels, at most.
+  double max_reach_m = 2.0;   ///< Longest move of one step from a cell centre (transition mask radius).
+  /// Rooms nobody can walk into are not cells. The walls split each level into connected regions; one of at
+  /// least `closed_region_min_m2`, smaller than `closed_region_fraction` of its level's largest and without
+  /// a stairwell or lift is closed (a room without a door, an island drawn as an outline). 0 turns it off.
+  double closed_region_fraction = 0.1;
   double closed_region_min_m2 = 10.0;
 
   int heading_bins = 36;  ///< Bins of the heading offset from the gyro-integrated yaw.
@@ -38,8 +41,8 @@ struct GridFilterConfig {
   double heading_outlier_prob = 0.15;
 
   double step_length_sigma = 0.08;  ///< Along-track noise per step [m].
-  /// Along-track noise per step, relative to the step length. It also stands in for the step-length scale
-  /// the particle filter carries per particle (experiment 14: 0.2 beat 0.1 and 0.15, and a scale state).
+  /// Along-track noise per step, relative to the step length. It also stands in for a per-user step-length
+  /// scale (experiment 14: 0.2 beat 0.1 and 0.15, and a scale state).
   double step_length_rel_sigma = 0.2;
   /// A persistent step-length scale as a state with this many values (1: none, odd).
   int step_scale_bins = 1;
@@ -87,22 +90,21 @@ struct GridFilterConfig {
   double integrity_max_sigma_m = 3.0;
 
   /// Floor prior from the k-NN classifier over the venue's Wi-Fi floor fingerprints, applied per scan as
-  /// `floor_prior_weight * log p(level)` on every cell, as pf.floor_prior_weight does per particle. The radio
-  /// model's 2-4 dB per slab barely separates floors, and the barometer only reports changes, so without it
-  /// nothing rejects mass that has walked the same path one floor up. 0 (or a venue without fingerprints)
-  /// turns it off. Negative: GridEngine takes pf.floor_prior_weight, _k and _eps from the engine config, so
-  /// `--config ipin.json` turns it on for both filters; a GridFilter on its own treats it as 0.
-  double floor_prior_weight = -1.0;
+  /// `floor_prior_weight * log p(level)` on every cell. The radio model's 2-4 dB per slab barely separates
+  /// floors, and the barometer only reports changes, so without it nothing rejects mass that has walked the
+  /// same path one floor up. 0 (or a venue without fingerprints) turns it off.
+  double floor_prior_weight = 0.0;
   int floor_prior_k = 5;
   double floor_prior_eps = 0.1;
 
-  /// Fingerprint likelihood on every cell, as pf.fingerprint_weight per particle: a kernel density around
-  /// each scan's nearest training scans (venues whose fingerprints carry positions). The grid needs no
-  /// proposal from it: every cell already holds mass. `fingerprint_model_weight` scales the log-distance
-  /// model's log-likelihood in a scan that has neighbours, as the particle filter's. Negative weight:
-  /// GridEngine takes these six from the engine config's pf.fingerprint_*; a GridFilter on its own treats
-  /// it as 0.
-  double fingerprint_weight = -1.0;
+  /// Fingerprint likelihood, for venues whose fingerprints carry positions (training scans). Each scan's
+  /// `fingerprint_k` nearest training scans, compared over its `fingerprint_strongest` strongest readings,
+  /// form a kernel density over position and level: Gaussians of `fingerprint_sigma_m` around the
+  /// neighbours, mixed with `fingerprint_eps` of the uniform prior. It is applied per scan as
+  /// `fingerprint_weight * log density` on every cell. `fingerprint_model_weight` scales the log-distance
+  /// model's log-likelihood in a scan that has neighbours: both read the same scan, and counting it twice in
+  /// full makes the posterior too sure. 0 (or a venue without such fingerprints) turns it off.
+  double fingerprint_weight = 0.0;
   int fingerprint_k = 10;
   int fingerprint_strongest = 40;
   double fingerprint_sigma_m = 4.0;
@@ -213,7 +215,8 @@ class GridFilter {
   void on_pressure(double t, double hpa);
 
   [[nodiscard]] Estimate estimate() const { return estimate_; }
-  /// The step's own move: mean displacement of the mass that survived it (see ParticleFilter::step_motion).
+  /// The step's own move: mean displacement of the mass that survived it. The estimate's change across the
+  /// step also holds corrections (mass dying at walls), which the track smoother draws differently.
   [[nodiscard]] Vec2 step_motion() const { return step_motion_; }
 
   [[nodiscard]] const GridMap& map() const { return *map_; }
@@ -293,7 +296,7 @@ class GridFilter {
   std::vector<double> row_;      ///< One cell's (scale, heading) row in double precision.
   std::vector<RssiReading> scan_;
   std::vector<double> level_weight_;
-  std::vector<Particle> points_;  ///< Cells as particles for MapConsistentEstimate.
+  std::vector<WeightedPoint> points_;  ///< Cells as particles for MapConsistentEstimate.
   // Scratch for level changes: per connector cell, a copy of its state before the change.
   std::vector<double> conn_mass_, conn_x_, conn_y_, conn_d1_, conn_d2_, conn_b1_, conn_b2_;
   std::vector<float> conn_h_;

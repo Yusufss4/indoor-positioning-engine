@@ -3,6 +3,7 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 #include <stdexcept>
 
 #include "ipe/eval.hpp"
@@ -138,7 +139,7 @@ TEST(Eval, ReplayRecordsAnEvenTrack) {
   const auto sc = sim::load_scenario_file(test::data_path("scenarios/office_nominal.json"));
   const auto venue = load_venue_file(sc.venue_path);
   const auto trace = sim::simulate(sc, venue);
-  const auto result = replay(venue, trace, preset_config("pf"));
+  const auto result = replay(venue, trace, preset_config("grid"));
   ASSERT_GT(result.track.size(), 10u);
   for (std::size_t i = 1; i < result.track.size(); ++i) {
     EXPECT_NEAR(result.track[i].t - result.track[i - 1].t, 0.2, 1e-9);
@@ -185,7 +186,7 @@ TEST(Eval, ReplayReportsRoomEvents) {
   const auto venue = load_venue_file(sc.venue_path);
   ASSERT_FALSE(venue.rooms().empty());
   const auto trace = sim::simulate(sc, venue);
-  const auto r = replay(venue, trace, preset_config("pf"));
+  const auto r = replay(venue, trace, preset_config("grid"));
   EXPECT_FALSE(r.truth_room_events.empty());
   EXPECT_FALSE(r.room_events.empty());
   for (std::size_t k = 1; k < r.room_events.size(); ++k) EXPECT_LE(r.room_events[k - 1].t, r.room_events[k].t);
@@ -247,8 +248,8 @@ TEST(Eval, ReplayGroupsScans) {
   const auto trace = sim::simulate(sc, venue);
   Trace scanned = trace;
   for (std::size_t b = 0; b < scanned.ble.size(); ++b) scanned.ble[b].scan = static_cast<std::uint32_t>(b + 1);
-  const auto a = replay(venue, trace, preset_config("pf"));
-  const auto b = replay(venue, scanned, preset_config("pf"));
+  const auto a = replay(venue, trace, preset_config("grid"));
+  const auto b = replay(venue, scanned, preset_config("grid"));
   ASSERT_EQ(a.records.size(), b.records.size());
   for (std::size_t i = 0; i < a.records.size(); ++i) {
     EXPECT_EQ(a.records[i].estimate.x, b.records[i].estimate.x);
@@ -257,41 +258,52 @@ TEST(Eval, ReplayGroupsScans) {
   EXPECT_GT(a.metrics.coverage95, 0.0);
 }
 
-TEST(Eval, OnlyTheParticleFilterPreset) {
-  EXPECT_EQ(preset_names(), std::vector<std::string>{"pf"});
-  EXPECT_TRUE(preset_config("pf").rssi.wall_aware);
-  EXPECT_TRUE(preset_config("pf").pf.map_consistent_estimate);
-  for (const char* gone : {"pf-nomap", "ekf", "wcl", "kalman"}) {
+TEST(Eval, OnlyTheGridPreset) {
+  EXPECT_EQ(preset_names(), std::vector<std::string>{"grid"});
+  EXPECT_TRUE(preset_config("grid").rssi.wall_aware);
+  EXPECT_TRUE(preset_config("grid").filter.map_consistent_estimate);
+  for (const char* gone : {"pf", "pf-nomap", "ekf", "wcl", "kalman"}) {
     EXPECT_THROW(preset_config(gone), std::invalid_argument) << gone;
   }
-  // Removed switches are rejected like any typo.
-  for (const char* gone : {R"({"pf": {"scan_tempering": 1}})", R"({"pf": {"wall_constraint": false}})",
-                           R"({"pf": {"proposal_ring_scale": 2}})", R"({"pf": {"use_barometer": false}})"}) {
-    auto cfg = preset_config("pf");
+  // The removed particle filter's section and switches are rejected like any typo.
+  for (const char* gone : {R"({"pf": {"num_particles": 500}})", R"({"filter": {"num_particles": 500}})",
+                           R"({"filter": {"init_proposal": true}})", R"({"filter": {"baro_jump": true}})"}) {
+    auto cfg = preset_config("grid");
     EXPECT_THROW(apply_config_overrides(cfg, gone), std::invalid_argument) << gone;
   }
 }
 
 TEST(Eval, ConfigOverridesMergeAndRejectTypos) {
-  auto cfg = preset_config("pf");
-  apply_config_overrides(cfg, R"({"pf": {"num_particles": 321}, "rssi": {"sigma_db": 7.5}})");
-  EXPECT_EQ(cfg.pf.num_particles, 321);
+  auto cfg = preset_config("grid");
+  apply_config_overrides(cfg, R"({"filter": {"heading_bins": 72}, "rssi": {"sigma_db": 7.5}})");
+  EXPECT_EQ(cfg.filter.heading_bins, 72);
   EXPECT_DOUBLE_EQ(cfg.rssi.sigma_db, 7.5);
-  EXPECT_TRUE(cfg.pf.map_consistent_estimate);  // untouched keys keep their values
-  EXPECT_THROW(apply_config_overrides(cfg, R"({"pf": {"num_particle": 10}})"), std::invalid_argument);
+  EXPECT_TRUE(cfg.filter.map_consistent_estimate);  // untouched keys keep their values
+  EXPECT_THROW(apply_config_overrides(cfg, R"({"filter": {"heading_binz": 10}})"), std::invalid_argument);
   EXPECT_THROW(apply_config_overrides(cfg, R"({"filter": "nope"})"), std::invalid_argument);
 }
 
 TEST(Eval, ConfigJsonRoundTrip) {
-  auto cfg = preset_config("pf");
-  cfg.pf.num_particles = 777;
+  auto cfg = preset_config("grid");
+  cfg.filter.heading_bins = 48;
   cfg.rssi.wall_aware = false;
-  auto copy = preset_config("pf");
+  auto copy = preset_config("grid");
   apply_config_overrides(copy, config_to_json(cfg));
-  EXPECT_EQ(copy.pf.num_particles, 777);
+  EXPECT_EQ(copy.filter.heading_bins, 48);
   EXPECT_FALSE(copy.rssi.wall_aware);
   // Keys of the removed filters are rejected like any typo.
   EXPECT_THROW(apply_config_overrides(copy, R"({"ekf": {"rssi_min_dbm": -80}})"), std::invalid_argument);
+}
+
+TEST(Eval, ShippedConfigPatchesApply) {
+  for (const char* name : {"msil_wifi.json", "ipin.json", "fingerprint.json"}) {
+    std::ifstream in(test::data_path(std::string("configs/") + name));
+    ASSERT_TRUE(in) << name;
+    std::stringstream text;
+    text << in.rdbuf();
+    auto cfg = preset_config("grid");
+    EXPECT_NO_THROW(apply_config_overrides(cfg, text.str())) << name;
+  }
 }
 
 TEST(Eval, ReplayProducesOneRecordPerTruthSample) {
@@ -299,8 +311,8 @@ TEST(Eval, ReplayProducesOneRecordPerTruthSample) {
   const auto venue = load_venue_file(sc.venue_path);
   const auto trace = sim::simulate(sc, venue);
   ReplayOptions opts;
-  opts.particle_snapshot_every = 10;
-  const auto r = replay(venue, trace, preset_config("pf"), opts);
+  opts.snapshot_every = 10;
+  const auto r = replay(venue, trace, preset_config("grid"), opts);
   EXPECT_EQ(r.records.size(), trace.truth.size());
   EXPECT_FALSE(r.snapshots.empty());
   EXPECT_GT(r.metrics.steps, 100u);
@@ -324,7 +336,6 @@ TEST(Eval, TraceManifestGroupsRecordedTraces) {
                                        << sc.venue_path << R"(", "trace": "t2.csv"}]})";
 
   BenchmarkOptions opts;
-  opts.config_patches = {R"({"pf": {"num_particles": 300}})"};  // keeps the test fast
   const auto cases = run_trace_benchmark((dir / "manifest.json").string(), opts);
   ASSERT_EQ(cases.size(), 3u);
   EXPECT_EQ(cases[0].scenario, "a");
@@ -343,10 +354,11 @@ TEST(Eval, TraceManifestGroupsRecordedTraces) {
 TEST(Eval, BaselineComparisonFlagsRegressions) {
   BenchmarkCase c;
   c.scenario = "s";
-  c.preset = "pf";
+  c.preset = "grid";
   c.cep50_m = 1.0;
   c.cep95_m = 3.0;
-  const std::string baseline = R"({"results": {"s": {"pf": {"cep50_m": 1.0, "cep95_m": 2.0}}, "gone": {"pf": {}}}})";
+  const std::string baseline =
+      R"({"results": {"s": {"grid": {"cep50_m": 1.0, "cep95_m": 2.0}}, "gone": {"grid": {}}}})";
   const auto findings = compare_to_baseline({c}, baseline, {});
   int regressed = 0, missing = 0;
   for (const auto& f : findings) {

@@ -237,7 +237,7 @@ TEST(Import, CommittedExportsAreUpToDate) {
 
 TEST(Import, WebDemoRecordingsAreConsistent) {
   // Regenerate with: datasets/msil/export_demo.py
-  auto cfg = eval::preset_config("pf");
+  auto cfg = eval::preset_config("grid");
   eval::apply_config_overrides(cfg, slurp(test::data_path("configs/msil_wifi.json")));
   int traces = 0;
   for (const auto& floor : fs::directory_iterator(test::data_path("real"))) {

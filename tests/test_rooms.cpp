@@ -3,7 +3,6 @@
 #include <vector>
 
 #include "ipe/engine.hpp"
-#include "ipe/particle_filter.hpp"
 #include "ipe/rooms.hpp"
 #include "ipe/rssi_model.hpp"
 #include "test_util.hpp"
@@ -96,13 +95,13 @@ TEST(Rooms, ExitPrecedesEnterWhenWalkingThroughADoor) {
 TEST(Rooms, LosingTheFixExitsAfterTheDwell) {
   const Venue v = test::two_room_venue_with_rooms();
   RoomTracker tr(v, unthrottled());
-  for (int k = 0; k <= 20; ++k) tr.update(0.1 * k, fix_at({5.0, 5.0}), nullptr);
+  for (int k = 0; k <= 20; ++k) tr.update(0.1 * k, fix_at({5.0, 5.0}));
   ASSERT_TRUE(tr.inside(0));
   ASSERT_EQ(tr.take_events().size(), 1u);
   const Estimate lost;
-  for (int k = 0; k < 15; ++k) tr.update(2.1 + 0.1 * k, lost, nullptr);
+  for (int k = 0; k < 15; ++k) tr.update(2.1 + 0.1 * k, lost);
   EXPECT_TRUE(tr.inside(0));
-  tr.update(3.7, lost, nullptr);
+  tr.update(3.7, lost);
   const auto ev = tr.take_events();
   ASSERT_EQ(ev.size(), 1u);
   EXPECT_EQ(ev[0].type, RoomEventType::Exit);
@@ -112,7 +111,7 @@ TEST(Rooms, LosingTheFixExitsAfterTheDwell) {
 TEST(Rooms, MeanPositionGivesCertainProbabilities) {
   const Venue v = test::two_room_venue_with_rooms();
   RoomTracker tr(v, unthrottled());
-  tr.update(0.0, fix_at({15.0, 5.0}), nullptr);
+  tr.update(0.0, fix_at({15.0, 5.0}));
   ASSERT_EQ(tr.probabilities().size(), 2u);
   EXPECT_DOUBLE_EQ(tr.probabilities()[0], 0.0);
   EXPECT_DOUBLE_EQ(tr.probabilities()[1], 1.0);
@@ -122,38 +121,11 @@ TEST(Rooms, UpdatesAreThrottled) {
   const Venue v = test::two_room_venue_with_rooms();
   RoomTracker tr(v, RoomEventConfig{});
   EXPECT_TRUE(tr.due(0.0));
-  tr.update(0.0, fix_at({5.0, 5.0}), nullptr);
+  tr.update(0.0, fix_at({5.0, 5.0}));
   EXPECT_FALSE(tr.due(0.1));
-  tr.update(0.1, fix_at({15.0, 5.0}), nullptr);  // skipped
+  tr.update(0.1, fix_at({15.0, 5.0}));  // skipped
   EXPECT_DOUBLE_EQ(tr.probabilities()[0], 1.0);
   EXPECT_TRUE(tr.due(0.25));
-}
-
-TEST(Rooms, ParticleMassIsTheRoomProbability) {
-  const Venue v = test::two_room_venue_with_rooms();
-  ParticleFilterConfig cfg;
-  cfg.num_particles = 800;
-  cfg.seed = 3;
-  ParticleFilter pf(v, cfg, {});
-  const RssiModel model(v);
-  double t = 0.0;
-  for (int r = 0; r < 60; ++r) {
-    for (std::size_t i = 0; i < v.beacons().size(); ++i) {
-      pf.on_rssi(t, i, model.expected_rssi(v.beacons()[i], {5.0, 5.0}));
-      t += 0.05;
-    }
-  }
-  RoomTracker tr(v, unthrottled());
-  tr.update(t, pf.estimate(), &pf);
-
-  double total = 0.0, west = 0.0;
-  for (const auto& p : pf.particles()) {
-    total += p.weight;
-    if (v.rooms()[0].contains(p.pos)) west += p.weight;
-  }
-  EXPECT_NEAR(tr.probabilities()[0], west / total, 1e-12);
-  EXPECT_GT(tr.probabilities()[0], 0.9);
-  EXPECT_NEAR(tr.probabilities()[0] + tr.probabilities()[1], 1.0, 1e-9);
 }
 
 TEST(Rooms, EngineReportsEventsForVenuesWithRooms) {

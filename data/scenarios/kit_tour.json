@@ -3,7 +3,6 @@
   "description": "Real building from OpenStreetMap (KIT Informatikbau, Karlsruhe; rooms, doors, stairwells and lifts as mapped; map data (c) OpenStreetMap contributors, ODbL): walk the first-floor south wing, climb the west stairwell to the second floor, walk the north wing, ride the north lift down to the ground floor and walk back to the south hall. Simulated phone with BLE beacons on a 10 m grid inside mapped spaces and a barometer.",
   "venue": "../venues/kit_informatikbau.json",
   "seed": 501,
-  "demo_config": "../configs/open_venue.json",
   "walk": {
     "waypoints": [
       [66.1, 13.5, 1],

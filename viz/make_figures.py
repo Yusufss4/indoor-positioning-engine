@@ -24,7 +24,7 @@ def run(cmd: list[str]) -> str:
     return subprocess.run(cmd, check=True, capture_output=True, text=True).stdout
 
 
-def replay(build: Path, scenario: str, preset: str, work: Path, particles_every: int = 0,
+def replay(build: Path, scenario: str, preset: str, work: Path, cells_every: int = 0,
            patch: str | None = None, tag: str | None = None) -> tuple[Path, Path | None]:
     tag = tag or preset
     est = work / f"{scenario}_{tag}.csv"
@@ -33,9 +33,9 @@ def replay(build: Path, scenario: str, preset: str, work: Path, particles_every:
     if patch:
         cmd += ["--set", patch]
     parts = None
-    if particles_every:
-        parts = work / f"{scenario}_{tag}_particles.csv"
-        cmd += ["--particles", str(parts), "--particles-every", str(particles_every)]
+    if cells_every:
+        parts = work / f"{scenario}_{tag}_cells.csv"
+        cmd += ["--cells", str(parts), "--cells-every", str(cells_every)]
     run(cmd)
     return est, parts
 
@@ -56,29 +56,28 @@ def main() -> int:
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp)
 
-        est, _ = replay(build, "office_nominal", "pf", work, particles_every=3)
-        runs = {"pf": ipeviz.Estimates.load(est)}
+        est, _ = replay(build, "office_nominal", "grid", work, cells_every=3)
+        runs = {"grid": ipeviz.Estimates.load(est)}
         ipeviz.plot_trajectories(office, runs, out / "office_nominal_trajectories.png",
                                  "office_nominal: estimated track")
         ipeviz.plot_error_over_time(runs, out / "office_nominal_error.png", "office_nominal: error over time")
         ipeviz.plot_error_cdf(runs, out / "office_nominal_cdf.png", "office_nominal: error CDF")
 
-        particles = ipeviz.load_particles(work / "office_nominal_pf_particles.csv")
-        ipeviz.animate_particles(office, runs["pf"], particles, out / "pf_convergence.gif", t_max=45.0, fps=8,
-                                 title="Particle filter: global convergence then tracking")
+        cells = ipeviz.load_cells(work / "office_nominal_grid_cells.csv")
+        ipeviz.animate_cells(office, runs["grid"], cells, out / "convergence.gif", t_max=45.0, fps=8,
+                             title="Grid filter: the posterior's heaviest cells, from start to tracking")
 
-        est, _ = replay(build, "office_field_issue", "pf", work)
-        field = {"pf": ipeviz.Estimates.load(est)}
-        old, _ = replay(build, "office_field_issue", "pf", work, tag="pf-before",
-                        patch='{"pf":{"beacon_integrity":false,"recovery_alpha_fast":0.3,'
-                              '"rssi_offset_sigma":5,"step_scale_sigma":0.1}}')
-        field_cmp = {"before": ipeviz.Estimates.load(old), "after": field["pf"]}
+        est, _ = replay(build, "office_field_issue", "grid", work)
+        field = {"grid": ipeviz.Estimates.load(est)}
+        old, _ = replay(build, "office_field_issue", "grid", work, tag="without-integrity",
+                        patch='{"filter":{"beacon_integrity":false}}')
+        field_cmp = {"before": ipeviz.Estimates.load(old), "after": field["grid"]}
         highlight = {"C2": "#bbbbbb", "N3": "#bbbbbb", "S3": "#e377c2"}
         ipeviz.plot_trajectories(office, field, out / "field_issue_trajectories.png",
                                  "office_field_issue: C2/N3 dead (grey), S3 installed 16 m from its map position",
                                  highlight=highlight)
         ipeviz.plot_error_over_time(field_cmp, out / "field_issue_before_after.png",
-                                    "office_field_issue: particle filter before vs after the recovery/integrity fix",
+                                    "office_field_issue: without and with the beacon integrity monitor",
                                     colors={"before": "#ff7f0e", "after": "#d62728"})
 
     if not args.skip_benchmark:

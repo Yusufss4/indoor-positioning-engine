@@ -3,7 +3,7 @@ if(NOT EMSCRIPTEN)
 endif()
 
 add_executable(ipe_wasm bindings.cpp)
-target_link_libraries(ipe_wasm PRIVATE ipe_eval ipe_grid)
+target_link_libraries(ipe_wasm PRIVATE ipe_eval)
 # The page runs the module in a Web Worker (worker.js), so it must load there.
 target_link_options(ipe_wasm PRIVATE
   -lembind

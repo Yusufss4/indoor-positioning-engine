@@ -2,10 +2,11 @@
 
 #include <array>
 #include <cmath>
+#include <memory>
 #include <vector>
 
 #include "ipe/fingerprint_map.hpp"
-#include "ipe/particle_filter.hpp"
+#include "ipe/grid_filter.hpp"
 #include "ipe/venue.hpp"
 
 using namespace ipe;
@@ -100,27 +101,25 @@ TEST(FingerprintMap, TooFewReadingsGiveNothingAndLeaveNoState) {
   EXPECT_NEAR(out[0].distance_db, 0.0, 1e-9);
 }
 
-TEST(FingerprintLikelihood, PullsTheCloudToTheMatchingTrainingScans) {
+TEST(FingerprintLikelihood, PullsTheMassToTheMatchingTrainingScans) {
   const Venue v = corridor();
-  ParticleFilterConfig cfg;
-  cfg.num_particles = 2000;
+  GridFilterConfig cfg;
   cfg.fingerprint_weight = 1.0;
   cfg.fingerprint_sigma_m = 3.0;
   cfg.fingerprint_k = 2;
   cfg.fingerprint_strongest = 3;
   cfg.fingerprint_model_weight = 0.0;  // the fingerprints alone
-  ParticleFilter pf(v, cfg, {});
+  GridFilter f(std::make_shared<const GridMap>(v, cfg), cfg, {});
   const std::vector<RssiReading> scan{{0, -84.0}, {1, -46.0}, {2, -60.0}};
-  for (int i = 0; i < 5; ++i) pf.on_rssi_scan(1.0 + i, scan);
-  ASSERT_TRUE(pf.estimate().valid);
-  EXPECT_GT(pf.estimate().pos.x, 30.0);
+  for (int i = 0; i < 5; ++i) f.on_rssi_scan(1.0 + i, scan);
+  ASSERT_TRUE(f.estimate().valid);
+  EXPECT_GT(f.estimate().pos.x, 30.0);
 }
 
 TEST(FingerprintLikelihood, AScanOfUnmodelledBeaconsStillUpdates) {
   const Venue v = corridor();
-  ParticleFilterConfig cfg;
-  cfg.num_particles = 500;
-  ParticleFilter off(v, cfg, {});
+  GridFilterConfig cfg;
+  GridFilter off(std::make_shared<const GridMap>(v, cfg), cfg, {});
   // Without the fingerprint likelihood a beacon without a model says nothing.
   off.on_rssi_scan(1.0, std::vector<RssiReading>{{2, -52.0}});
   off.on_rssi(2.0, 2, -52.0);
@@ -129,7 +128,7 @@ TEST(FingerprintLikelihood, AScanOfUnmodelledBeaconsStillUpdates) {
   // With it, the scan counts even when the model is switched off: "c" is one of its dimensions.
   cfg.fingerprint_weight = 1.0;
   cfg.fingerprint_model_weight = 0.0;
-  ParticleFilter on(v, cfg, {});
+  GridFilter on(std::make_shared<const GridMap>(v, cfg), cfg, {});
   on.on_rssi_scan(1.0, std::vector<RssiReading>{{2, -52.0}, {0, -61.0}, {1, -74.0}});
   ASSERT_TRUE(on.estimate().valid);
   EXPECT_GT(on.estimate().pos.x, 8.0);
@@ -144,10 +143,9 @@ TEST(FingerprintLikelihood, OffLeavesTheFilterBitIdentical) {
     "beacons": [{"id": "a", "x": 0, "y": 5, "tx_power": -40}, {"id": "b", "x": 40, "y": 5, "tx_power": -40},
                 {"id": "c", "x": 20, "y": 5, "model": false}]
   })");
-  ParticleFilterConfig cfg;
-  cfg.num_particles = 300;
-  ParticleFilter a(with, cfg, {});
-  ParticleFilter b(without, cfg, {});
+  GridFilterConfig cfg;
+  GridFilter a(std::make_shared<const GridMap>(with, cfg), cfg, {});
+  GridFilter b(std::make_shared<const GridMap>(without, cfg), cfg, {});
   const std::vector<RssiReading> scan{{0, -70.0}, {1, -66.0}, {2, -55.0}};
   for (int i = 0; i < 4; ++i) {
     a.on_rssi_scan(1.0 + i, scan);

@@ -24,11 +24,11 @@ struct TrackSmootherConfig {
   double max_step_interval_s = 1.2;
 };
 
-/// The position a client draws, made from the particle filter's estimate without lagging behind it:
-///   - a step moves the dot by the step's own motion (ParticleFilter::step_motion()), immediately;
+/// The position a client draws, made from the filter's estimate without lagging behind it:
+///   - a step moves the dot by the step's own motion (GridFilter::step_motion()), immediately;
 ///   - between steps it continues at the last step's pace (`extrapolate_steps`);
 ///   - everything else that moves the filter's estimate, including what a step does besides moving
-///     (particles dying at walls, resampling), is a correction: the dot glides towards the estimate in
+///     (mass dying at walls), is a correction: the dot glides towards the estimate in
 ///     continuous time, `exp(-dt / tau_s)` of the gap left after `dt`, at most `max_correction_mps`, so
 ///     a correction is never drawn at the instant it arrives, whatever the update rate;
 ///   - it jumps to the filter's estimate when that is more than `snap_m` away and when the reported level

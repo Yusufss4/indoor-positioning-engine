@@ -21,7 +21,7 @@ int LevelSelector::update(double t, std::span<const double> weights) {
   const auto best = static_cast<std::size_t>(std::max_element(avg_.begin(), avg_.end()) - avg_.begin());
   const auto held = static_cast<std::size_t>(level_);
   if (weights[held] <= 0.0) {
-    // No particle left on the reported level: nothing to report there, whatever the average says.
+    // No mass left on the reported level: nothing to report there, whatever the average says.
     level_ = top;
   } else if (best != held && avg_[best] - avg_[held] >= hysteresis_) {
     level_ = static_cast<int>(best);

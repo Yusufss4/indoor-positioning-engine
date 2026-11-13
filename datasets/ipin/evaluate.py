@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Replays a manifest with ipe-replay (or ipe-grid) and reports what ipe-regress does not, per walk and
-per group, next to CEP50/CEP95:
+"""Replays a manifest with ipe-replay and reports what ipe-regress does not, per walk and per group, next
+to CEP50/CEP95:
 
 * the floor hit rate;
 * the IPIN competition metric: 75th percentile of horizontal error plus 15 m per wrong floor, over the
@@ -14,7 +14,7 @@ The engine is causal, and so is everything above by default. --two-pass, --fill 
 post-processing for competitions scored offline (Kaggle); they are not what a phone can show live.
 
     python3 datasets/ipin/evaluate.py datasets/ipin/out_scans/manifest_tune.json \
-        --config data/configs/ipin.json [--set JSON] [--tool grid] [--json out.json]
+        --config data/configs/fingerprint.json [--set JSON] [--json out.json]
 """
 
 from __future__ import annotations
@@ -37,25 +37,13 @@ from common import offline  # noqa: E402
 FLOOR_PENALTY_M = 15.0  # per floor of error, in both the IPIN and the Kaggle metric
 
 
-def merge(a: dict, b: dict) -> dict:
-    out = dict(a)
-    for k, v in b.items():
-        out[k] = merge(out[k], v) if isinstance(v, dict) and isinstance(out.get(k), dict) else v
-    return out
-
-
-def run_engine(venue: Path, trace: Path, out: Path, seed: int, args) -> list[dict]:
-    tool = [str(args.build / "tools" / "ipe-grid"), "replay"] if args.tool == "grid" else [str(args.build / "tools" / "ipe-replay")]
-    cmd = tool + ["--venue", str(venue), "--trace", str(trace), "--warmup", str(args.warmup), "--out", str(out)]
+def run_engine(venue: Path, trace: Path, out: Path, args) -> list[dict]:
+    cmd = [str(args.build / "tools" / "ipe-replay"), "--venue", str(venue), "--trace", str(trace), "--warmup",
+           str(args.warmup), "--out", str(out)]
     if args.config:
         cmd += ["--config", str(args.config)]
-    patch = json.loads(args.set) if args.set else {}
-    if args.seeds > 1:
-        patch = merge(patch, {"pf": {"seed": seed}})
-    if patch:
-        cmd += ["--set", json.dumps(patch)]
-    if args.grid_set:
-        cmd += ["--grid-set", args.grid_set]
+    if args.set:
+        cmd += ["--set", args.set]
     subprocess.run(cmd, check=True, capture_output=True, text=True)
     rows = offline.read_estimates(out)
     for r in rows:
@@ -63,13 +51,13 @@ def run_engine(venue: Path, trace: Path, out: Path, seed: int, args) -> list[dic
     return rows
 
 
-def replay(entry: dict, seed: int, base: Path, args, tmp: Path) -> dict:
+def replay(entry: dict, base: Path, args, tmp: Path) -> dict:
     venue, trace = base / entry["venue"], base / entry["trace"]
-    rows = run_engine(venue, trace, tmp / f"{entry['name']}_{seed}.csv", seed, args)
+    rows = run_engine(venue, trace, tmp / f"{entry['name']}.csv", args)
     if args.two_pass:
-        reversed_trace = tmp / f"{entry['name']}_{seed}_reversed.csv"
+        reversed_trace = tmp / f"{entry['name']}_reversed.csv"
         end = offline.reverse_trace(trace, reversed_trace)
-        back = run_engine(venue, reversed_trace, tmp / f"{entry['name']}_{seed}_back.csv", seed, args)
+        back = run_engine(venue, reversed_trace, tmp / f"{entry['name']}_back.csv", args)
         rows = offline.fuse(rows, back, end, args.fuse_floor)
     if args.fill:
         offline.fill_gaps(rows)
@@ -126,9 +114,6 @@ def main():
     ap.add_argument("--warmup", type=float, default=5.0)
     ap.add_argument("--json", type=Path)
     ap.add_argument("--quiet", action="store_true", help="only the per-group summary")
-    ap.add_argument("--tool", choices=["pf", "grid"], default="pf",
-                    help="pf: ipe-replay (the engine); grid: ipe-grid replay (the grid filter, which has no seed)")
-    ap.add_argument("--grid-set", help="with --tool grid, a JSON merge patch on the grid filter config")
     ap.add_argument("--two-pass", action="store_true",
                     help="offline: replay each walk forwards and backwards and combine the two estimates "
                          "(datasets/common/offline.py)")
@@ -140,28 +125,16 @@ def main():
                     help="offline: move each fix onto the nearest surveyed waypoint within this many metres "
                          "(waypoints.json next to the venue, written by the MSIL converter with --fingerprints)")
     ap.add_argument("--only", help="replay only the walks whose name or group contains this text")
-    ap.add_argument("--seeds", type=int, default=1,
-                    help="replay each walk with filter seeds 1..N and average its metrics (a walk is one recording; "
-                         "the seeds only average out the filter's own randomness)")
+    ap.add_argument("--jobs", type=int, default=12,
+                    help="walks replayed at once (an engine on a mall-size floor holds over 100 MB)")
     args = ap.parse_args()
 
-    if args.tool == "grid":
-        args.seeds = 1
-    elif args.grid_set:
-        ap.error("--grid-set needs --tool grid")
     entries = json.loads(args.manifest.read_text())["traces"]
     if args.only:
         entries = [e for e in entries if args.only in e["name"] or args.only in e["group"]]
-    jobs = [(e, k) for e in entries for k in range(1, args.seeds + 1)]
-    with tempfile.TemporaryDirectory() as tmp, ThreadPoolExecutor() as pool:
-        runs = list(pool.map(lambda j: replay(j[0], j[1], args.manifest.parent, args, Path(tmp)), jobs))
-    rows = []
-    for i, e in enumerate(entries):
-        rs = runs[i * args.seeds:(i + 1) * args.seeds]
-        row = dict(rs[0])
-        for k in ("cep50_m", "cep95_m", "floor_hit", "ipin_p75_m", "h_p75_m", "kaggle_m"):
-            row[k] = statistics.mean(r[k] for r in rs)
-        rows.append(row)
+    # The filter has no random seed: a walk is replayed once.
+    with tempfile.TemporaryDirectory() as tmp, ThreadPoolExecutor(args.jobs) as pool:
+        rows = list(pool.map(lambda e: replay(e, args.manifest.parent, args, Path(tmp)), entries))
     groups: dict[str, list] = {}
     for r in rows:
         groups.setdefault(r["group"], []).append(r)

@@ -17,16 +17,16 @@ Runs a trace through the positioning engine and prints accuracy metrics as
 JSON. With --scenario the trace is simulated in memory first.
 
 options:
-  --filter NAME          pf, the only filter (kept for existing scripts)
+  --filter NAME          grid, the only filter (kept for existing scripts)
   --config FILE          JSON merge patch applied to the preset config
-  --set JSON             inline JSON merge patch, e.g. '{"pf":{"num_particles":500}}'
+  --set JSON             inline JSON merge patch, e.g. '{"filter":{"heading_bins":72}}'
   --warmup SECONDS       exclude the first seconds from error stats (default 5)
   --out FILE             per-truth-sample estimates CSV
   --track FILE           the estimate every 0.2 s of trace time, CSV (what the smoothness metrics use)
   --events FILE          room enter/exit events CSV, estimated and true (venues with rooms)
   --metrics FILE         write metrics JSON to a file as well
-  --particles FILE       particle snapshots CSV
-  --particles-every N    snapshot every N truth samples (default 5)
+  --cells FILE           snapshots of the posterior's heaviest cells, CSV
+  --cells-every N        snapshot every N truth samples (default 5)
   --print-config         print the effective engine config and exit
 )";
 
@@ -47,7 +47,7 @@ int main(int argc, char** argv) {
       return 0;
     }
 
-    auto cfg = ipe::eval::preset_config(args.get("filter", "pf"));
+    auto cfg = ipe::eval::preset_config(args.get("filter", "grid"));
     if (args.has("config")) ipe::eval::apply_config_overrides(cfg, read_file(args.get("config")));
     if (args.has("set")) ipe::eval::apply_config_overrides(cfg, args.get("set"));
     if (args.has("print-config")) {
@@ -70,16 +70,16 @@ int main(int argc, char** argv) {
 
     ipe::eval::ReplayOptions opts;
     opts.warmup_s = std::stod(args.get("warmup", "5"));
-    if (args.has("particles")) opts.particle_snapshot_every = std::stoi(args.get("particles-every", "5"));
+    if (args.has("cells")) opts.snapshot_every = std::stoi(args.get("cells-every", "5"));
 
     const auto result = ipe::eval::replay(venue, trace, cfg, opts);
     if (args.has("out")) ipe::eval::write_estimates_csv(args.get("out"), result);
     if (args.has("track")) ipe::eval::write_track_csv(args.get("track"), result);
-    if (args.has("particles")) ipe::eval::write_particles_csv(args.get("particles"), result);
+    if (args.has("cells")) ipe::eval::write_cells_csv(args.get("cells"), result);
     if (args.has("events")) ipe::eval::write_room_events_csv(args.get("events"), venue, result);
 
     auto metrics = nlohmann::json::parse(ipe::eval::metrics_to_json(result.metrics));
-    metrics["filter"] = args.get("filter", "pf");
+    metrics["filter"] = args.get("filter", "grid");
     metrics["venue"] = venue.name();
     if (auto it = trace.metadata.find("scenario"); it != trace.metadata.end()) metrics["scenario"] = it->second;
     const std::string text = metrics.dump(2);

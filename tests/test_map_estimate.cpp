@@ -14,10 +14,10 @@ Venue split_venue() {
     "walls": [[0,0,20,0],[20,0,20,10],[20,10,0,10],[0,10,0,0],[10,0,10,10]], "beacons": []})");
 }
 
-std::vector<Particle> cluster(Vec2 c, int n, double w, int level = 0) {
-  std::vector<Particle> out;
+std::vector<WeightedPoint> cluster(Vec2 c, int n, double w, int level = 0) {
+  std::vector<WeightedPoint> out;
   for (int i = 0; i < n; ++i) {
-    Particle p;
+    WeightedPoint p;
     p.pos = c + Vec2{0.1 * (i % 5), 0.1 * (i / 5)};
     p.weight = w;
     p.level = level;
@@ -26,7 +26,7 @@ std::vector<Particle> cluster(Vec2 c, int n, double w, int level = 0) {
   return out;
 }
 
-Vec2 weighted_mean(const std::vector<Particle>& ps) {
+Vec2 weighted_mean(const std::vector<WeightedPoint>& ps) {
   Vec2 m{};
   double w = 0.0;
   for (const auto& p : ps) {

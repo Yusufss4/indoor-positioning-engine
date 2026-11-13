@@ -519,7 +519,7 @@ void GridFilter::update_rssi(double t, std::span<const RssiReading> readings) {
     for (std::size_t c = 0; c < n; ++c) dev_var_[c] += walk2;
   }
   // The scan's nearest training scans as a kernel density over position and level, mixed with the uniform
-  // prior over the cells (as the particle filter's fingerprint likelihood). The model reads the same scan,
+  // prior over the cells. The model reads the same scan,
   // so it counts for less next to them.
   if (neighbour_count_ > 0) {
     for (std::size_t c = 0; c < n; ++c) loglik_[c] *= cfg_.fingerprint_model_weight;
@@ -805,7 +805,7 @@ void GridFilter::update_estimate(double t) {
   const double floor = kPointFloorRel * shown.max_mass;
   for (std::size_t c = begin; c < end; ++c) {
     if (mass_[c] <= 0.0 || mass_[c] < floor) continue;
-    Particle p;
+    WeightedPoint p;
     p.pos = {cx_[c], cy_[c]};
     p.weight = mass_[c];
     p.level = level;

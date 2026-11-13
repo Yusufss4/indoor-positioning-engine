@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-#include "ipe/grid_engine.hpp"
+#include "ipe/engine.hpp"
 #include "ipe/grid_filter.hpp"
 #include "ipe/rng.hpp"
 #include "ipe/rssi_model.hpp"
@@ -201,19 +201,18 @@ TEST(GridFilter, FloorPriorPullsTheMassToTheClassifiedLevel) {
   EXPECT_NEAR(std::log(odds(share[1]) / odds(share[0])), 5.0 * std::log(19.0), 1e-6);
 }
 
-TEST(GridEngine, FloorPriorFollowsTheEngineConfigUnlessSet) {
+TEST(GridFilter, LevelHysteresisOffReportsTheMostLikelyLevel) {
+  // With the hysteresis off, the reported level is the one holding the most mass after every update.
   const Venue v = test::two_level_venue();
-  EngineConfig base;
-  base.pf.floor_prior_weight = 3.0;
-  base.pf.floor_prior_k = 7;
   GridFilterConfig cfg;
+  cfg.level_smoothing_s = 0.0;
+  cfg.level_hysteresis = 0.0;
   auto map = std::make_shared<const GridMap>(v, cfg);
-  const GridEngine follows(v, map, base, cfg);
-  EXPECT_EQ(follows.filter().config().floor_prior_weight, 3.0);
-  EXPECT_EQ(follows.filter().config().floor_prior_k, 7);
-  cfg.floor_prior_weight = 0.0;
-  const GridEngine off(v, map, base, cfg);
-  EXPECT_EQ(off.filter().config().floor_prior_weight, 0.0);
+  GridFilter f(map, cfg, {});
+  for (int k = 0; k < 40; ++k) {
+    f.on_rssi(k * 0.1, static_cast<std::size_t>(k % 8), -70.0);
+    EXPECT_EQ(f.estimate().level, level_mass(f, 1) > 0.5 ? 1 : 0);
+  }
 }
 
 TEST(GridFilter, LearnsTheDeviceOffsetPerCell) {
@@ -404,11 +403,13 @@ TEST(GridFilter, IsDeterministic) {
   EXPECT_EQ(a.estimate().pos.y, b.estimate().pos.y);
 }
 
-TEST(GridEngine, RoomProbabilityIsTheMassInTheRoom) {
+TEST(Engine, RoomProbabilityIsTheMassInTheRoom) {
   const Venue v = test::two_room_venue_with_rooms();
   GridFilterConfig cfg;
   auto map = std::make_shared<const GridMap>(v, cfg);
-  GridEngine engine(v, map, EngineConfig{}, cfg);
+  EngineConfig engine_cfg;
+  engine_cfg.filter = cfg;
+  PositioningEngine engine(v, engine_cfg, map);
   const RssiModel model(v);
   const Vec2 p{4.0, 6.0};
   double t = 0.0;
@@ -427,11 +428,4 @@ TEST(GridEngine, RoomProbabilityIsTheMassInTheRoom) {
   ASSERT_NE(engine.room_tracker(), nullptr);
   EXPECT_NEAR(engine.room_tracker()->probabilities()[0], west, 1e-12);
   EXPECT_GT(west, 0.9);
-}
-
-TEST(GridConfig, RejectsUnknownKeys) {
-  GridFilterConfig cfg;
-  grid::apply_overrides(cfg, R"({"heading_bins": 72})");
-  EXPECT_EQ(cfg.heading_bins, 72);
-  EXPECT_THROW(grid::apply_overrides(cfg, R"({"heading_binz": 72})"), std::invalid_argument);
 }
