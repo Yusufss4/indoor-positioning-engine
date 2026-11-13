@@ -11,7 +11,7 @@
 #include <vector>
 
 #include "ipe/baro.hpp"
-#include "ipe/filter.hpp"
+#include "ipe/estimate.hpp"
 #include "ipe/grid_filter.hpp"
 #include "ipe/pdr.hpp"
 #include "ipe/rooms.hpp"
@@ -49,6 +49,12 @@ class PositioningEngine {
   PositioningEngine(const Venue& venue, EngineConfig cfg, std::shared_ptr<const GridMap> map);
 
   void on_imu(const ImuSample& sample);
+  /// A step from a motion model of your own, in place of the built-in step detector: feed these and no IMU
+  /// samples. `step.heading_delta` is the turn since the previous step; a valid `step.mag_heading` is
+  /// applied as an absolute heading with `mag_heading_sigma_deg`.
+  void on_step(const StepEvent& step);
+  /// An absolute heading [rad] with its standard deviation [rad], from any source.
+  void on_heading(double t, double heading, double sigma);
   void on_ble(double t, std::string_view beacon_id, double rssi);
   void on_ble(double t, std::size_t beacon_index, double rssi);
   /// One scan's readings; beacon indices outside the venue are dropped.
@@ -77,6 +83,7 @@ class PositioningEngine {
   [[nodiscard]] const RoomTracker* room_tracker() const { return rooms_ ? &*rooms_ : nullptr; }
 
  private:
+  void apply_step(const StepEvent& step);
   /// Feeds the filter's estimate after a non-step update to the smoother.
   void after_update(double t);
   void update_rooms(double t);

@@ -12,6 +12,7 @@
 #include "ipe/grid_filter.hpp"
 #include "ipe/rng.hpp"
 #include "ipe/rssi_model.hpp"
+#include "ipe/simulator.hpp"
 #include "test_util.hpp"
 
 using namespace ipe;
@@ -428,4 +429,31 @@ TEST(Engine, RoomProbabilityIsTheMassInTheRoom) {
   ASSERT_NE(engine.room_tracker(), nullptr);
   EXPECT_NEAR(engine.room_tracker()->probabilities()[0], west, 1e-12);
   EXPECT_GT(west, 0.9);
+}
+
+TEST(Engine, StepsFromOutsideGiveTheSameFilterStateAsTheBuiltInDetector) {
+  const auto sc = sim::load_scenario_file(test::data_path("scenarios/office_nominal.json"));
+  const Venue venue = load_venue_file(sc.venue_path);
+  const Trace trace = sim::simulate(sc, venue);
+  const EngineConfig cfg;
+  auto map = std::make_shared<const GridMap>(venue, cfg.filter);
+  PositioningEngine built_in(venue, cfg, map);
+  PositioningEngine fed(venue, cfg, map);
+  PdrProcessor pdr(cfg.pdr);  // stands in for a motion model of the caller's own
+  for (const ImuSample& sample : trace.imu) {
+    if (sample.t > 20.0) break;
+    built_in.on_imu(sample);
+    if (const auto step = pdr.process(sample)) fed.on_step(*step);
+  }
+  ASSERT_GT(fed.step_count(), 10u);
+  EXPECT_EQ(built_in.step_count(), fed.step_count());
+  for (std::size_t c = 0; c < map->size(); ++c) ASSERT_EQ(built_in.filter().mass()[c], fed.filter().mass()[c]);
+  EXPECT_EQ(built_in.raw_estimate().heading, fed.raw_estimate().heading);
+}
+
+TEST(Engine, AnAbsoluteHeadingTurnsTheHeadingDistribution) {
+  const Venue v = test::two_room_venue_with_rooms();
+  PositioningEngine engine(v, EngineConfig{});
+  engine.on_heading(1.0, 1.0, 0.1);
+  EXPECT_NEAR(engine.raw_estimate().heading, 1.0, 0.05);
 }

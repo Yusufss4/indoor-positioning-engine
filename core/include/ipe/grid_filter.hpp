@@ -11,7 +11,7 @@
 
 #include "ipe/baro.hpp"
 #include "ipe/beacon_integrity.hpp"
-#include "ipe/filter.hpp"
+#include "ipe/estimate.hpp"
 #include "ipe/fingerprint_map.hpp"
 #include "ipe/floor_classifier.hpp"
 #include "ipe/level_selector.hpp"
@@ -19,7 +19,6 @@
 #include "ipe/pdr.hpp"
 #include "ipe/rssi_model.hpp"
 #include "ipe/venue.hpp"
-#include "ipe/weighted_point.hpp"
 
 namespace ipe {
 
