@@ -11,9 +11,14 @@ WebAssembly, running in your browser.
 ![a recorded mall walk replayed through the engine](docs/img/demo.gif)
 
 A real walk through a shopping mall, replayed as the live demo draws it. Black squares are the points a
-surveyor tapped (the only ground truth), the green dot and line are the engine's estimate, the green
-shading is where it holds probability, and the purple dots are Wi-Fi access points. This walk ends with a
-median error of 3.0 m; the ten mall walks in the demo have a median of 5.3 m.
+surveyor tapped (the ground truth), the green dot and line are the engine's estimate, the green shading is
+where it holds probability, and the purple dots are Wi-Fi access points. Median error on this walk: 3.0 m.
+
+![a walk through a seven-floor building in the 3D view](docs/img/demo_3d.gif)
+
+The 3D view following a simulated walk through a seven-floor university building imported from
+OpenStreetMap: up a stairwell, across a floor, and down in a lift. The black marker is the walker, the
+green one the engine's estimate, and the lines are their paths.
 
 ## How it works
 
@@ -35,14 +40,11 @@ median error of 3.0 m; the ten mall walks in the demo have a median of 5.3 m.
 |---|---|---|
 | Simulated scenarios | 12 walks with injected faults (moved beacons, magnetic anomalies, weather drift, stairs and lifts), 10 seeds each | mean CEP50 0.66 m, CEP95 1.83 m; right floor 98–99% |
 | [Microsoft Indoor Location](https://github.com/location-competition/indoor-location-competition-20) sample | 2 shopping malls, 14 floors, phone IMU + Wi-Fi; 109 held-out walks | median CEP50 5.2 m, CEP95 8.9 m |
-| [IPIN competition](https://evaal.isti.cnr.it/) Track 3 | 2 buildings with stairs and barometer data; the competition's 6 scoring walks and its metric | 5.0–8.6 m per walk, right floor 94–97%. Winners: 5.3 m (2023), 7.9 m (2024), 30.1 m (2022) |
-| [Kaggle Indoor Location & Navigation](https://www.kaggle.com/competitions/indoor-location-navigation) | 626 test walks in 24 buildings, scored by Kaggle | 5.30 m, with offline post-processing. Winner: 1.50 m |
+| [IPIN competition](https://evaal.isti.cnr.it/) Track 3 | 2 buildings with stairs and barometer data; the competition's 6 scoring walks and its metric | 5.0–8.6 m per walk, right floor 94–97% |
+| [Kaggle Indoor Location & Navigation](https://www.kaggle.com/competitions/indoor-location-navigation) | 626 test walks in 24 buildings, scored by Kaggle | 5.30 m, with offline post-processing |
 
 - CEP50 and CEP95 are the median and the 95th percentile of the horizontal error.
 - Settings are chosen on separate tuning walks; the numbers above are from held-out walks replayed once.
-- Simulation is optimistic: real errors are about ten times the simulated office's.
-- The engine reaches the IPIN winners' range and stays far behind the Kaggle winners, who learn the
-  phone's motion with neural networks and optimise each walk as a whole.
 
 Method, per-dataset tables and how to reproduce them: [docs/datasets.md](docs/datasets.md).
 
@@ -95,25 +97,13 @@ emcmake cmake -S . -B build-wasm -DCMAKE_BUILD_TYPE=Release && cmake --build bui
 python3 -m http.server -d build-wasm/site 8000      # open http://localhost:8000
 ```
 
-## Repository layout
+## Documentation
 
-```
-core/      the engine: steps, grid filter, radio and barometer models, room events, venue and trace files
-sim/       scenario -> simulated sensor trace with ground truth
-eval/      replay, metrics, comparison against the accuracy baselines
-geo/       GeoJSON import and export
-tools/     ipe-sim, ipe-replay, ipe-regress, ipe-import
-examples/  the engine as a library
-web/       WebAssembly bindings and the browser demo (2D canvas, 3D MapLibre view)
-datasets/  download and conversion scripts for the real datasets, and their evaluation
-data/      venues, scenarios, config patches, demo recordings
-tests/     unit tests and the accuracy baselines
-viz/       figures and the demo GIF
-docs/      design, file formats, datasets and results, how to extend, history
-```
-
-To add a sensor, a setting, a motion model or a dataset, start at
-[docs/extending.md](docs/extending.md). [AGENTS.md](AGENTS.md) has the rules for evaluating a change.
+- [Design](docs/design.md): how the engine works.
+- [Datasets and results](docs/datasets.md): the data, the method and every table.
+- [File formats](docs/formats.md): venues, traces, scenarios, settings, tool output.
+- [Extending](docs/extending.md): adding a sensor, a setting, a motion model or a dataset.
+- [History](docs/history.md): what was tried and why the engine is the way it is.
 
 ## License
 
