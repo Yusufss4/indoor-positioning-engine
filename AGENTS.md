@@ -4,9 +4,10 @@ Instructions for AI coding agents (Claude Code, Codex, Cursor) working in this r
 
 ## What this is
 
-A C++20 indoor positioning engine: pedestrian dead reckoning plus BLE RSSI, fused by a map-aware particle
-filter (the engine's only filter). A deterministic simulator produces traces with ground
-truth; a replay tool and a regression suite measure accuracy.
+A C++20 indoor positioning engine: pedestrian dead reckoning plus BLE / Wi-Fi RSSI and a barometer, fused
+by a map-aware grid filter (the engine's only filter: the posterior on a lattice of the venue's walkable
+cells, no random numbers). A deterministic simulator produces traces with ground truth; a replay tool and
+a regression suite measure accuracy.
 
 ## Layout
 
@@ -14,25 +15,20 @@ truth; a replay tool and a regression suite measure accuracy.
   [docs/design.md](docs/design.md#where-things-live) maps each concern to its file and lists the steps
   for adding a sensor.
 - `sim/` - scenario JSON to synthetic trace (IMU, BLE, barometer, ground truth).
-- `eval/` - the `pf` preset, config overrides, replay runner, metrics, regression comparison.
+- `eval/` - the `grid` preset, config overrides, replay runner, metrics, regression comparison.
 - `geo/` - GeoJSON / IMDF import and export (`ipe_geo`); native tooling only, not linked by the engine.
 - `plan/` - beacon placement analysis (`ipe_plan`): coverage, Cramer-Rao bound and floor margin of a
  beacon layout from the map and RSSI model; native tooling only. `viz/placement_study.py` checks the
  scores against simulated CEP on thinned layouts.
-- `grid/` - a grid Bayes filter prototype (`ipe_grid`, [docs/grid.md](docs/grid.md)): the posterior on a lattice of
-  map cells instead of particles, with `GridEngine` running it through the engine's PDR, smoother and room events.
-  The engine and the baselines do not use it; the web demo runs it instead of the particle filter (`web/worker.js`).
-  Its floor prior follows the engine config's `pf.floor_prior_*` unless `--grid-set` overrides it. `ipe-grid
-  compare` replays the same traces through `pf` and the grid filter (eval's `BenchmarkOptions::estimators`).
-- `tools/` - `ipe-sim`, `ipe-replay`, `ipe-regress`, `ipe-import`, `ipe-plan`, `ipe-grid`.
+- `tools/` - `ipe-sim`, `ipe-replay`, `ipe-regress`, `ipe-import`, `ipe-plan`.
 - `tests/` - GoogleTest unit tests and the `accuracy_regression` CTest.
 - `data/venues`, `data/scenarios` - inputs. `tests/regression/baseline.json` - accepted accuracy.
 - `data/geojson`, `data/imdf` - generated from `data/venues` by `ipe-import`; a unit test fails when they
   are stale. `data/mappings` - GeoJSON property mapping tables.
-- `data/configs` - engine config patches for `--config` (e.g. `open_venue.json`, `msil_wifi.json`, `ipin.json`
-  = `msil_wifi.json` plus the opt-in floor model and slab-loss calibration, see [docs/ipin.md](docs/ipin.md#floor-model);
-  `fingerprint.json` = `ipin.json` plus the fingerprint likelihood, for venues converted with fingerprint
-  positions, see [docs/benchmarks.md](docs/benchmarks.md)).
+- `data/configs` - engine config patches for `--config`: `msil_wifi.json` (Wi-Fi), `ipin.json` (plus the
+  k-NN floor prior) and `fingerprint.json` (plus the fingerprint likelihood, for venues converted with
+  fingerprint positions, see [docs/benchmarks.md](docs/benchmarks.md)). The filter's settings are the
+  `filter` section.
 - `datasets/msil` - fetch and convert scripts for the Microsoft Indoor Location sample. The raw data and
   the converted `out/` (readings one by one) and `out_scans/` (`--scans`, one batch per Wi-Fi scan) are
   git-ignored; `tests/regression/msil_baseline.json` gates the held-out walks of `out_scans/`.
@@ -46,7 +42,8 @@ truth; a replay tool and a regression suite measure accuracy.
 - `datasets/ipin` - IPIN competition Track 3 packages (2022 UMinho, 2023/2024 Nuremberg, CC BY) to venues and
   traces ([docs/ipin.md](docs/ipin.md)). Walls are extracted from the floor plans (`maps.py`) and corrected
   in `edits/<site>.json` (stairs, lifts, footprints). The venues are committed in `data/ipin/`; raw data and
-  `out_scans/` are git-ignored. `tests/regression/ipin_baseline.json` gates the scoring walks
+  `out_scans/` and `out_fp/` (with fingerprint positions) are git-ignored.
+  `tests/regression/ipin_baseline.json` gates the scoring walks of `out_fp/` with `fingerprint.json`
   (`ipin_regression`, label `realdata`). Settings are chosen on `manifest_tune.json` (validation walks)
   only. `evaluate.py` adds floor hit rate and the competition metric.
 - `datasets/kaggle` - the full Kaggle "Indoor Location & Navigation" set (204 buildings; MSIL is its public
@@ -70,11 +67,12 @@ truth; a replay tool and a regression suite measure accuracy.
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ctest --test-dir build -LE regression --output-on-failure   # unit tests, ~1 s
-ctest --test-dir build -L regression --output-on-failure    # accuracy gate, ~3 s
+ctest --test-dir build -L regression --output-on-failure    # accuracy gate, ~40 s
 ```
 
-`-L regression` also runs `real_data_regression` (label `realdata`), which is skipped unless
-`datasets/msil/out_scans/` exists (see [docs/real_data.md](docs/real_data.md)). Settings for real data are
+`-L regression` also runs `real_data_regression` and `ipin_regression` (label `realdata`, about 9 minutes
+together), which are skipped unless `datasets/msil/out_scans/` and `datasets/ipin/out_fp/` exist (see
+[docs/real_data.md](docs/real_data.md), [docs/benchmarks.md](docs/benchmarks.md#reproduce)). Settings for real data are
 chosen on `manifest_tune.json` only; `manifest_holdout.json` is for reporting, not for tuning.
 
 Sanitizers: `-DIPE_SANITIZE=address,undefined` with `CMAKE_BUILD_TYPE=Debug`.
@@ -82,20 +80,23 @@ Sanitizers: `-DIPE_SANITIZE=address,undefined` with `CMAKE_BUILD_TYPE=Debug`.
 ## Rules
 
 1. **Accuracy claims need numbers.** Any change that touches `core/` must be evaluated with
-   `ipe-regress --no-baseline --seeds 10` before and after, and the summary must quote both. A single seed
-   is noise; do not tune on one run.
+   `ipe-regress --no-baseline --seeds 10` before and after, and the summary must quote both. The filter is
+   deterministic, so the seeds are the simulator's: ten different walks of each scenario. One walk is
+   noise; do not tune on one run.
 2. **Never update `tests/regression/baseline.json` to make CI pass** unless the change is an intentional
    accuracy trade-off and the PR description explains which scenarios got worse and why.
 3. **Do not edit scenarios to flatter the filter.** Scenarios encode real-world failure modes; if one looks
    wrong, say so instead of changing it. Every scenario must keep `wall_violations == 0`
    (`ipe-sim` exits 3 otherwise).
-4. **Determinism matters.** All randomness goes through `ipe::Rng`; never use `std::*_distribution`
-   (implementation-defined across standard libraries, would break the WASM build and the baseline).
+4. **Determinism matters.** The filter draws no random numbers, and must not start to. The simulator's
+   randomness goes through `ipe::Rng`; never use `std::*_distribution` (implementation-defined across
+   standard libraries, would break the WASM build and the baseline).
 5. **Separate model limitations from data problems.** Before changing the filter, check whether the error
    comes from the sensor model (e.g. walls not modelled, step length scale) or from the data
    (dead/moved beacons, magnetic anomalies). The scenario descriptions say which effect each one injects.
-6. Keep `core/` free of platform code, allocation in hot loops, and global state. Particle updates are
-   O(N) per measurement; keep them that way.
+6. Keep `core/` free of platform code, allocation in hot loops, and global state. A radio update is
+   O(cells) and a step O(cells x heading bins); keep them that way, and quote `--serial` timings for any
+   change to those loops (compute is this filter's cost, see [docs/grid.md](docs/grid.md#cost)).
 7. Config fields are exposed through `NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT` in
    `eval/src/eval.cpp`. A new config field must be added there or `--set` overrides will not reach it.
 8. Format with `clang-format-18` (CI enforces it).
@@ -108,7 +109,7 @@ Sanitizers: `-DIPE_SANITIZE=address,undefined` with `CMAKE_BUILD_TYPE=Debug`.
 
 # A/B experiment across all scenarios
 ./build/tools/ipe-regress --scenarios data/scenarios --no-baseline --seeds 10 \
-    --set '{"pf":{"beacon_integrity":false}}'
+    --set '{"filter":{"beacon_integrity":false}}'
 
 # Effective config of a preset
 ./build/tools/ipe-replay --print-config

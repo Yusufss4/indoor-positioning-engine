@@ -3,6 +3,14 @@
 Each entry: the observation, the hypothesis, the change, and the measured effect across all scenarios.
 Numbers are means over seeds (`ipe-regress --no-baseline --seeds N`).
 
+**Read this first.** Experiments 2 to 15 were run on a particle filter, which was the engine until
+experiment 16 replaced it with the grid filter of experiment 14. They are kept as the record of how the
+models, the map handling and the metrics got here, and most of their findings carry over because the two
+filters share those. What does not exist any more: every `pf.*` setting, the `pf` preset, `ipe-grid`, the
+beacon-ring proposals (4, 9), augmented-MCL recovery as the particle filter had it (2), the online loss
+calibration (10) and the barometer jump ([ipin.md](ipin.md#floor-model)). The commands in those entries
+ran on the code of their time.
+
 ## 2. Moved beacon hijacking the particle filter (`office_field_issue`)
 
 **Observation.** The particle filter's CEP95 on this scenario was 5.41 m (5 seeds), with a 17 m error
@@ -1053,19 +1061,97 @@ of the test walks score 8.92 m (before) and 5.31 m on the private leaderboard, a
 relative motion from the sensors. The engine's offline mode here is two causal passes, forwards and
 backwards, combined.
 
+## 16. One filter: the grid filter becomes the engine
+
+**Question.** The engine carried two filters: the particle filter that the tools and gates ran, and the
+grid filter of experiment 14 that the web demo ran. Experiment 14 left the grid as a prototype because of
+its compute on mall floors. With fingerprints (experiment 15) both got better. Is one of them enough?
+
+**Check on the mall floors**, the one place where the grid had not been clearly better. MSIL sample, tune
+half, 111 walks, `fingerprint.json`, every waypoint scored (gaps filled):
+
+| | Particle filter (3 seeds) | Grid filter |
+|---|---:|---:|
+| Kaggle metric [m] | 8.70 | 8.76 |
+| Median CEP50 / CEP95 [m] | 5.44 / 10.70 | 5.49 / 10.26 |
+| Walks on which it is the better one | 57 | 54 |
+| One walk on one desktop core, share of its duration | 0–9% | 3–60% |
+
+A tie on accuracy. The grid's time includes building the lattice (0.3 s) and the wall counts per access
+point, which dominate a 3 s walk.
+
+**Everywhere else the grid was already better.** Synthetic scenarios, 10 seeds, particle filter → grid
+(`ipe-regress --no-baseline --seeds 10`, before and after the switch):
+
+| Scenario | CEP50 [m] | CEP95 [m] | Converged [s] | Coverage95 | Jitter p95 [m] | Jumps/min | Through walls/min | Floor ok |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| airport_hall_sparse | 1.21 → 1.01 | 5.95 → 3.76 | 35.9 → 34.5 | 73% → 68% | 0.29 → 0.20 | 0.7 → 0.2 | 0.31 → 0.05 | - |
+| baro_drift_long | 0.62 → 0.54 | 1.95 → 1.42 | 13.3 → 1.0 | 87% → 78% | 0.39 → 0.28 | 1.3 → 0.6 | 1.15 → 0.17 | 99.1% → 99.2% |
+| kit_tour | 0.74 → 0.65 | 6.58 → 2.67 | 8.0 → 0.7 | 76% → 65% | 0.35 → 0.26 | 1.4 → 0.9 | 1.13 → 1.19 | 98.9% → 99.0% |
+| office_device_offset | 0.74 → 0.49 | 2.03 → 1.15 | 5.7 → 5.2 | 83% → 92% | 0.36 → 0.31 | 0.4 → 0.1 | 1.22 → 0.73 | - |
+| office_elevator | 0.58 → 0.54 | 1.70 → 1.28 | 1.3 → 2.5 | 91% → 76% | 0.40 → 0.22 | 1.7 → 0.9 | 1.24 → 0.12 | 99.0% → 99.0% |
+| office_field_issue | 0.70 → 0.56 | 1.95 → 1.68 | 2.5 → 5.7 | 86% → 83% | 0.44 → 0.30 | 0.4 → 0.1 | 1.13 → 0.49 | - |
+| office_floor_bleed | 0.88 → 0.68 | 3.87 → 1.50 | 8.0 → 1.8 | 80% → 66% | 1.79 → 0.32 | 3.6 → 1.0 | 5.51 → 0.52 | 96.6% → 97.9% |
+| office_mag_disturbance | 1.14 → 0.94 | 2.71 → 2.65 | 3.8 → 6.1 | 63% → 53% | 0.49 → 0.37 | 0.8 → 0.3 | 2.80 → 2.60 | - |
+| office_nlos_heavy | 0.64 → 0.57 | 1.83 → 1.28 | 2.7 → 3.8 | 91% → 84% | 0.35 → 0.29 | 0.4 → 0.0 | 0.93 → 0.34 | - |
+| office_nominal | 0.64 → 0.55 | 1.56 → 1.14 | 1.7 → 2.2 | 88% → 85% | 0.35 → 0.29 | 0.1 → 0.0 | 0.64 → 0.39 | - |
+| office_stairs_up_down | 0.78 → 0.58 | 3.24 → 1.63 | 11.1 → 1.2 | 79% → 75% | 0.46 → 0.30 | 1.9 → 0.8 | 2.01 → 0.08 | 98.9% → 99.1% |
+| office_step_scale | 0.73 → 0.78 | 1.88 → 1.77 | 2.1 → 3.3 | 83% → 62% | 0.34 → 0.28 | 0.0 → 0.0 | 1.00 → 0.78 | - |
+| **mean** | 0.78 → 0.66 | 2.94 → 1.83 | 8.0 → 5.7 | | 0.50 → 0.29 | 1.06 → 0.41 | 1.59 → 0.62 | |
+
+Real walks, held out:
+
+| Data | Particle filter | Grid filter |
+|---|---|---|
+| IPIN scoring walks, `fingerprint.json`: competition p75 per trial [m] | 6.3, 6.6, 8.9, 6.7, 10.0, 11.0 (5 seeds) | 6.6, 5.1, 8.6, 5.0, 7.7, 6.8 |
+| the same: floor right | 90–97% | 94–97% |
+| MSIL, 109 walks, `msil_wifi.json`: median CEP50 / CEP95 (mean) [m] | 7.34 / 9.46 (11.71 / 15.67) | 6.76 / 9.41 (10.79 / 14.40) |
+
+**Change.** The particle filter is removed. `PositioningEngine` runs the grid filter, which moved from
+`grid/` into `core/`; its settings are the `filter` section of the config, in place of `pf`. `ipe-grid` is
+gone: `ipe-replay` and `ipe-regress` run the engine, and the regression runner builds one lattice per
+venue and shares it between replays. `evaluate.py` lost `--seeds` and `--tool`: a walk is replayed once.
+All three baselines were regenerated for the preset `grid`, and the IPIN gate now runs `fingerprint.json`
+on the venues with fingerprint positions.
+
+**What got worse.**
+- **`office_step_scale`**: CEP50 0.73 → 0.78 m. The grid has no per-user step scale; a wider along-track
+  noise stands in for it (experiment 14).
+- **Convergence** is 0.5–3.2 s later on five single-floor offices (2.5 → 5.7 s on `office_field_issue`)
+  and on `office_elevator`. The other four multi-floor walks converge 6–12 s sooner.
+- **Coverage95** falls on 11 of 12 scenarios (82% → 74% on average, 62% on `office_step_scale`): the
+  reported ellipse is tighter than the errors. On the real walks of the gates it is 13–21%.
+- **MSIL per floor**: median CEP95 is more than 10% worse on site2_F4 (one walk); median CEP50 on site2_F2
+  (two walks) and site2_F4.
+- **Compute.** About 25 times the particle filter on a mall floor. The synthetic gate takes 40 s instead of
+  4 s; the two real-data gates about 9 minutes together.
+- **Gone with the particle filter**: the barometer-driven move to the nearest stairs, the kept barometer
+  reference for re-seeds and the online slab-loss calibration. The grid reached better floor accuracy on
+  the IPIN walks without them, through the floor vote and the fingerprints' levels.
+
+**What got simpler.** No seed and no seed noise: every A/B comparison of a recorded walk is exact, and a
+gate's baseline is a number, not a distribution. No start proposal and no rule for when to use it, no
+injection of recovery hypotheses, no re-seeding, no rejection sampling around closed rooms. About 1,200
+lines of filter code and 780 lines of its tests are gone.
+
 ## Open questions
 
-- A Wi-Fi scan can still move the whole cloud across a wall into a large region next to the walker's (a
-  parallel corridor), where it lasts longer than in a closed room (experiment 13). Forbidding injections
-  across walls blocks the escape from a wrong corridor that recovery is for. A likelihood that does not
-  treat a scan's readings as independent would attack the cause.
-- The beacon-driven init proposal is now chosen by particle density (experiment 9), but venues between
-  0.6 and 1 particle per m^2 are where it is mixed. A wall-aware ring (rejection sampling against the
-  full likelihood) might remove the office cost and let it be on everywhere.
-- A wider BLE likelihood (sigma 7 dB) improves 9 of 12 simulated scenarios, but the two-floor walks then
-  take twice as long to lock on (experiment 12). If the floor decision could be kept sharp while the
-  horizontal update is softened, the gain might be had without the cost.
+- **Compute on large floors.** The filter touches every cell at every update. A sparse active set (cells
+  below a mass floor left alone) saved nothing on Wi-Fi, where most cells stay above any useful floor
+  (experiment 14). Coarser cells away from the mass, or a hierarchy, are untried.
+- **Uncertainty.** Coverage95 is 53–92% on the simulated walks and under a quarter on real Wi-Fi. The
+  model counts a scan's readings and consecutive packets as independent. Tempering a scan made the spread
+  honest and cost accuracy at every setting tried ([real_data.md](real_data.md#scans-as-one-update)); the
+  fingerprint likelihood has the same problem in a different place.
+- **Stairs taken away from the estimate.** Mass changes level only inside a connector. A
+  barometer-driven move to the nearest stairs helped the particle filter on IPIN; the grid has no such
+  step ([grid.md](grid.md#updates)).
+- **A per-user step length.** A three-value scale state fixed `office_step_scale` and cost most other
+  offices (experiment 14).
+- **Whole-walk optimisation for offline use.** Two causal passes, forwards and backwards, are what the
+  Kaggle numbers use; a grid makes an exact forward-backward smoother possible, at the cost of keeping
+  every step's posterior ([benchmarks.md](benchmarks.md#what-the-winners-do-that-the-engine-does-not)).
 - `office_nlos_heavy`: the wall-aware model assumes 3.5 dB per wall while the truth is 7 dB. Learning the
-  wall loss online failed both as a particle state and as a venue-wide calibration (experiment 10); the
-  device offset and the wall loss trade off too easily. Per-wall-type losses from the map are the
+  wall loss online failed both as a per-hypothesis state and as a venue-wide calibration (experiment 10);
+  the device offset and the wall loss trade off too easily. Per-wall-type losses from the map are the
   alternative.

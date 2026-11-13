@@ -11,6 +11,12 @@ simulated accuracy cannot show whether that model is right. The UJI BLE database
 This page checks the engine's RSSI parameters against it, replays the fingerprints through the
 unchanged engine, and compares `ipe-plan`'s map-only scores with what was measured.
 
+**The engine today.** The replay table below was measured with the particle filter the engine had before
+(removed in experiment 16 of [experiments.md](experiments.md)). The grid filter that replaced it gives a
+median CEP50 / CEP95 of 1.72 / 2.89 m over the same 282 held-out sessions, against the particle filter's
+1.78 / 3.27 m (experiment 14). The radio model study and the `ipe-plan` comparison do not depend on the
+filter.
+
 **Summary.**
 - The 5 dB spread the engine assumes matches the data: 4.5–6.2 dB.
 - An obstacle edge costs about 1 dB, not 3–3.5.
@@ -154,8 +160,8 @@ surveyed beacons. There is no 3D view and no plan image: the database gives loca
 datasets/uji_ble/fetch.sh
 .venv/bin/python datasets/uji_ble/study.py --figures viz/output/uji_ble
 .venv/bin/python datasets/uji_ble/convert.py          # data/uji_ble/*.json and datasets/uji_ble/out/
-.venv/bin/python datasets/ipin/evaluate.py datasets/uji_ble/out/manifest_holdout.json --warmup 0 --seeds 3
-.venv/bin/python datasets/ipin/evaluate.py datasets/uji_ble/out/manifest.json --warmup 0 --seeds 3 \
+.venv/bin/python datasets/ipin/evaluate.py datasets/uji_ble/out/manifest_holdout.json --warmup 0
+.venv/bin/python datasets/ipin/evaluate.py datasets/uji_ble/out/manifest.json --warmup 0 \
     --json datasets/uji_ble/out/replay.json --quiet
 .venv/bin/python datasets/uji_ble/plan_check.py --replay datasets/uji_ble/out/replay.json
 ```

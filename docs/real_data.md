@@ -15,10 +15,18 @@ points counted up to six times, a uniform start over very large floors, and one 
 reading instead of per scan. Its uncertainty is still far too small: the 95% ellipse holds the truth
 for under a fifth of the fixes in a typical walk.
 
-**Update: the competition's own metric.** This page reports CEP per walk for the log-distance model.
-[benchmarks.md](benchmarks.md#kaggle-indoor-location--navigation-2021) scores the same walks, and the full
-204-building Kaggle set, with the competition's metric, and adds position fingerprints and offline
-post-processing.
+**The engine today.** The engine's filter is now the grid filter ([grid.md](grid.md)). On the 109 held-out
+walks it reaches a median CEP50 / CEP95 of 6.8 / 9.4 m with the Wi-Fi config (mean 10.8 / 14.4 m), and
+5.2 / 8.9 m (mean 7.4 / 10.6 m) with the training scans as position fingerprints (`data/configs/fingerprint.json`, venues from
+`convert.py --fingerprints`). `tests/regression/msil_baseline.json` gates the first of these.
+[benchmarks.md](benchmarks.md#kaggle-indoor-location--navigation-2021) scores the same data, and the full
+204-building Kaggle set, with the competition's own metric.
+
+**The rest of this page is the record of the conversion and of the work with the particle filter the
+engine had before** (removed in experiment 16 of [experiments.md](experiments.md)). The data handling,
+the scan batching, the shop-wall study and the failure modes still apply; the accuracy tables are the
+particle filter's, and its settings named here (particle count, init and recovery proposals) no longer
+exist. `msil_wifi.json` today sets the RSSI sigma and the cap on drawn corrections.
 
 ## Data
 

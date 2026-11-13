@@ -69,15 +69,15 @@ def main() -> int:
 
         est, _ = replay(build, "office_field_issue", "grid", work)
         field = {"grid": ipeviz.Estimates.load(est)}
-        old, _ = replay(build, "office_field_issue", "grid", work, tag="without-integrity",
-                        patch='{"filter":{"beacon_integrity":false}}')
+        old, _ = replay(build, "office_field_issue", "grid", work, tag="recovery-1e-3",
+                        patch='{"filter":{"teleport_rate_per_s":0.001}}')
         field_cmp = {"before": ipeviz.Estimates.load(old), "after": field["grid"]}
         highlight = {"C2": "#bbbbbb", "N3": "#bbbbbb", "S3": "#e377c2"}
         ipeviz.plot_trajectories(office, field, out / "field_issue_trajectories.png",
                                  "office_field_issue: C2/N3 dead (grey), S3 installed 16 m from its map position",
                                  highlight=highlight)
         ipeviz.plot_error_over_time(field_cmp, out / "field_issue_before_after.png",
-                                    "office_field_issue: without and with the beacon integrity monitor",
+                                    "office_field_issue: uniform recovery mass at 1e-3 per second (before) and 1e-8 (after)",
                                     colors={"before": "#ff7f0e", "after": "#d62728"})
 
     if not args.skip_benchmark:

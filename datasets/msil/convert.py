@@ -436,7 +436,7 @@ def convert_floor(site: str, floor_name: str, floor_dir: Path, paths: list[PathD
     report["door_centres"] = [[round(float(v), 2) for v in c] for c in door_centres]
 
     # Ground truth vs map: a surveyor path that crosses a wall means that wall set would kill
-    # the true hypothesis in the particle filter.
+    # the true hypothesis in the filter.
     wp_inside = wp_total = 0
     test_ids = {p.path_id for p in test}
     cross = {k: 0 for k in wall_sets}

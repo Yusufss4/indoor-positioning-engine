@@ -5,7 +5,24 @@ on one floor. The IPIN competition's smartphone track (Track 3, off-site) fills 
 cross floors on stairs, half of its phones log pressure, and its packages include georeferenced floor
 plans. This page replays two of its buildings through the engine.
 
-**Summary.** On the competition's scoring walks the particle filter, with the MSIL Wi-Fi settings
+**The engine today.** The engine's filter is now the grid filter ([grid.md](grid.md)), and with the
+training scans as position fingerprints it is in the range of the competition's winners. Scoring walks,
+replayed once with settings chosen on the validation walks (median over a building's trials):
+
+| Config | Nuremberg: CEP50 [m], floor right, competition p75 [m] | UMinho: the same |
+|---|---|---|
+| `ipin.json` (log-distance radio model, k-NN floor vote) | 7.5, 83%, 18.0 | 10.1, 84%, 25.0 |
+| `fingerprint.json` (plus position fingerprints) | 3.6, 96%, 5.9 | 4.7, 96%, 7.3 |
+
+[benchmarks.md](benchmarks.md) sets this against the leaderboards and has the method.
+
+**The rest of this page is the record of how the data was converted and of the work with the particle
+filter the engine had before** (removed in experiment 16 of [experiments.md](experiments.md)). The
+conversion, the map checks and the failure modes still apply. The accuracy tables below are the particle
+filter's, and the `pf.*` settings they name (the barometer jump, the kept barometer reference, the slab
+loss calibration) no longer exist; of the old floor model the grid filter has the k-NN floor vote.
+
+**Summary of that work.** On the competition's scoring walks the particle filter, with the MSIL Wi-Fi settings
 unchanged, reaches:
 - Nuremberg (4 walks): median CEP50 7.6 m, floor right 76% of the time;
 - UMinho (2 walks): median CEP50 13.5 m, floor right 64% of the time.
@@ -20,12 +37,6 @@ filter loses the floor in two ways:
 
 The data also exposed a gap in the venue model. Nuremberg's floor −1 is only a stair landing, so venue
 levels now take their own `footprint` ([formats.md](formats.md#several-floors)).
-
-**Update: position fingerprints.** The numbers above and in the sections below are the log-distance
-radio model's. With the training scans' positions in the venue and `data/configs/fingerprint.json`, the
-competition metric on the scoring walks falls from 15–42 m to 6–11 m per walk, and the floor is right for
-90–97% of the landmarks. That is the range of the competition's winners; the comparison, the method and
-what remains are in [benchmarks.md](benchmarks.md).
 
 An opt-in floor model, `data/configs/ipin.json`, targets both failure modes (see [Floor model](#floor-model)).
 On the validation walks it raises the floor hit rate:
@@ -263,8 +274,9 @@ in, and both are shifted to start at 0.
 ## Reproduce
 
 `--positions --unmodelled --out datasets/ipin/out_fp` instead of `--out datasets/ipin/out_scans --data
-data/ipin` writes the venues for the fingerprint likelihood ([benchmarks.md](benchmarks.md#reproduce));
-the committed venues in `data/ipin/` and the regression gate do not use it.
+data/ipin` writes the venues for the fingerprint likelihood ([benchmarks.md](benchmarks.md#reproduce)).
+`ipin_regression` gates the scoring walks of `out_fp` with `fingerprint.json`; the committed venues in
+`data/ipin/` are the ones without positions.
 
 ```bash
 datasets/ipin/fetch.sh
@@ -272,7 +284,7 @@ datasets/ipin/fetch.sh
 .venv/bin/python datasets/ipin/convert.py --wifi --scans --fingerprints --debug --out datasets/ipin/out_scans \
     --data data/ipin
 .venv/bin/python datasets/ipin/evaluate.py datasets/ipin/out_scans/manifest_tune.json \
-    --config data/configs/msil_wifi.json --seeds 5   # or data/configs/ipin.json
+    --config data/configs/ipin.json                  # or data/configs/fingerprint.json on out_fp
 ctest --test-dir build -R ipin_regression --output-on-failure
 .venv/bin/python datasets/ipin/export_demo.py   # data/real_ipin/ for the web demo
 ```

@@ -174,10 +174,10 @@ def plot_benchmark(results: dict, out: str | Path, metric: str = "cep95_m") -> N
     plt.close(fig)
 
 
-def animate_cells(venue: Venue, est: Estimates, particles: dict[float, np.ndarray], out: str | Path,
+def animate_cells(venue: Venue, est: Estimates, cells: dict[float, np.ndarray], out: str | Path,
                       t_max: float | None = None, fps: int = 10, title: str = "") -> None:
-    """GIF of the particle cloud, estimate and ground truth over time."""
-    times = sorted(t for t in particles if t_max is None or t <= t_max)
+    """GIF of the posterior's heaviest cells, the estimate and the ground truth over time."""
+    times = sorted(t for t in cells if t_max is None or t <= t_max)
     fig, ax = plt.subplots(figsize=(8, 5.2))
     draw_venue(ax, venue, beacon_labels=False)
     cloud = ax.scatter([], [], s=3, color=COLORS["grid"], alpha=0.35, zorder=2)
@@ -193,7 +193,7 @@ def animate_cells(venue: Venue, est: Estimates, particles: dict[float, np.ndarra
 
     def frame(k: int):
         t = times[k]
-        p = particles[t]
+        p = cells[t]
         cloud.set_offsets(p[:, :2])
         idx = int(np.searchsorted(est.t, t))
         idx = min(idx, len(est.t) - 1)

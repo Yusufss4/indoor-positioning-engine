@@ -13,7 +13,7 @@
 ```
 
 - Units are metres in a local east-north frame (x east, y north).
-- Walls are line segments; they block pedestrians (particle-filter motion constraint) and attenuate radio by
+- Walls are line segments; they block pedestrians (the filter's motion constraint) and attenuate radio by
   `wall_attenuation_db` each in the map-aware RSSI model.
 - `tx_power` is the expected RSSI at 1 m. `path_loss_exp` is the log-distance exponent. These are the
   *surveyed* values; scenarios can make the real ones differ.
@@ -50,27 +50,25 @@ Instead of top-level `walls`, a multi-floor venue has `levels`, and may add `con
 - `elevation_m` defaults to `ordinal * height_m`; `height_m` defaults to 4. Only elevation differences
   matter to the engine (barometer, 3D radio distance); `height_m` is also used for rendering.
 - `floor_attenuation_db` is the radio loss per slab between beacon and phone (default 15).
-- A connector's `area` polygon is the only place a pedestrian (and a particle) can change level. `kind`
+- A connector's `area` polygon is the only place a pedestrian (and the filter's mass) can change level. `kind`
   is `stairs`, `elevator` or `escalator`; `levels` lists two or more ordinals.
 - `georef` anchors the local frame on the globe: `origin_lat`/`origin_lon` is local (0, 0), and
   `rotation_deg` is the counter-clockwise angle from east to local +x. It is needed for GeoJSON/IMDF export
   and the 3D view, and is optional for everything else.
 - `footprint` (optional, `[[x, y], ...]`) is the outline of the walkable area on every floor, for buildings
-  that fill only part of their bounds (an L or a U). The particle filter then starts, recovers and keeps
-  particles inside it, and the beacon-ring proposal weights use its area. Without it the whole bounds
-  rectangle is walkable; one covering 99% or more of the bounds is ignored.
+  that fill only part of their bounds (an L or a U). The filter's cells then exist only inside it. Without
+  it the whole bounds rectangle is walkable; one covering 99% or more of the bounds is ignored.
 - A level may add its own `footprint` (`[[x, y], ...]`) when it is smaller than the building: a mezzanine,
-  or a stair landing such as floor -1 of `data/ipin/nuremberg.json`. Particles on that level stay inside it,
-  and new particles pick their level in proportion to each level's walkable area, so a small landing gets
-  few of them. Without level footprints every level gets the same share, as before.
+  or a stair landing such as floor -1 of `data/ipin/nuremberg.json`. That level's cells exist only inside
+  it, so the prior gives a small landing a small share.
 - A file has either top-level `walls` (one floor, ordinal 0) or `levels`, not both.
-- `floor_fingerprints` (optional) are radio scans with a known floor, for the particle filter's k-NN floor
-  prior (`pf.floor_prior_weight`):
+- `floor_fingerprints` (optional) are radio scans with a known floor, for the filter's k-NN floor prior
+  (`filter.floor_prior_weight`):
   `{"ids": ["w:...", ...], "scans": [[ordinal, id index, dBm, id index, dBm, ...], ...]}`. Each scan
   names its beacons by index into `ids`. Ids that are not venue beacons are dropped. The IPIN converter
   writes one per training Wi-Fi scan (`convert.py --fingerprints`).
 - With an `"xy": [[x, y], ...]` entry, one position per scan, the same scans also feed the fingerprint
-  likelihood (`pf.fingerprint_weight`, [benchmarks.md](benchmarks.md#what-changed-in-the-engine)). The
+  likelihood (`filter.fingerprint_weight`, [benchmarks.md](benchmarks.md#what-changed-in-the-engine)). The
   IPIN converter writes it with `--positions`, the MSIL converter with `--fingerprints`.
 
 ### Rooms
@@ -98,7 +96,7 @@ Instead of top-level `walls`, a multi-floor venue has `levels`, and may add `con
 |---|---|---|
 | top | `venue` | Venue file, relative to the scenario file |
 | top | `seed` | Default simulation seed |
-| top | `demo_config` | Optional engine config patch the web demo applies, relative to the scenario file. The demo's grid filter takes its PDR, RSSI, smoothing, room and floor prior settings from it. `ipe-regress` ignores it and uses the default config |
+| top | `demo_config` | Optional engine config patch the web demo applies, relative to the scenario file. `ipe-regress` ignores it and uses the default config |
 | `walk` | `waypoints` | Polyline followed by a pure-pursuit walker: `[x, y]` or `[x, y, level_ordinal]` |
 | `walk` | `step_frequency_hz`, `step_length_m`, `step_length_sigma`, `turn_rate_deg_s` | Gait |
 | `walk` | `stairs_speed_factor` | Horizontal speed on stairs relative to walking (0.6) |
@@ -156,6 +154,15 @@ JSON merge patches over the engine's default config, the same shape as `--print-
 `ipe-replay` and `ipe-regress` take `--config FILE`. It is applied before any `--set`, and unknown keys
 are rejected.
 
+The sections are `pdr`, `rssi`, `baro`, `filter` (the grid filter: lattice, motion noise, recovery, floor
+prior, fingerprints), `rooms` and `smoothing`. The shipped patches:
+
+| File | What it sets | For |
+|---|---|---|
+| `msil_wifi.json` | RSSI sigma 8 dB, drawn corrections capped at 1.5 m/s | Wi-Fi with a log-distance radio map |
+| `ipin.json` | the same, plus `filter.floor_prior_weight` 3 | multi-floor venues with floor fingerprints |
+| `fingerprint.json` | the same, plus `filter.fingerprint_weight` 3 | venues whose fingerprints carry positions |
+
 The `rooms` section tunes the room event detector (defaults shown; see
 [design.md](design.md#room-enter-and-exit-events)):
 
@@ -185,7 +192,8 @@ truth after the warm-up are skipped. `--baseline` and `--update` work as for sce
   one row per ground-truth sample.
 - `--track`: `t,x,y,level,valid`, the engine's estimate every 0.2 s of trace time from the first
   ground-truth sample on (what a client polling the engine would draw; the smoothness metrics use it).
-- `--particles`: `t,x,y,w,level`, subsampled particle cloud every N ground-truth samples.
+- `--cells`: `t,x,y,w,level`, the heaviest cells of the posterior (centroid and mass) every N ground-truth
+  samples.
 - `--events`: `t,source,room_id,room_name,type,probability`, the engine's room events (`source` is
   `estimate`) and the events of the ground-truth path (`truth`), sorted by time. `type` is `enter` or
   `exit`; `probability` is the room probability that fired the event (1 or 0 for truth). Names are
@@ -357,7 +365,7 @@ python3 datasets/osm/convert.py --out /tmp/kit.geojson
     --out data/venues/kit_informatikbau.json
 ./build/tools/ipe-import export data/venues/kit_informatikbau.json --out data/geojson/kit_informatikbau.geojson
 .venv/bin/python datasets/osm/plan_walk.py --venue data/venues/kit_informatikbau.json --name kit_tour \
-    --seed 501 --demo-config ../configs/open_venue.json --out data/scenarios/kit_tour.json \
+    --seed 501 --out data/scenarios/kit_tour.json \
     --goals 66,13.5,1 20,12,1 7,35,1 @osm_w1120093940 13,45,2 13,68,2 @osm_w1120094033 13,60,0 13,35,0 \
             7,25,0 38,8,0
 ```
