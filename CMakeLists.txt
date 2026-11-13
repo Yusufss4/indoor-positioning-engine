@@ -18,6 +18,7 @@ endif()
 
 option(IPE_BUILD_TOOLS "Build command line tools (sim, replay, regress)" ${_ipe_native})
 option(IPE_BUILD_TESTS "Build unit and regression tests" ${_ipe_native})
+option(IPE_BUILD_EXAMPLES "Build the example programs" ${_ipe_native})
 option(IPE_BUILD_WASM "Build the WebAssembly demo module" ${EMSCRIPTEN})
 option(IPE_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
 set(IPE_SANITIZE "" CACHE STRING "Comma separated sanitizers, e.g. address,undefined")
@@ -57,6 +58,10 @@ endif()
 
 if(IPE_BUILD_TOOLS)
   add_subdirectory(tools)
+endif()
+
+if(IPE_BUILD_EXAMPLES)
+  add_subdirectory(examples)
 endif()
 
 if(IPE_BUILD_TESTS)

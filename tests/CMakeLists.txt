@@ -34,6 +34,16 @@ target_compile_definitions(ipe_tests PRIVATE IPE_DATA_DIR="${PROJECT_SOURCE_DIR}
 include(GoogleTest)
 gtest_discover_tests(ipe_tests DISCOVERY_TIMEOUT 60)
 
+if(IPE_BUILD_TOOLS AND IPE_BUILD_EXAMPLES)
+  # The library example on a simulated office walk: it must build against ipe::core alone and run.
+  add_test(NAME example_minimal
+           COMMAND sh -c "\"$0\" --scenario \"$2\" --out \"$3\" && \"$1\" \"$4\" \"$3\""
+                   $<TARGET_FILE:ipe-sim> $<TARGET_FILE:ipe-minimal>
+                   ${PROJECT_SOURCE_DIR}/data/scenarios/office_nominal.json ${CMAKE_BINARY_DIR}/example_trace.csv
+                   ${PROJECT_SOURCE_DIR}/data/venues/office_floor.json)
+  set_tests_properties(example_minimal PROPERTIES PASS_REGULAR_EXPRESSION "error [0-9.]+ m" TIMEOUT 300)
+endif()
+
 if(IPE_BUILD_TOOLS)
   set(IPE_REGRESSION_SEEDS 3 CACHE STRING "Seeds per scenario in the accuracy regression test")
   add_test(NAME accuracy_regression
