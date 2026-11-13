@@ -23,8 +23,11 @@ using emscripten::val;
 
 namespace {
 
-/// Live scoring at the truth samples, as replay does it (after a 5 s warm-up).
+/// Live scoring at the truth samples, as replay does it (eval's compute_metrics): after a 5 s warm-up that
+/// counts from the first truth sample, which a recording does not have at t = 0.
 struct Score {
+  bool started = false;
+  double t0 = 0.0;  ///< Time of the first truth sample.
   double error_sum = 0.0;
   int error_count = 0;
   std::vector<double> errors;
@@ -32,7 +35,11 @@ struct Score {
   int fixes = 0;
 
   void add(const ipe::Estimate& e, const ipe::TruthSample& truth) {
-    if (!e.valid || truth.t < 5.0) return;
+    if (!started) {
+      started = true;
+      t0 = truth.t;
+    }
+    if (!e.valid || truth.t - t0 < 5.0) return;
     ++fixes;
     if (e.level != truth.level) return;
     ++floor_ok;

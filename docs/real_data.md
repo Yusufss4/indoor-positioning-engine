@@ -279,13 +279,45 @@ The scenario menu of the [live demo](https://yusufss4.github.io/indoor-positioni
 "Real recordings" group (the demo itself opens on `kit_tour`; `default` in `demos.json` is not used).
 It holds the longest held-out walk on every floor where that walk lasts at least 60 s (10 of the 14 floors; the other
 four have no held-out walk longer than 47 s), copied to `data/real/` by `datasets/msil/export_demo.py`.
-The demo replays the recorded IMU and Wi-Fi through the grid filter ([grid.md](grid.md)) with the Wi-Fi config. Its venues come from `convert.py --walls doors`, so the shop walls of the floor plan are
-real walls in the demo, with the doorways [inferred from training walks](#shop-walls-with-doorways).
-That is a choice for the demo, not the best-scoring map. Shop walls also leave rooms that no training walk
-entered without a door. Until experiment 13 the filter still placed particles in them, and one Wi-Fi scan
+The demo replays the recorded IMU and Wi-Fi through the grid filter ([grid.md](grid.md)) with
+`data/configs/fingerprint.json`. Its venues come from `convert.py --walls doors --fingerprints`:
+
+- **Shop walls.** The shop walls of the floor plan are real walls in the demo, with the doorways
+  [inferred from training walks](#shop-walls-with-doorways). That is a choice for the demo.
+- **Fingerprints.** The floor's training scans carry their positions, and the access points that fit no
+  log-distance model stay as fingerprint dimensions (drawn pale). This is the engine that
+  [benchmarks.md](benchmarks.md) scores.
+
+The ten walks, one replay each (`ipe-replay`), CEP50 / CEP95 [m]:
+
+| Walk | Shop walls, `msil_wifi.json` (the demo before) | Shop walls, `fingerprint.json` (the demo) | Floor outline only, `fingerprint.json` |
+|---|---:|---:|---:|
+| site1 B1, 231 s | 10.1 / 16.7 | 8.2 / 15.8 | 7.5 / 14.6 |
+| site1 F1, 98 s | 9.1 / 32.9 | 10.0 / 11.4 | 9.5 / 12.2 |
+| site1 F2, 160 s | 3.8 / 17.5 | 3.0 / 6.0 | 3.9 / 7.8 |
+| site1 F3, 133 s | 2.1 / 5.4 | 2.5 / 5.6 | 3.8 / 6.2 |
+| site1 F4, 106 s | 3.3 / 14.1 | 2.8 / 12.4 | 4.2 / 11.1 |
+| site2 F1, 217 s | 35.4 / 61.5 | 7.8 / 17.1 | 10.1 / 16.9 |
+| site2 F3, 122 s | 33.4 / 85.5 | 25.0 / 51.2 | 26.9 / 49.6 |
+| site2 F6, 70 s | 23.5 / 31.6 | 3.4 / 6.3 | 4.7 / 9.6 |
+| site2 F7, 75 s | 68.6 / 74.5 | 3.8 / 8.6 | 4.8 / 12.3 |
+| site2 F8, 86 s | 8.6 / 41.6 | 6.7 / 20.3 | 8.0 / 10.2 |
+| **median** | 9.6 / 32.3 | 5.3 / 11.9 | 6.2 / 11.7 |
+| jitter p95 [m], jumps and wall crossings a minute (mean) | 1.77, 3.6, 4.6 | 0.65, 2.4, 3.7 | 0.31, 0.7, 0.0 |
+
+- With the log-distance model alone the grid filter lost four of the five site2 walks behind shop walls;
+  with fingerprints it loses one (site2 F3, where the outline alone does no better).
+- site1 F1 and F3 have a slightly worse CEP50 with fingerprints (0.9 and 0.4 m).
+- Against the outline alone, shop walls give the better CEP50 on 8 of the 10 walks and a drawn track that
+  is less smooth: twice the jitter and three times the jumps.
+- These are ten walks picked by length, not a benchmark; the held-out numbers are at the top of this page
+  and in [benchmarks.md](benchmarks.md).
+
+**Before the grid filter.** Shop walls leave rooms that no training walk
+entered without a door. Until experiment 13 the particle filter still placed particles in them, and one Wi-Fi scan
 could pull the dot into a shop nobody can enter. No particle is placed in such a closed room any more, so the
-shops stop trapping the cloud. The shop walls are still worse than the outline alone on 6 of these 10 walks,
-and better on 3. Mean of 6 filter seeds per walk, `ipe-replay` with the Wi-Fi config, CEP50 / CEP95 [m]:
+shops stop trapping the cloud. The shop walls were still worse than the outline alone on 6 of these 10 walks,
+and better on 3. Particle filter, mean of 6 filter seeds per walk, `ipe-replay` with the Wi-Fi config, CEP50 / CEP95 [m]:
 
 | Walk | Floor outline only (`out_scans`) | Shop walls, before experiment 13 | Shop walls (demo) |
 |---|---:|---:|---:|
@@ -333,7 +365,9 @@ ctest --test-dir build -L realdata                               # out_scans vs 
 .venv/bin/python datasets/msil/plot.py --trace site2/F1/5dd35c9844333f00067aa0e0.csv --out docs/img/msil_trajectory.png
 .venv/bin/python datasets/msil/convert.py --wifi --scans --walls doors --out datasets/msil/out_doors   # shop walls
 .venv/bin/python datasets/msil/plot.py --out-dir datasets/msil/out_doors --walls-only site1/F2 --out docs/img/msil_walls.png
-.venv/bin/python datasets/msil/export_demo.py                    # refresh data/real/ from out_doors/
+.venv/bin/python datasets/msil/convert.py --wifi --scans --walls doors --fingerprints \
+    --out datasets/msil/out_doors_fp                             # shop walls and fingerprints, for the demo
+.venv/bin/python datasets/msil/export_demo.py                    # refresh data/real/ from out_doors_fp/
 ```
 
 `convert.py --help` lists the options: `--walls`, `--door-width`, `--scans`, the fit thresholds, `--test-every`, and

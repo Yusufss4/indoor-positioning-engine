@@ -109,7 +109,7 @@ Two more public datasets test what MSIL cannot:
 
 Ten held-out walks, one on each floor whose longest held-out walk lasts at least a minute, play in the
 [live demo](https://yusufss4.github.io/indoor-positioning-engine/) under "Real recordings", over the
-mall's floor plan.
+mall's floor plan, with the floor's training scans as position fingerprints (`fingerprint.json`).
 
 ![held-out walk](docs/img/msil_trajectory.png)
 

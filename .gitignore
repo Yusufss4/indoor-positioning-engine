@@ -7,9 +7,7 @@ __pycache__/
 .venv/
 viz/output/
 datasets/msil/raw/
-datasets/msil/out/
-datasets/msil/out_scans/
-datasets/msil/out_doors/
+datasets/msil/out*/
 web/dist/
 .DS_Store
 datasets/ipin/raw/

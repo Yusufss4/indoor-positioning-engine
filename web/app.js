@@ -163,8 +163,7 @@ async function loadRecording(entry) {
   el("description").textContent = entry.description ||
     `${entry.title} with a real Android phone (IMU + Wi-Fi), held out from fitting and tuning. Squares are ` +
     `the surveyor's waypoints, the only ground truth; the black path is interpolated between them, and the ` +
-    `live error is measured against it. Purple dots are Wi-Fi access points located from other walks. The ` +
-    `engine config is data/configs/msil_wifi.json.`;
+    `live error is measured against it. Purple dots are Wi-Fi access points located from other walks.`;
   return { venue: venueText, trace: traceText, config: configText };
 }
 

@@ -7,10 +7,13 @@ floor it writes the venue,
 its GeoJSON export (for the 3D view), the floor image and the trace, plus data/real/demos.json,
 which the demo reads to fill its scenario menu.
 
-The venues carry the shop walls with inferred doorways (see docs/real_data.md) and the shop outlines
-as rooms. The sample data is MIT-licensed; its licence is copied next to the files.
+The venues carry the shop walls with inferred doorways (see docs/real_data.md), the shop outlines as
+rooms, and the floor's training scans as position fingerprints, which the demo's config
+(data/configs/fingerprint.json) uses. The sample data is MIT-licensed; its licence is copied next to the
+files.
 
-    .venv/bin/python datasets/msil/convert.py --wifi --scans --walls doors --out datasets/msil/out_doors
+    .venv/bin/python datasets/msil/convert.py --wifi --scans --walls doors --fingerprints \
+        --out datasets/msil/out_doors_fp
     .venv/bin/python datasets/msil/export_demo.py
 """
 
@@ -40,8 +43,8 @@ def waypoints(trace: Path) -> list[tuple[float, float]]:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--out-dir", type=Path, default=HERE / "out_doors",
-                    help="converter output folder (convert.py --wifi --scans --walls doors)")
+    ap.add_argument("--out-dir", type=Path, default=HERE / "out_doors_fp",
+                    help="converter output folder (convert.py --wifi --scans --walls doors --fingerprints)")
     ap.add_argument("--raw", type=Path, default=HERE / "raw")
     ap.add_argument("--dest", type=Path, default=ROOT / "data" / "real")
     ap.add_argument("--build", type=Path, default=ROOT / "build")
@@ -60,10 +63,16 @@ def main():
              if t["duration_s"] >= args.min_duration][: args.count]
     picks.sort(key=lambda t: t["group"])
 
+    # The sample's licence: from the raw checkout, or the copy already next to the demo files (fetch.sh
+    # downloads the data folder only). Read before anything is deleted.
+    licence = next((p for p in (args.raw / "LICENSE", args.dest / "LICENSE") if p.exists()), None)
+    if licence is None:
+        raise SystemExit(f"no LICENSE in {args.raw} or {args.dest}: the demo files must ship with the sample's licence")
+    licence_text = licence.read_bytes()
     if args.dest.exists():
         shutil.rmtree(args.dest)
     args.dest.mkdir(parents=True)
-    shutil.copy(args.raw / "LICENSE", args.dest / "LICENSE")
+    (args.dest / "LICENSE").write_bytes(licence_text)
 
     demos = []
     for t in picks:
@@ -81,7 +90,9 @@ def main():
         subprocess.run([str(args.build / "tools" / "ipe-import"), "export", str(floor_dir / "venue.json"),
                         "--out", str(floor_dir / "venue.geojson")], check=True, capture_output=True)
 
-        bounds = json.loads((floor_dir / "venue.json").read_text())["bounds"]
+        bounds = venue["bounds"]
+        fitted = sum(b.get("model", True) for b in venue["beacons"])
+        scans = len(venue.get("floor_fingerprints", {}).get("xy", []))
         pts = waypoints(src_trace)
         xs, ys = [p[0] for p in pts], [p[1] for p in pts]
         view = [max(bounds[0], min(xs) - VIEW_PAD_M), max(bounds[1], min(ys) - VIEW_PAD_M),
@@ -93,10 +104,19 @@ def main():
             "geojson": f"{group}/venue.geojson",
             "image": f"{group}/floor.png",
             "trace": f"{group}/{src_trace.name}",
-            "config": "../configs/msil_wifi.json",
+            "config": "../configs/fingerprint.json",
             "view": [round(v, 1) for v in view],
             "duration_s": round(t["duration_s"], 1),
             "waypoints": len(pts),
+            "description":
+                f"{site} {floor}: a {t['duration_s']:.0f} s walk through a shopping mall with a real Android phone "
+                f"(IMU + Wi-Fi), held out from fitting and tuning. Squares are the surveyor's waypoints, the only "
+                f"ground truth; the black path is interpolated between them, and the live error is measured against "
+                f"it. The engine uses data/configs/fingerprint.json: {scans} training scans of this floor as "
+                f"position fingerprints, next to the log-distance model of {fitted} located access points (purple). "
+                f"The other {len(venue['beacons']) - fitted} access points (pale) fit no such model and count in "
+                f"the fingerprints only. The shop walls are the plan's, with doorways inferred from the training "
+                f"walks.",
         })
         print(f"{group}: {src_trace.name} ({t['duration_s']:.0f} s, {len(pts)} waypoints)")
 
