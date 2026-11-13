@@ -22,14 +22,13 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(RssiModelConfig, sigma_db, outli
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(BaroConfig, lowpass_tau_s, sea_level_hpa)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
     GridFilterConfig, cell_m, max_cells, max_reach_m, closed_region_fraction, closed_region_min_m2, heading_bins,
-    heading_sigma_deg, heading_outlier_prob, step_length_sigma, step_length_rel_sigma, step_scale_bins,
-    step_scale_spread, step_scale_sigma, step_scale_switch, estimate_rssi_offset, rssi_offset_sigma, rssi_offset_walk,
-    teleport_rate_per_s, teleport_period_s, recovery_alpha_slow, recovery_alpha_fast, recovery_max_fraction,
-    active_floor_rel, level_change_prob_step, level_change_prob_baro, baro_update_interval_s, baro_sigma_m,
-    baro_outlier_prob, baro_offset_sigma_m, baro_offset_walk_m, level_smoothing_s, level_hysteresis,
-    map_consistent_estimate, beacon_integrity, integrity_threshold_db, integrity_alpha, integrity_min_samples,
-    integrity_max_sigma_m, floor_prior_weight, floor_prior_k, floor_prior_eps, fingerprint_weight, fingerprint_k,
-    fingerprint_strongest, fingerprint_sigma_m, fingerprint_eps, fingerprint_model_weight)
+    heading_sigma_deg, heading_outlier_prob, step_length_sigma, step_length_rel_sigma, estimate_rssi_offset,
+    rssi_offset_sigma, rssi_offset_walk, teleport_rate_per_s, teleport_period_s, level_change_prob_step,
+    level_change_prob_baro, baro_update_interval_s, baro_sigma_m, baro_outlier_prob, baro_offset_sigma_m,
+    baro_offset_walk_m, level_smoothing_s, level_hysteresis, map_consistent_estimate, beacon_integrity,
+    integrity_threshold_db, integrity_alpha, integrity_min_samples, integrity_max_sigma_m, floor_prior_weight,
+    floor_prior_k, floor_prior_eps, fingerprint_weight, fingerprint_k, fingerprint_strongest, fingerprint_sigma_m,
+    fingerprint_eps, fingerprint_model_weight)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(TrackSmootherConfig, enabled, tau_s, max_correction_mps, snap_m,
                                                 extrapolate_steps, max_step_interval_s)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(RoomEventConfig, enter_prob, exit_prob, enter_dwell_s, exit_dwell_s,

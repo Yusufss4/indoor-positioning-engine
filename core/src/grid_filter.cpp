@@ -63,7 +63,6 @@ GridFilter::GridFilter(std::shared_ptr<const GridMap> map, GridFilterConfig cfg,
       cfg_(cfg),
       rssi_model_(map_->venue(), rssi_cfg),
       bins_(std::max(cfg.heading_bins, 4)),
-      scales_(std::clamp(cfg.step_scale_bins, 1, 15) | 1),
       multi_level_(map_->venue().multi_level()),
       integrity_(map_->venue().beacons().size(), {cfg.integrity_threshold_db, cfg.integrity_alpha,
                                                   cfg.integrity_min_samples, cfg.integrity_max_sigma_m}),
@@ -72,16 +71,7 @@ GridFilter::GridFilter(std::shared_ptr<const GridMap> map, GridFilterConfig cfg,
       level_selector_(cfg.level_smoothing_s, cfg.level_hysteresis),
       altimeter_(baro_cfg) {
   const std::size_t n = map_->size();
-  const std::size_t states = n * static_cast<std::size_t>(scales_) * static_cast<std::size_t>(bins_);
-  double prior_sum = 0.0;
-  for (int s = 0; s < scales_; ++s) {
-    const double v = 1.0 + (s - (scales_ - 1) / 2) * cfg_.step_scale_spread;
-    const double z = scales_ > 1 ? (v - 1.0) / cfg_.step_scale_sigma : 0.0;
-    scale_value_.push_back(v);
-    scale_prior_.push_back(std::exp(-0.5 * z * z));
-    prior_sum += scale_prior_.back();
-  }
-  for (double& p : scale_prior_) p /= prior_sum;
+  const std::size_t states = n * static_cast<std::size_t>(bins_);
 
   mass_.assign(n, 0.0);
   cx_.assign(n, 0.0);
@@ -95,7 +85,7 @@ GridFilter::GridFilter(std::shared_ptr<const GridMap> map, GridFilterConfig cfg,
   h_next_.assign(states, 0.0F);
   touched_.assign(n, 0);
   acc_.assign(n, StepAcc{});
-  move_x_.assign(static_cast<std::size_t>(scales_) * static_cast<std::size_t>(bins_) * 3, 0.0);
+  move_x_.assign(static_cast<std::size_t>(bins_) * 3, 0.0);
   move_y_.assign(move_x_.size(), 0.0);
   move_offset_.assign(move_x_.size(), -1);
   const auto offsets = static_cast<std::size_t>((2 * map_->radius() + 1) * (2 * map_->radius() + 1));
@@ -103,16 +93,15 @@ GridFilter::GridFilter(std::shared_ptr<const GridMap> map, GridFilterConfig cfg,
   local_w_.assign(offsets, 0.0);
   local_x_.assign(offsets, 0.0);
   local_y_.assign(offsets, 0.0);
-  row_lik_.assign(static_cast<std::size_t>(scales_) * static_cast<std::size_t>(bins_), 0.0);
   bin_lik_.assign(static_cast<std::size_t>(bins_), 0.0);
-  row_.assign(static_cast<std::size_t>(scales_) * static_cast<std::size_t>(bins_), 0.0);
+  row_.assign(static_cast<std::size_t>(bins_), 0.0);
   level_weight_.assign(static_cast<std::size_t>(std::max(map_->venue().level_count(), 1)), 0.0);
   floor_p_.assign(level_weight_.size(), 0.0);
   points_.reserve(n);
   scan_.reserve(map_->venue().beacons().size());
   const std::size_t conns = map_->connector_cells().size();
   for (auto* v : {&conn_mass_, &conn_x_, &conn_y_, &conn_d1_, &conn_d2_, &conn_b1_, &conn_b2_}) v->assign(conns, 0.0);
-  conn_h_.assign(conns * static_cast<std::size_t>(scales_) * static_cast<std::size_t>(bins_), 0.0F);
+  conn_h_.assign(conns * static_cast<std::size_t>(bins_), 0.0F);
   if (cfg_.map_consistent_estimate) map_estimate_.emplace(map_->venue(), n);
   initialize_uniform();
   update_estimate(0.0);
@@ -120,11 +109,7 @@ GridFilter::GridFilter(std::shared_ptr<const GridMap> map, GridFilterConfig cfg,
 
 double GridFilter::bin_heading(int bin) const { return wrap_angle(yaw_ + kTwoPi * bin / bins_); }
 
-double GridFilter::heading_prob(std::size_t cell, int bin) const {
-  double p = 0.0;
-  for (int s = 0; s < scales_; ++s) p += h_[state(cell, s, bin)];
-  return p;
-}
+double GridFilter::heading_prob(std::size_t cell, int bin) const { return h_[state(cell, bin)]; }
 
 void GridFilter::initialize_uniform() {
   const std::size_t n = map_->size();
@@ -139,10 +124,8 @@ void GridFilter::initialize_uniform() {
     const int level = map_->cell(c).level;
     baro_mu_[c] = baro_ready_ ? altitude_ - elevation(level) : 0.0;
     baro_var_[c] = cfg_.baro_offset_sigma_m * cfg_.baro_offset_sigma_m;
-    for (int s = 0; s < scales_; ++s) {
-      const auto v = static_cast<float>(scale_prior_[static_cast<std::size_t>(s)] / bins_);
-      for (int k = 0; k < bins_; ++k) h_[state(c, s, k)] = v;
-    }
+    const auto v = static_cast<float>(1.0 / bins_);
+    for (int k = 0; k < bins_; ++k) h_[state(c, k)] = v;
   }
 }
 
@@ -154,11 +137,7 @@ void GridFilter::set_point(Vec2 p, int level, int bin) {
   mass_[c] = 1.0;
   cx_[c] = p.x;
   cy_[c] = p.y;
-  for (int s = 0; s < scales_; ++s) {
-    for (int k = 0; k < bins_; ++k) {
-      h_[state(c, s, k)] = k == bin ? static_cast<float>(scale_prior_[static_cast<std::size_t>(s)]) : 0.0F;
-    }
-  }
+  for (int k = 0; k < bins_; ++k) h_[state(c, k)] = k == bin ? 1.0F : 0.0F;
   update_heading(level);
   update_estimate(now_);
 }
@@ -167,64 +146,39 @@ void GridFilter::on_step(const StepEvent& step) {
   now_ = step.t;
   yaw_ = wrap_angle(yaw_ + step.heading_delta);
   const std::size_t n = map_->size();
-  const std::size_t row = static_cast<std::size_t>(scales_) * static_cast<std::size_t>(bins_);
-  const double floor = active_floor();
-  const auto active = [&](std::size_t c) { return mass_[c] > 0.0 && mass_[c] >= floor; };
+  const auto row = static_cast<std::size_t>(bins_);
 
   // Heading noise: a 3-tap kernel over the bins with the variance of heading_sigma per step. The bins are
   // offsets from the yaw, so the gyro turn itself needs no interpolation.
   const double bin_rad = kTwoPi / bins_;
   const double sigma = deg2rad(cfg_.heading_sigma_deg);
   const double a = std::clamp(0.5 * (sigma / bin_rad) * (sigma / bin_rad), 0.0, 1.0 / 3.0);
-  const double sw = scales_ > 1 ? std::clamp(cfg_.step_scale_switch, 0.0, 0.5) : 0.0;
   for (std::size_t c = 0; c < n; ++c) {
-    if (!active(c)) continue;
+    if (mass_[c] <= 0.0) continue;
     float* hc = &h_[c * row];
-    for (int s = 0; s < scales_; ++s) {
-      const float* src = hc + static_cast<std::size_t>(s) * static_cast<std::size_t>(bins_);
-      double* dst = &row_[static_cast<std::size_t>(s) * static_cast<std::size_t>(bins_)];
-      for (int k = 0; k < bins_; ++k) {
-        const int lo = k == 0 ? bins_ - 1 : k - 1, hi = k + 1 == bins_ ? 0 : k + 1;
-        dst[k] = (1.0 - 2.0 * a) * src[k] + a * (src[lo] + src[hi]);
-      }
-    }
-    if (sw > 0.0) {
-      // Scale switch to a neighbouring value, reflecting at the ends.
-      for (int k = 0; k < bins_; ++k) {
-        double prev = 0.0;
-        for (int s = 0; s < scales_; ++s) {
-          const std::size_t i =
-              static_cast<std::size_t>(s) * static_cast<std::size_t>(bins_) + static_cast<std::size_t>(k);
-          const double here = row_[i];
-          const double next = s + 1 < scales_ ? row_[i + static_cast<std::size_t>(bins_)] : 0.0;
-          const int neighbours = (s > 0) + (s + 1 < scales_);
-          row_[i] = here * (1.0 - sw * neighbours) + sw * (prev + next);
-          prev = here;
-        }
-      }
+    for (int k = 0; k < bins_; ++k) {
+      const int lo = k == 0 ? bins_ - 1 : k - 1, hi = k + 1 == bins_ ? 0 : k + 1;
+      row_[static_cast<std::size_t>(k)] = (1.0 - 2.0 * a) * hc[k] + a * (hc[lo] + hc[hi]);
     }
     for (std::size_t i = 0; i < row; ++i) hc[i] = static_cast<float>(row_[i]);
   }
 
-  // Moves per (scale, heading, node): along-track 3-point Gauss-Hermite nodes L +- sqrt(3) sigma, weighted
+  // Moves per (heading, node): along-track 3-point Gauss-Hermite nodes L +- sqrt(3) sigma, weighted
   // 1/6, 2/3, 1/6, which match the mean and variance of the length noise. In metres and in lattice units.
   constexpr double kNode = 1.7320508075688772;
   constexpr std::array<double, 3> kNodes{-kNode, 0.0, kNode};
   constexpr std::array<double, 3> kWeights{1.0 / 6.0, 2.0 / 3.0, 1.0 / 6.0};
   const double inv_cell = 1.0 / map_->cell_m();
+  const double l = step.length;
+  const double sl = std::hypot(cfg_.step_length_sigma, cfg_.step_length_rel_sigma * l);
   for (int k = 0; k < bins_; ++k) {
     const double th = yaw_ + bin_rad * k;
     const double ck = std::cos(th), sk = std::sin(th);
-    for (int s = 0; s < scales_; ++s) {
-      const double l = step.length * scale_value_[static_cast<std::size_t>(s)];
-      const double sl = std::hypot(cfg_.step_length_sigma, cfg_.step_length_rel_sigma * l);
-      for (std::size_t j = 0; j < 3; ++j) {
-        const double len = std::max(0.0, l + kNodes[j] * sl);
-        const std::size_t i =
-            (static_cast<std::size_t>(s) * static_cast<std::size_t>(bins_) + static_cast<std::size_t>(k)) * 3 + j;
-        move_x_[i] = len * ck;
-        move_y_[i] = len * sk;
-      }
+    for (std::size_t j = 0; j < 3; ++j) {
+      const double len = std::max(0.0, l + kNodes[j] * sl);
+      const std::size_t i = static_cast<std::size_t>(k) * 3 + j;
+      move_x_[i] = len * ck;
+      move_y_[i] = len * sk;
     }
   }
 
@@ -237,7 +191,7 @@ void GridFilter::on_step(const StepEvent& step) {
   const Vec2 origin = map_->lattice_centre(0, 0) - Vec2{0.5 * map_->cell_m(), 0.5 * map_->cell_m()};
   Vec2 move_level{}, move_all{};
   double w_level = 0.0, w_all = 0.0;
-  // The scatter runs for every (cell, scale, heading, node). It reads the members through local pointers and
+  // The scatter runs for every (cell, heading, node). It reads the members through local pointers and
   // keeps the cell's lattice position and mask in locals: the byte and float stores below could alias the
   // members, so the compiler would otherwise reload them on every iteration.
   const double* const mass = mass_.data();
@@ -258,18 +212,6 @@ void GridFilter::on_step(const StepEvent& step) {
     if (m <= 0.0) continue;
     const double d1 = dev_mu_[c], d2 = dev_var_[c] + d1 * d1;
     const double b1 = baro_mu_[c], b2 = baro_var_[c] + b1 * b1;
-    if (!active(c)) {
-      // Background: uniform recovery mass, which a step leaves uniform. It stays where it is.
-      StepAcc& stay = acc[c];
-      stay.mass += m;
-      stay.x += m * cx_[c];
-      stay.y += m * cy_[c];
-      stay.d1 += m * d1;
-      stay.d2 += m * d2;
-      stay.b1 += m * b1;
-      stay.b2 += m * b2;
-      continue;
-    }
     const GridMap::Cell& cell = map_->cell(c);
     const int cell_ix = cell.ix, cell_iy = cell.iy;
     const std::uint64_t mask_lo = cell.mask[0], mask_hi = cell.mask[1];
@@ -316,15 +258,9 @@ void GridFilter::on_step(const StepEvent& step) {
             run_w = run_x = run_y = 0.0;
             const auto ut = static_cast<std::size_t>(t);
             if (touched[ut] == 0) {
-              // First mass into this cell: its new row starts from the mass that stays in it, none for an
-              // active cell (its own mass moves), all of it for a background cell (it stays put).
+              // First mass into this cell: its new row starts empty (the cell's own mass moves too).
               touched[ut] = 1;
-              float* const ht = h_next + ut * row;
-              if (mass[ut] > 0.0 && !active(ut)) {
-                for (std::size_t i = 0; i < row; ++i) ht[i] = static_cast<float>(mass[ut] * h[ut * row + i]);
-              } else {
-                std::fill_n(ht, row, 0.0F);
-              }
+              std::fill_n(h_next + ut * row, row, 0.0F);
             }
           } else {
             run_w = local_w[b];
@@ -385,7 +321,6 @@ void GridFilter::on_step(const StepEvent& step) {
     dev_var_[c] = cfg_.estimate_rssi_offset ? std::max(in.d2 / m - dev_mu_[c] * dev_mu_[c], kMinVar) : 0.0;
     baro_mu_[c] = in.b1 / m;
     baro_var_[c] = std::max(in.b2 / m - baro_mu_[c] * baro_mu_[c], kMinVar);
-    if (!touched_[c]) continue;  // a background cell nothing moved into keeps its row
     const float* hn = &h_next_[c * row];
     double sum = 0.0;
     for (std::size_t i = 0; i < row; ++i) sum += hn[i];
@@ -400,13 +335,6 @@ void GridFilter::on_step(const StepEvent& step) {
   update_estimate(step.t);
 }
 
-double GridFilter::active_floor() const {
-  if (cfg_.active_floor_rel <= 0.0) return 0.0;
-  double max_mass = 0.0;
-  for (double m : mass_) max_mass = std::max(max_mass, m);
-  return cfg_.active_floor_rel * max_mass;
-}
-
 void GridFilter::on_heading(double t, double heading, double sigma) {
   now_ = t;
   const double eps = cfg_.heading_outlier_prob;
@@ -415,27 +343,18 @@ void GridFilter::on_heading(double t, double heading, double sigma) {
     const double z = wrap_angle(heading - (yaw_ + kTwoPi * k / bins_)) / sigma;
     bin_lik_[static_cast<std::size_t>(k)] = (1.0 - eps) * norm * std::exp(-0.5 * z * z) + eps / kTwoPi;
   }
-  const std::size_t row = static_cast<std::size_t>(scales_) * static_cast<std::size_t>(bins_);
-  const double floor = active_floor();
-  double mean_lik = 0.0;
-  for (double l : bin_lik_) mean_lik += l / bins_;
-  for (std::size_t i = 0; i < row; ++i) row_lik_[i] = bin_lik_[i % static_cast<std::size_t>(bins_)];
+  const auto row = static_cast<std::size_t>(bins_);
   for (std::size_t c = 0; c < map_->size(); ++c) {
     if (mass_[c] <= 0.0) continue;
-    if (mass_[c] < floor) {
-      // Background mass is uniform over headings.
-      mass_[c] *= mean_lik;
-      continue;
-    }
     float* hc = &h_[c * row];
     double sum = 0.0;
-    for (std::size_t i = 0; i < row; ++i) sum += hc[i] * row_lik_[i];
+    for (std::size_t i = 0; i < row; ++i) sum += hc[i] * bin_lik_[i];
     if (sum <= 0.0) {
       mass_[c] = 0.0;
       continue;
     }
     const double inv = 1.0 / sum;
-    for (std::size_t i = 0; i < row; ++i) hc[i] = static_cast<float>(hc[i] * row_lik_[i] * inv);
+    for (std::size_t i = 0; i < row; ++i) hc[i] = static_cast<float>(hc[i] * bin_lik_[i] * inv);
     mass_[c] *= sum;
   }
   normalize();
@@ -550,23 +469,6 @@ void GridFilter::update_rssi(double t, std::span<const RssiReading> readings) {
       }
     }
   }
-  if (cfg_.recovery_max_fraction > 0.0) {
-    // Predictive likelihood of the update under the current distribution, as augmented MCL averages it.
-    double max_ll = -std::numeric_limits<double>::infinity();
-    for (std::size_t c = 0; c < n; ++c) {
-      if (mass_[c] > 0.0) max_ll = std::max(max_ll, loglik_[c]);
-    }
-    if (std::isfinite(max_ll)) {
-      double avg = 0.0;
-      for (std::size_t c = 0; c < n; ++c) {
-        if (mass_[c] > 0.0) avg += mass_[c] * std::exp(loglik_[c] - max_ll);
-      }
-      const double w_avg = avg * std::exp(max_ll);
-      if (w_slow_ == 0.0) w_slow_ = w_fast_ = w_avg;
-      w_slow_ += cfg_.recovery_alpha_slow * (w_avg - w_slow_);
-      w_fast_ += cfg_.recovery_alpha_fast * (w_avg - w_fast_);
-    }
-  }
   localized_ = true;
   apply_cell_loglik(t);
 }
@@ -640,17 +542,14 @@ void GridFilter::maybe_teleport(double t) {
   const double dt = t - last_teleport_t_;
   if (dt < cfg_.teleport_period_s) return;
   last_teleport_t_ = t;
-  double rho = 1.0 - std::exp(-std::max(cfg_.teleport_rate_per_s, 0.0) * dt);
-  if (cfg_.recovery_max_fraction > 0.0 && w_slow_ > 0.0) {
-    rho += std::clamp(1.0 - w_fast_ / w_slow_, 0.0, cfg_.recovery_max_fraction);
-  }
-  rho = std::min(rho, 1.0);
+  const double rho = std::min(1.0 - std::exp(-std::max(cfg_.teleport_rate_per_s, 0.0) * dt), 1.0);
   if (rho <= 0.0) return;
   const std::size_t n = map_->size();
   const double u = rho / static_cast<double>(n);
   const double dev_var0 = cfg_.estimate_rssi_offset ? cfg_.rssi_offset_sigma * cfg_.rssi_offset_sigma : 0.0;
   const double baro_var0 = cfg_.baro_offset_sigma_m * cfg_.baro_offset_sigma_m;
-  const std::size_t row = static_cast<std::size_t>(scales_) * static_cast<std::size_t>(bins_);
+  const auto row = static_cast<std::size_t>(bins_);
+  const double prior = 1.0 / bins_;
   for (std::size_t c = 0; c < n; ++c) {
     const double kept = (1.0 - rho) * mass_[c];
     const double m = kept + u;
@@ -665,20 +564,14 @@ void GridFilter::maybe_teleport(double t) {
     mass_[c] = m;
     if (f < 1e-9) continue;  // the heading row would not change in float
     float* hc = &h_[c * row];
-    for (int s = 0; s < scales_; ++s) {
-      const double prior = scale_prior_[static_cast<std::size_t>(s)] / bins_;
-      for (int k = 0; k < bins_; ++k) {
-        float& v = hc[static_cast<std::size_t>(s) * static_cast<std::size_t>(bins_) + static_cast<std::size_t>(k)];
-        v = static_cast<float>((1.0 - f) * v + f * prior);
-      }
-    }
+    for (std::size_t k = 0; k < row; ++k) hc[k] = static_cast<float>((1.0 - f) * hc[k] + f * prior);
   }
 }
 
 void GridFilter::change_levels(double prob) {
   const auto conns = map_->connector_cells();
   if (conns.empty() || prob <= 0.0) return;
-  const std::size_t row = static_cast<std::size_t>(scales_) * static_cast<std::size_t>(bins_);
+  const auto row = static_cast<std::size_t>(bins_);
   for (std::size_t i = 0; i < conns.size(); ++i) {
     const std::size_t c = conns[i];
     conn_mass_[i] = mass_[c];
@@ -722,9 +615,7 @@ void GridFilter::update_heading(int level) {
   std::fill(bin_lik_.begin(), bin_lik_.end(), 0.0);
   for (std::size_t c = begin; c < end; ++c) {
     if (mass_[c] <= 0.0) continue;
-    for (int s = 0; s < scales_; ++s) {
-      for (int k = 0; k < bins_; ++k) bin_lik_[static_cast<std::size_t>(k)] += mass_[c] * h_[state(c, s, k)];
-    }
+    for (int k = 0; k < bins_; ++k) bin_lik_[static_cast<std::size_t>(k)] += mass_[c] * h_[state(c, k)];
   }
   double sx = 0.0, sy = 0.0;
   for (int k = 0; k < bins_; ++k) {
