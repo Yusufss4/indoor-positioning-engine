@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Regenerates every figure and results table under docs/ from the C++ tools.
+"""Regenerates the figures and the results table under docs/ from the C++ tools: docs/img/convergence.gif,
+docs/img/benchmark_cep95.png, docs/results.md and docs/results.json. (docs/img/demo.gif is recorded from the
+web demo by viz/record_demo.py.)
 
 usage: python viz/make_figures.py [--build build] [--out docs/img] [--seeds 10]
 """
@@ -57,28 +59,9 @@ def main() -> int:
         work = Path(tmp)
 
         est, _ = replay(build, "office_nominal", "grid", work, cells_every=3)
-        runs = {"grid": ipeviz.Estimates.load(est)}
-        ipeviz.plot_trajectories(office, runs, out / "office_nominal_trajectories.png",
-                                 "office_nominal: estimated track")
-        ipeviz.plot_error_over_time(runs, out / "office_nominal_error.png", "office_nominal: error over time")
-        ipeviz.plot_error_cdf(runs, out / "office_nominal_cdf.png", "office_nominal: error CDF")
-
         cells = ipeviz.load_cells(work / "office_nominal_grid_cells.csv")
-        ipeviz.animate_cells(office, runs["grid"], cells, out / "convergence.gif", t_max=45.0, fps=8,
+        ipeviz.animate_cells(office, ipeviz.Estimates.load(est), cells, out / "convergence.gif", t_max=45.0, fps=8,
                              title="Grid filter: the posterior's heaviest cells, from start to tracking")
-
-        est, _ = replay(build, "office_field_issue", "grid", work)
-        field = {"grid": ipeviz.Estimates.load(est)}
-        old, _ = replay(build, "office_field_issue", "grid", work, tag="recovery-1e-3",
-                        patch='{"filter":{"teleport_rate_per_s":0.001}}')
-        field_cmp = {"before": ipeviz.Estimates.load(old), "after": field["grid"]}
-        highlight = {"C2": "#bbbbbb", "N3": "#bbbbbb", "S3": "#e377c2"}
-        ipeviz.plot_trajectories(office, field, out / "field_issue_trajectories.png",
-                                 "office_field_issue: C2/N3 dead (grey), S3 installed 16 m from its map position",
-                                 highlight=highlight)
-        ipeviz.plot_error_over_time(field_cmp, out / "field_issue_before_after.png",
-                                    "office_field_issue: uniform recovery mass at 1e-3 per second (before) and 1e-8 (after)",
-                                    colors={"before": "#ff7f0e", "after": "#d62728"})
 
     if not args.skip_benchmark:
         js = out.parent / "results.json"
@@ -88,7 +71,6 @@ def main() -> int:
              "--serial", "--seeds", str(args.seeds), "--json", str(js), "--markdown", str(md)])
         results = json.loads(js.read_text())
         ipeviz.plot_benchmark(results, out / "benchmark_cep95.png", "cep95_m")
-        ipeviz.plot_benchmark(results, out / "benchmark_cep50.png", "cep50_m")
 
     print(f"figures written to {out}")
     return 0

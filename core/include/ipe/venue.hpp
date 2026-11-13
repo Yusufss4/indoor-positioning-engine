@@ -27,7 +27,7 @@ struct Beacon {
 /// in the engine a level is referred to by its index in that list.
 struct Level {
   std::string name;
-  int ordinal = 0;           ///< Building floor number as in IMDF (0 = ground, -1 = basement).
+  int ordinal = 0;           ///< Building floor number (0 = ground, -1 = basement).
   double elevation_m = 0.0;  ///< Floor height above the venue datum.
   double height_m = 4.0;     ///< Floor-to-floor height, used for rendering.
   std::vector<Segment> walls;

@@ -13,7 +13,7 @@ For every site and floor:
 * test paths become ipe traces: earth-frame IMU in the engine's convention, BLE/Wi-Fi rows and
   one ground-truth row per surveyor waypoint.
 
-A manifest lists the venue/trace pairs for ``ipe-regress --traces``. See docs/real_data.md.
+A manifest lists the venue/trace pairs for ``ipe-regress --traces``. See docs/datasets.md.
 """
 
 from __future__ import annotations

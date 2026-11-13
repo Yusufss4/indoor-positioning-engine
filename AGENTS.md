@@ -5,79 +5,51 @@ Instructions for AI coding agents (Claude Code, Codex, Cursor) working in this r
 ## What this is
 
 A C++20 indoor positioning engine: pedestrian dead reckoning plus BLE / Wi-Fi RSSI and a barometer, fused
-by a map-aware grid filter (the engine's only filter: the posterior on a lattice of the venue's walkable
-cells, no random numbers). A deterministic simulator produces traces with ground truth; a replay tool and
-a regression suite measure accuracy.
+by a map-aware grid filter (the posterior on a lattice of the venue's walkable cells, no random numbers).
+A deterministic simulator produces traces with ground truth; a replay tool and a regression suite measure
+accuracy. [docs/design.md](docs/design.md) explains the engine and maps each concern to its file;
+[docs/extending.md](docs/extending.md) says where a new sensor, setting, motion model or dataset goes.
 
 ## Layout
 
-- `core/` - the engine. No I/O beyond venue/trace parsing; this is what a mobile SDK or WASM build links.
-  [docs/design.md](docs/design.md#where-things-live) maps each concern to its file and lists the steps
-  for adding a sensor.
-- `sim/` - scenario JSON to synthetic trace (IMU, BLE, barometer, ground truth).
-- `eval/` - the `grid` preset, config overrides, replay runner, metrics, regression comparison.
-- `geo/` - GeoJSON / IMDF import and export (`ipe_geo`); native tooling only, not linked by the engine.
-- `plan/` - beacon placement analysis (`ipe_plan`): coverage, Cramer-Rao bound and floor margin of a
- beacon layout from the map and RSSI model; native tooling only. `viz/placement_study.py` checks the
- scores against simulated CEP on thinned layouts.
-- `tools/` - `ipe-sim`, `ipe-replay`, `ipe-regress`, `ipe-import`, `ipe-plan`.
-- `tests/` - GoogleTest unit tests and the `accuracy_regression` CTest.
-- `data/venues`, `data/scenarios` - inputs. `tests/regression/baseline.json` - accepted accuracy.
-- `data/geojson`, `data/imdf` - generated from `data/venues` by `ipe-import`; a unit test fails when they
-  are stale. `data/mappings` - GeoJSON property mapping tables.
-- `data/configs` - engine config patches for `--config`: `msil_wifi.json` (Wi-Fi), `ipin.json` (plus the
-  k-NN floor prior) and `fingerprint.json` (plus the fingerprint likelihood, for venues converted with
-  fingerprint positions, see [docs/benchmarks.md](docs/benchmarks.md)). The filter's settings are the
-  `filter` section.
-- `datasets/msil` - fetch and convert scripts for the Microsoft Indoor Location sample. The raw data and
-  the converted `out/` (readings one by one) and `out_scans/` (`--scans`, one batch per Wi-Fi scan) are
-  git-ignored; `tests/regression/msil_baseline.json` gates the held-out walks of `out_scans/`.
-  `data/real` holds ten converted walks for the web demo, with shop walls and fingerprint positions
-  (`convert.py --wifi --scans --walls doors --fingerprints --out datasets/msil/out_doors_fp`), which the
-  demo runs with `fingerprint.json`; regenerate it with `datasets/msil/export_demo.py` (a unit test
-  checks it against the venue export).
-- `datasets/osm` - OpenStreetMap indoor data to venue (`convert.py`, from the committed Overpass snapshot
-  in `data/osm/`, ODbL) and an A* walk planner that writes scenarios (`plan_walk.py`). They produce
-  `data/venues/kit_informatikbau.json` and `data/scenarios/kit_tour.json`; the commands are in
-  [docs/formats.md](docs/formats.md#openstreetmap-datasetsosm).
-- `datasets/ipin` - IPIN competition Track 3 packages (2022 UMinho, 2023/2024 Nuremberg, CC BY) to venues and
-  traces ([docs/ipin.md](docs/ipin.md)). Walls are extracted from the floor plans (`maps.py`) and corrected
-  in `edits/<site>.json` (stairs, lifts, footprints). The venues are committed in `data/ipin/`; raw data and
-  `out_scans/` and `out_fp/` (with fingerprint positions) are git-ignored.
-  `tests/regression/ipin_baseline.json` gates the scoring walks of `out_fp/` with `fingerprint.json`
-  (`ipin_regression`, label `realdata`). Settings are chosen on `manifest_tune.json` (validation walks)
-  only. `evaluate.py` adds floor hit rate and the competition metric.
-- `datasets/kaggle` - the full Kaggle "Indoor Location & Navigation" set (204 buildings; MSIL is its public
-  two-building sample). `fetch.sh` needs a Kaggle token; `datasets/msil/convert.py --kaggle` converts it;
-  `submit.py` builds a submission file and uploads nothing. The competition rules forbid redistribution:
-  nothing converted from it is committed, only aggregate numbers in the docs. `export_demo.py` writes one
-  held-out walk per floor to `data/real_kaggle/` for the web demo; that folder is git-ignored and must
-  stay so, and the deployed demo does not have it.
-- `datasets/uji_ble` - UJI BLE fingerprints (CC BY): RSSI model study, venues in `data/uji_ble/` and
-  standing-still traces ([docs/uji_ble.md](docs/uji_ble.md)).
-- `data/real_ipin`, `data/real_uji` - web demo recordings written by `export_demo.py` in those folders
-  (`data/real` is MSIL's and is rewritten by its own script). The demo reads every `demos.json` that
-  `RECORDING_SOURCES` in `web/app.js` lists and skips the ones that are missing.
-- `datasets/common` - helpers shared by the real-data converters (transmitter fit, wall geometry, georef,
-  trace writer, fingerprint tables). MSIL output must stay byte-identical when they change. `offline.py`
-  holds the offline steps (two-pass replay, gap filling, waypoint snapping) that `evaluate.py --two-pass
-  --fill --snap` and the Kaggle submission use; they are for competitions scored offline and must never be
-  quoted as what the engine does live.
-- `viz/` - Python plotting; `web/` - Emscripten bindings and the browser demo.
+- `core/` - the engine (`ipe::core`): what an app or the WASM build links. No I/O beyond venue, trace and
+  config parsing. The grid filter is `core/src/filter/`, one file per kind of update.
+- `sim/` - scenario JSON to a synthetic trace (IMU, BLE, barometer, ground truth).
+- `eval/` - replay runner, metrics, regression comparison.
+- `geo/` - GeoJSON import and export; native tooling only, not linked by the engine.
+- `tools/` - `ipe-sim`, `ipe-replay`, `ipe-regress`, `ipe-import`. `examples/` - the engine as a library.
+- `tests/` - GoogleTest unit tests and the regression CTests; `tests/regression/*.json` are the accepted
+  accuracy baselines.
+- `web/` - Emscripten bindings and the browser demo. `viz/` - figures and the README GIF.
+- `data/venues`, `data/scenarios` - inputs. `data/geojson` is generated from `data/venues` by `ipe-import`;
+  a unit test fails when it is stale.
+- `data/configs` - config patches for `--config`: `msil_wifi.json` (Wi-Fi), `ipin.json` (plus the floor
+  vote) and `fingerprint.json` (plus the fingerprint likelihood, for venues with fingerprint positions).
+- `data/demo/{msil,ipin}` - recordings for the web demo, written by `datasets/*/export_demo.py`; a unit
+  test checks them. `data/demo/kaggle` is the same for the Kaggle set, git-ignored (see below).
+- `datasets/` - download and conversion scripts for the real datasets ([docs/datasets.md](docs/datasets.md)):
+  - `msil` - the Microsoft Indoor Location sample (two malls); also converts the full Kaggle set
+    (`--kaggle`). `tests/regression/msil_baseline.json` gates the held-out walks of `out_scans/`.
+  - `ipin` - IPIN competition Track 3 (two multi-floor buildings); venues in `data/ipin/`.
+    `tests/regression/ipin_baseline.json` gates the scoring walks of `out_fp/` with `fingerprint.json`.
+  - `kaggle` - fetch, submission and demo export for the full Kaggle set.
+  - `osm` - OpenStreetMap indoor data to a venue, and a walk planner that writes scenarios.
+  - `common` - what the converters share; `offline.py` holds the offline steps (two-pass replay, gap
+    filling, waypoint snapping). `evaluate.py` scores a manifest with the competitions' metrics.
+  - Raw data and converter output (`raw/`, `out*/`) are git-ignored.
 
 ## Build and test
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
-ctest --test-dir build -LE regression --output-on-failure   # unit tests, ~1 s
+ctest --test-dir build -LE regression --output-on-failure   # unit tests, a few seconds
 ctest --test-dir build -L regression --output-on-failure    # accuracy gate, ~40 s
 ```
 
 `-L regression` also runs `real_data_regression` and `ipin_regression` (label `realdata`, about 9 minutes
-together), which are skipped unless `datasets/msil/out_scans/` and `datasets/ipin/out_fp/` exist (see
-[docs/real_data.md](docs/real_data.md), [docs/benchmarks.md](docs/benchmarks.md#reproduce)). Settings for real data are
-chosen on `manifest_tune.json` only; `manifest_holdout.json` is for reporting, not for tuning.
+together), which are skipped unless `datasets/msil/out_scans/` and `datasets/ipin/out_fp/` exist
+([docs/datasets.md](docs/datasets.md#reproduce)).
 
 Sanitizers: `-DIPE_SANITIZE=address,undefined` with `CMAKE_BUILD_TYPE=Debug`.
 
@@ -86,49 +58,56 @@ Sanitizers: `-DIPE_SANITIZE=address,undefined` with `CMAKE_BUILD_TYPE=Debug`.
 1. **Accuracy claims need numbers.** Any change that touches `core/` must be evaluated with
    `ipe-regress --no-baseline --seeds 10` before and after, and the summary must quote both. The filter is
    deterministic, so the seeds are the simulator's: ten different walks of each scenario. One walk is
-   noise; do not tune on one run.
-2. **Never update `tests/regression/baseline.json` to make CI pass** unless the change is an intentional
+   noise; do not tune on one run. A refactoring must give identical metrics (compare the `--json` outputs;
+   only `compute_us_per_update` may differ).
+2. **Never update a baseline in `tests/regression/` to make CI pass** unless the change is an intentional
    accuracy trade-off and the PR description explains which scenarios got worse and why.
 3. **Do not edit scenarios to flatter the filter.** Scenarios encode real-world failure modes; if one looks
-   wrong, say so instead of changing it. Every scenario must keep `wall_violations == 0`
-   (`ipe-sim` exits 3 otherwise).
+   wrong, say so instead of changing it. Every scenario must keep `wall_violations == 0` (`ipe-sim` exits 3
+   otherwise).
 4. **Determinism matters.** The filter draws no random numbers, and must not start to. The simulator's
    randomness goes through `ipe::Rng`; never use `std::*_distribution` (implementation-defined across
    standard libraries, would break the WASM build and the baseline).
 5. **Separate model limitations from data problems.** Before changing the filter, check whether the error
-   comes from the sensor model (e.g. walls not modelled, step length scale) or from the data
-   (dead/moved beacons, magnetic anomalies). The scenario descriptions say which effect each one injects.
-6. Keep `core/` free of platform code, allocation in hot loops, and global state. A radio update is
+   comes from the sensor model (walls not modelled, step length scale) or from the data (dead or moved
+   beacons, magnetic anomalies). The scenario descriptions say which effect each one injects.
+6. **Keep `core/` free of platform code, allocation in hot loops, and global state.** A radio update is
    O(cells) and a step O(cells x heading bins); keep them that way, and quote `--serial` timings for any
-   change to those loops (compute is this filter's cost, see [docs/grid.md](docs/grid.md#cost)).
-7. Config fields are exposed through `NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT` in
-   `eval/src/eval.cpp`. A new config field must be added there or `--set` overrides will not reach it.
-8. Format with `clang-format-18` (CI enforces it).
+   change to those loops (compute is this filter's cost, see [docs/design.md](docs/design.md#cost)).
+7. **Real data: tune and held-out stay apart.** Settings are chosen on `manifest_tune.json` only;
+   `manifest_holdout.json` is replayed once to report.
+8. **Offline steps are not the engine.** Numbers from `--two-pass`, `--fill` or `--snap` must never be
+   quoted as what the engine does live.
+9. **Nothing converted from the Kaggle data is committed.** Its competition rules forbid redistribution:
+   only code and aggregate numbers. `data/demo/kaggle/` must stay git-ignored.
+10. **New behaviour is off by default** behind a config field, until it has earned its place on the
+    scenarios and the real walks. A config field must be listed in `core/src/config.cpp` (the build fails
+    otherwise).
+11. Format with `clang-format-18` (CI enforces it).
 
 ## Useful commands
 
 ```bash
-# One run with per-sample output for plotting
-./build/tools/ipe-replay --scenario data/scenarios/office_field_issue.json --out /tmp/est.csv
-
-# A/B experiment across all scenarios
+./build/tools/ipe-replay --scenario data/scenarios/office_field_issue.json --out /tmp/est.csv   # one run
 ./build/tools/ipe-regress --scenarios data/scenarios --no-baseline --seeds 10 \
-    --set '{"filter":{"beacon_integrity":false}}'
-
-# Effective config of a preset
-./build/tools/ipe-replay --print-config
+    --set '{"filter":{"beacon_integrity":false}}'                                               # A/B test
+./build/tools/ipe-replay --print-config                                                         # every setting
+.venv/bin/python datasets/evaluate.py datasets/ipin/out_fp/manifest_tune.json \
+    --config data/configs/fingerprint.json                                                      # real walks
 ```
 
-The companion repo `positioning-agent-tools` exposes these tools as an MCP server.
+The companion repo `positioning-agent-tools` wraps these tools as an MCP server. It still calls the removed
+`pf` presets (`--filter pf`, `--presets pf,wcl`) and needs updating before it works against this version.
 
 ## Common agent failure modes here
 
 - Claiming an improvement from a single seed or a single scenario.
 - "Fixing" a failing regression by loosening tolerances or regenerating the baseline.
-- Adding config fields without registering them for JSON (silently ignored by presets, rejected by `--set`).
 - Treating `compute_us_per_update` from parallel runs as a performance measurement (use `--serial`).
 - Comparing with a competition leaderboard on other walks or another metric than the competition's.
-  [docs/benchmarks.md](docs/benchmarks.md) says which of our numbers are like for like.
+  [docs/datasets.md](docs/datasets.md#against-the-leaderboards) says which numbers are like for like.
 - Judging smoothing by CEP alone. A change to what is reported must also quote `jitter_p95_m`,
-  `jumps_per_min`, `level_flips` and, on walled maps, `wall_crossings_per_min` (in `ipe-regress` tables; definitions in
-  [docs/formats.md](docs/formats.md#replay-outputs)).
+  `jumps_per_min`, `level_flips` and, on walled maps, `wall_crossings_per_min`
+  ([docs/formats.md](docs/formats.md#replay-outputs)).
+- Running an exporter that rewrites `data/demo/` without checking the diff: those files are what the
+  public demo serves.

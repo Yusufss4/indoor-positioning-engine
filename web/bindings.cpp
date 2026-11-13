@@ -14,6 +14,7 @@
 #include <utility>
 #include <vector>
 
+#include "ipe/config.hpp"
 #include "ipe/eval.hpp"
 #include "ipe/simulator.hpp"
 #include "ipe/trace.hpp"
@@ -51,7 +52,7 @@ struct Score {
   double floor_accuracy() const { return fixes ? static_cast<double>(floor_ok) / fixes : -1.0; }
 };
 
-/// Name of the estimate in the JS API: the grid filter (docs/grid.md).
+/// Name of the estimate in the JS API: the grid filter (docs/design.md).
 constexpr const char* kGrid = "grid";
 
 /// Grid cells handed to the page per snapshot, heaviest first, and the mass below which a cell is not drawn
@@ -233,8 +234,8 @@ class Demo {
 
   void init(const std::string& config_patch) {
     // The engine's default config, patched. The lattice is built here and kept, so the page can draw it.
-    auto cfg = ipe::eval::preset_config("grid");
-    if (!config_patch.empty()) ipe::eval::apply_config_overrides(cfg, config_patch);
+    ipe::EngineConfig cfg;
+    if (!config_patch.empty()) ipe::apply_config_patch(cfg, config_patch);
     grid_map_ = std::make_shared<const ipe::GridMap>(venue_, cfg.filter);
     grid_ = std::make_unique<ipe::PositioningEngine>(venue_, cfg, grid_map_);
     // venue_ and trace_ are members and the Demo is never moved, so the player's references stay valid.

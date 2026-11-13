@@ -1,5 +1,7 @@
 #include "ipe/regression.hpp"
 
+#include "ipe/config.hpp"
+
 #include <algorithm>
 #include <cstdio>
 #include <filesystem>
@@ -21,13 +23,10 @@ namespace ipe::eval {
 namespace fs = std::filesystem;
 
 namespace {
-std::vector<EngineConfig> preset_configs(const BenchmarkOptions& opts) {
-  std::vector<EngineConfig> configs;
-  for (const auto& p : opts.presets) {
-    configs.push_back(preset_config(p));
-    for (const auto& patch : opts.config_patches) apply_config_overrides(configs.back(), patch);
-  }
-  return configs;
+EngineConfig engine_config(const BenchmarkOptions& opts) {
+  EngineConfig cfg;
+  for (const auto& patch : opts.config_patches) apply_config_patch(cfg, patch);
+  return cfg;
 }
 
 /// At most one job per hardware thread at a time. Every job gets its own thread up front (std::async), and
@@ -49,15 +48,15 @@ class JobLimit {
   std::counting_semaphore<> slots_;
 };
 
-/// The lattice of each (venue, preset), built on first use and shared between the replays of that venue:
-/// on a large venue it is most of an engine's start-up cost.
+/// The lattice of each venue, built on first use and shared between the replays of that venue: on a large
+/// venue it is most of an engine's start-up cost.
 class MapCache {
  public:
-  std::shared_ptr<const GridMap> get(const Venue& venue, std::size_t preset, const GridFilterConfig& cfg) {
+  std::shared_ptr<const GridMap> get(const Venue& venue, const GridFilterConfig& cfg) {
     std::shared_ptr<Slot> slot;
     {
       const std::lock_guard lock(mutex_);
-      auto& entry = slots_[{&venue, preset}];
+      auto& entry = slots_[&venue];
       if (!entry) entry = std::make_shared<Slot>();
       slot = entry;
     }
@@ -72,17 +71,13 @@ class MapCache {
     std::shared_ptr<const GridMap> map;
   };
   std::mutex mutex_;
-  std::map<std::pair<const Venue*, std::size_t>, std::shared_ptr<Slot>> slots_;
+  std::map<const Venue*, std::shared_ptr<Slot>> slots_;
 };
 
-/// Metrics of one trace through every preset.
-std::vector<Metrics> replay_all(const Venue& venue, const Trace& trace, const std::vector<EngineConfig>& configs,
-                                const BenchmarkOptions& opts, MapCache& maps) {
-  std::vector<Metrics> out;
-  for (std::size_t i = 0; i < configs.size(); ++i) {
-    out.push_back(replay(venue, trace, configs[i], opts.replay, maps.get(venue, i, configs[i].filter)).metrics);
-  }
-  return out;
+/// Metrics of one trace through the engine.
+Metrics replay_metrics(const Venue& venue, const Trace& trace, const EngineConfig& cfg, const BenchmarkOptions& opts,
+                       MapCache& maps) {
+  return replay(venue, trace, cfg, opts.replay, maps.get(venue, cfg.filter)).metrics;
 }
 
 double mean_or(const std::vector<double>& values, double fallback) {
@@ -146,13 +141,13 @@ std::vector<BenchmarkCase> run_benchmark(const std::string& scenario_dir, const 
     scenarios.push_back(std::move(sc));
   }
 
-  const std::vector<EngineConfig> configs = preset_configs(opts);
+  const EngineConfig cfg = engine_config(opts);
   MapCache maps;
 
-  // One job per (scenario, seed): simulate once, replay through every preset.
+  // One job per (scenario, seed): simulate, replay.
   struct JobResult {
     std::size_t scenario;
-    std::vector<Metrics> per_preset;
+    Metrics metrics;
   };
   JobLimit limit;
   auto job = [&](std::size_t si, int k) {
@@ -160,7 +155,7 @@ std::vector<BenchmarkCase> run_benchmark(const std::string& scenario_dir, const 
       const auto& sc = scenarios[si];
       const Venue& venue = *venues.at(sc.venue_path);
       const Trace trace = sim::simulate(sc, venue, sc.seed + static_cast<std::uint64_t>(k));
-      return JobResult{si, replay_all(venue, trace, configs, opts, maps)};
+      return JobResult{si, replay_metrics(venue, trace, cfg, opts, maps)};
     });
   };
 
@@ -175,55 +170,52 @@ std::vector<BenchmarkCase> run_benchmark(const std::string& scenario_dir, const 
       for (int k = 0; k < opts.seeds; ++k) job_results.push_back(job(si, k));
   }
 
-  const std::vector<std::string>& names = opts.presets;
   std::vector<BenchmarkCase> cases;
   for (std::size_t si = 0; si < scenarios.size(); ++si) {
-    for (std::size_t pi = 0; pi < names.size(); ++pi) {
-      BenchmarkCase c;
-      c.scenario = scenarios[si].name;
-      c.preset = names[pi];
-      c.multi_level = venues.at(scenarios[si].venue_path)->multi_level();
-      c.floor_accuracy = 0.0;
-      c.floor_switch_latency_s = 0.0;
-      int converged = 0, with_changes = 0;
-      std::vector<double> coverages;
-      SmoothnessSamples smooth;
-      for (const auto& jr : job_results) {
-        if (jr.scenario != si) continue;
-        const Metrics& m = jr.per_preset[pi];
-        ++c.runs;
-        smooth.add(m);
-        if (m.coverage95 >= 0.0) coverages.push_back(m.coverage95);
-        c.mean_m += m.mean_m;
-        c.cep50_m += m.cep50_m;
-        c.cep95_m += m.cep95_m;
-        c.availability += m.availability;
-        c.compute_us_per_update += m.compute_us_per_update;
-        c.floor_accuracy += m.floor_accuracy;
-        if (m.floor_switch_latency_s >= 0.0) {
-          c.floor_switch_latency_s += m.floor_switch_latency_s;
-          ++with_changes;
-        }
-        if (m.convergence_s >= 0.0) {
-          c.convergence_s += m.convergence_s;
-          ++converged;
-        } else {
-          ++c.unconverged_runs;
-        }
+    BenchmarkCase c;
+    c.scenario = scenarios[si].name;
+    c.filter = kFilterName;
+    c.multi_level = venues.at(scenarios[si].venue_path)->multi_level();
+    c.floor_accuracy = 0.0;
+    c.floor_switch_latency_s = 0.0;
+    int converged = 0, with_changes = 0;
+    std::vector<double> coverages;
+    SmoothnessSamples smooth;
+    for (const auto& jr : job_results) {
+      if (jr.scenario != si) continue;
+      const Metrics& m = jr.metrics;
+      ++c.runs;
+      smooth.add(m);
+      if (m.coverage95 >= 0.0) coverages.push_back(m.coverage95);
+      c.mean_m += m.mean_m;
+      c.cep50_m += m.cep50_m;
+      c.cep95_m += m.cep95_m;
+      c.availability += m.availability;
+      c.compute_us_per_update += m.compute_us_per_update;
+      c.floor_accuracy += m.floor_accuracy;
+      if (m.floor_switch_latency_s >= 0.0) {
+        c.floor_switch_latency_s += m.floor_switch_latency_s;
+        ++with_changes;
       }
-      const double n = std::max(1, c.runs);
-      c.mean_m /= n;
-      c.cep50_m /= n;
-      c.cep95_m /= n;
-      c.availability /= n;
-      c.compute_us_per_update /= n;
-      c.floor_accuracy /= n;
-      c.floor_switch_latency_s = with_changes ? c.floor_switch_latency_s / with_changes : -1.0;
-      c.convergence_s = converged ? c.convergence_s / converged : -1.0;
-      c.coverage95 = mean_or(coverages, -1.0);
-      smooth.fill(c, false);
-      cases.push_back(c);
+      if (m.convergence_s >= 0.0) {
+        c.convergence_s += m.convergence_s;
+        ++converged;
+      } else {
+        ++c.unconverged_runs;
+      }
     }
+    const double n = std::max(1, c.runs);
+    c.mean_m /= n;
+    c.cep50_m /= n;
+    c.cep95_m /= n;
+    c.availability /= n;
+    c.compute_us_per_update /= n;
+    c.floor_accuracy /= n;
+    c.floor_switch_latency_s = with_changes ? c.floor_switch_latency_s / with_changes : -1.0;
+    c.convergence_s = converged ? c.convergence_s / converged : -1.0;
+    c.coverage95 = mean_or(coverages, -1.0);
+    smooth.fill(c, false);
+    cases.push_back(c);
   }
   return cases;
 }
@@ -251,7 +243,7 @@ std::vector<BenchmarkCase> run_trace_benchmark(const std::string& manifest_path,
   }
   if (entries.empty()) throw std::runtime_error("no traces in " + manifest_path);
 
-  const std::vector<EngineConfig> configs = preset_configs(opts);
+  const EngineConfig cfg = engine_config(opts);
   MapCache maps;
 
   JobLimit limit;
@@ -259,12 +251,12 @@ std::vector<BenchmarkCase> run_trace_benchmark(const std::string& manifest_path,
     return limit.run([&] {
       const Venue& venue = *venues.at(entries[i].venue);
       const Trace trace = read_trace_file(entries[i].trace);
-      return replay_all(venue, trace, configs, opts, maps);
+      return replay_metrics(venue, trace, cfg, opts, maps);
     });
   };
-  std::vector<std::vector<Metrics>> results(entries.size());
+  std::vector<Metrics> results(entries.size());
   if (opts.parallel) {
-    std::vector<std::future<std::vector<Metrics>>> futures;
+    std::vector<std::future<Metrics>> futures;
     for (std::size_t i = 0; i < entries.size(); ++i) futures.push_back(std::async(std::launch::async, job, i));
     for (std::size_t i = 0; i < entries.size(); ++i) results[i] = futures[i].get();
   } else {
@@ -272,52 +264,49 @@ std::vector<BenchmarkCase> run_trace_benchmark(const std::string& manifest_path,
   }
 
   groups.push_back("all");
-  const std::vector<std::string>& names = opts.presets;
   std::vector<BenchmarkCase> cases;
   for (const auto& group : groups) {
-    for (std::size_t pi = 0; pi < names.size(); ++pi) {
-      BenchmarkCase c;
-      c.scenario = group;
-      c.preset = names[pi];
-      c.recorded = true;
-      std::vector<double> means, cep50s, cep95s, coverages;
-      SmoothnessSamples smooth;
-      int converged = 0;
-      for (std::size_t i = 0; i < entries.size(); ++i) {
-        if (group != "all" && entries[i].group != group) continue;
-        const Metrics& m = results[i][pi];
-        // A walk shorter than the warm-up has no scored samples.
-        if (m.samples == 0) continue;
-        ++c.runs;
-        smooth.add(m);
-        if (m.coverage95 >= 0.0) coverages.push_back(m.coverage95);
-        means.push_back(m.mean_m);
-        cep50s.push_back(m.cep50_m);
-        cep95s.push_back(m.cep95_m);
-        c.availability += m.availability;
-        c.compute_us_per_update += m.compute_us_per_update;
-        if (m.convergence_s >= 0.0) {
-          c.convergence_s += m.convergence_s;
-          ++converged;
-        } else {
-          ++c.unconverged_runs;
-        }
+    BenchmarkCase c;
+    c.scenario = group;
+    c.filter = kFilterName;
+    c.recorded = true;
+    std::vector<double> means, cep50s, cep95s, coverages;
+    SmoothnessSamples smooth;
+    int converged = 0;
+    for (std::size_t i = 0; i < entries.size(); ++i) {
+      if (group != "all" && entries[i].group != group) continue;
+      const Metrics& m = results[i];
+      // A walk shorter than the warm-up has no scored samples.
+      if (m.samples == 0) continue;
+      ++c.runs;
+      smooth.add(m);
+      if (m.coverage95 >= 0.0) coverages.push_back(m.coverage95);
+      means.push_back(m.mean_m);
+      cep50s.push_back(m.cep50_m);
+      cep95s.push_back(m.cep95_m);
+      c.availability += m.availability;
+      c.compute_us_per_update += m.compute_us_per_update;
+      if (m.convergence_s >= 0.0) {
+        c.convergence_s += m.convergence_s;
+        ++converged;
+      } else {
+        ++c.unconverged_runs;
       }
-      const double n = std::max(1, c.runs);
-      for (double v : means) c.mean_m += v / n;
-      for (double v : cep50s) c.cep50_m += v / n;
-      for (double v : cep95s) c.cep95_m += v / n;
-      c.median_mean_m = percentile(means, 0.5);
-      c.median_cep50_m = percentile(cep50s, 0.5);
-      c.median_cep95_m = percentile(cep95s, 0.5);
-      c.coverage95 = mean_or(coverages, -1.0);
-      c.median_coverage95 = coverages.empty() ? -1.0 : percentile(coverages, 0.5);
-      c.availability /= n;
-      c.compute_us_per_update /= n;
-      c.convergence_s = converged ? c.convergence_s / converged : -1.0;
-      smooth.fill(c, true);
-      cases.push_back(c);
     }
+    const double n = std::max(1, c.runs);
+    for (double v : means) c.mean_m += v / n;
+    for (double v : cep50s) c.cep50_m += v / n;
+    for (double v : cep95s) c.cep95_m += v / n;
+    c.median_mean_m = percentile(means, 0.5);
+    c.median_cep50_m = percentile(cep50s, 0.5);
+    c.median_cep95_m = percentile(cep95s, 0.5);
+    c.coverage95 = mean_or(coverages, -1.0);
+    c.median_coverage95 = coverages.empty() ? -1.0 : percentile(coverages, 0.5);
+    c.availability /= n;
+    c.compute_us_per_update /= n;
+    c.convergence_s = converged ? c.convergence_s / converged : -1.0;
+    smooth.fill(c, true);
+    cases.push_back(c);
   }
   return cases;
 }
@@ -346,13 +335,13 @@ std::vector<Finding> compare_to_baseline(const std::vector<BenchmarkCase>& resul
     for (const auto& [metric, current] : {std::pair{"cep50_m", c.cep50_m}, std::pair{"cep95_m", c.cep95_m}}) {
       Finding f;
       f.scenario = c.scenario;
-      f.preset = c.preset;
+      f.filter = c.filter;
       f.metric = metric;
       f.current = current;
-      if (!base.contains(c.scenario) || !base[c.scenario].contains(c.preset)) {
+      if (!base.contains(c.scenario) || !base[c.scenario].contains(c.filter)) {
         f.status = Finding::Status::New;
       } else {
-        f.baseline = base[c.scenario][c.preset].at(metric).get<double>();
+        f.baseline = base[c.scenario][c.filter].at(metric).get<double>();
         const double limit = f.baseline * (1.0 + tol.relative) + tol.absolute_m;
         const double improved = f.baseline * (1.0 - tol.relative) - tol.absolute_m;
         if (current > limit) {
@@ -363,10 +352,10 @@ std::vector<Finding> compare_to_baseline(const std::vector<BenchmarkCase>& resul
       }
       findings.push_back(f);
     }
-    if (c.multi_level && base.contains(c.scenario) && base[c.scenario].contains(c.preset) &&
-        base[c.scenario][c.preset].contains("floor_accuracy")) {
-      Finding f{Finding::Status::Ok, c.scenario, c.preset, "floor_acc", 0.0, c.floor_accuracy};
-      f.baseline = base[c.scenario][c.preset].at("floor_accuracy").get<double>();
+    if (c.multi_level && base.contains(c.scenario) && base[c.scenario].contains(c.filter) &&
+        base[c.scenario][c.filter].contains("floor_accuracy")) {
+      Finding f{Finding::Status::Ok, c.scenario, c.filter, "floor_acc", 0.0, c.floor_accuracy};
+      f.baseline = base[c.scenario][c.filter].at("floor_accuracy").get<double>();
       if (c.floor_accuracy < f.baseline - tol.floor_accuracy) {
         f.status = Finding::Status::Regressed;
       } else if (c.floor_accuracy > f.baseline + tol.floor_accuracy) {
@@ -375,12 +364,12 @@ std::vector<Finding> compare_to_baseline(const std::vector<BenchmarkCase>& resul
       findings.push_back(f);
     }
   }
-  for (const auto& [scenario, presets] : base.items()) {
-    for (const auto& [preset, _] : presets.items()) {
+  for (const auto& [scenario, filters] : base.items()) {
+    for (const auto& [filter, _] : filters.items()) {
       const bool present = std::any_of(results.begin(), results.end(), [&](const BenchmarkCase& c) {
-        return c.scenario == scenario && c.preset == preset;
+        return c.scenario == scenario && c.filter == filter;
       });
-      if (!present) findings.push_back({Finding::Status::Missing, scenario, preset, "*", 0.0, 0.0});
+      if (!present) findings.push_back({Finding::Status::Missing, scenario, filter, "*", 0.0, 0.0});
     }
   }
   return findings;
@@ -394,7 +383,7 @@ std::string benchmark_to_json(const std::vector<BenchmarkCase>& results, const B
   r = nlohmann::json::object();
   auto round3 = [](double v) { return std::round(v * 1000.0) / 1000.0; };
   for (const auto& c : results) {
-    auto& entry = r[c.scenario][c.preset];
+    auto& entry = r[c.scenario][c.filter];
     entry = {{"mean_m", round3(c.mean_m)},
              {"cep50_m", round3(c.cep50_m)},
              {"cep95_m", round3(c.cep95_m)},
@@ -454,7 +443,7 @@ std::string benchmark_to_markdown(const std::vector<BenchmarkCase>& results) {
       number(c.wall_crossings_per_min, "%.2f", walls, sizeof(walls));
       std::snprintf(buf, sizeof(buf),
                     "| %s | %s | %d | %.2f | %.2f | %.2f | %.2f | %s | %d/%d | %s | %s | %s | %.1f / %.1f | %.1f |\n",
-                    c.scenario.c_str(), c.preset.c_str(), c.runs, c.median_cep50_m, c.median_cep95_m, c.cep50_m,
+                    c.scenario.c_str(), c.filter.c_str(), c.runs, c.median_cep50_m, c.median_cep95_m, c.cep50_m,
                     c.cep95_m, coverage, c.runs - c.unconverged_runs, c.runs, jitter, jumps, walls, c.level_flips,
                     c.level_changes, c.compute_us_per_update);
       out << buf;
@@ -491,7 +480,7 @@ std::string benchmark_to_markdown(const std::vector<BenchmarkCase>& results) {
     number(c.path_ratio, "%.2f", path, sizeof(path));
     std::snprintf(buf, sizeof(buf),
                   "| %s | %s | %.2f | %.2f | %.2f | %s | %s | %s | %s | %s | %s | %s | %s | %s | %.1f |\n",
-                  c.scenario.c_str(), c.preset.c_str(), c.mean_m, c.cep50_m, c.cep95_m, coverage, conv, floor_ok,
+                  c.scenario.c_str(), c.filter.c_str(), c.mean_m, c.cep50_m, c.cep95_m, coverage, conv, floor_ok,
                   floor_switch, flips, jitter, jumps, walls, path, c.compute_us_per_update);
     out << buf;
   }

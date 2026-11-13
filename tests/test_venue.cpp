@@ -245,7 +245,7 @@ TEST(Venue, EveryCommittedVenueHasRoomsInsideItsBounds) {
   for (const char* name : {"office_floor", "office_two_floor", "airport_hall", "kit_informatikbau"}) {
     files.push_back(test::data_path(std::string("venues/") + name + ".json"));
   }
-  for (const auto& floor : std::filesystem::directory_iterator(test::data_path("real"))) {
+  for (const auto& floor : std::filesystem::directory_iterator(test::data_path("demo/msil"))) {
     if (floor.is_directory()) files.push_back((floor.path() / "venue.json").string());
   }
   ASSERT_GT(files.size(), 4u);
@@ -265,7 +265,7 @@ TEST(Venue, EveryCommittedVenueHasRoomsInsideItsBounds) {
 }
 
 TEST(Venue, RealDataVenuesLoad) {
-  // Venues converted from public datasets (datasets/ipin, datasets/uji_ble).
+  // Venues converted from a public dataset (datasets/ipin).
   const Venue nuremberg = load_venue_file(test::data_path("ipin/nuremberg.json"));
   EXPECT_EQ(nuremberg.level_count(), 3);
   EXPECT_TRUE(nuremberg.has_level_footprints());  // floor -1 is only a stair landing
@@ -273,12 +273,6 @@ TEST(Venue, RealDataVenuesLoad) {
   const Venue uminho = load_venue_file(test::data_path("ipin/uminho.json"));
   EXPECT_EQ(uminho.level_count(), 3);
   EXPECT_FALSE(uminho.connectors().empty());
-  for (const char* name : {"lib", "geo_m4", "geo_m12", "geo_m20"}) {
-    SCOPED_TRACE(name);
-    const Venue v = load_venue_file(test::data_path(std::string("uji_ble/") + name + ".json"));
-    EXPECT_GE(v.beacons().size(), 22u);
-    EXPECT_FALSE(v.walls().empty());
-  }
 }
 
 TEST(Venue, RejectsInvalidLevelReferences) {

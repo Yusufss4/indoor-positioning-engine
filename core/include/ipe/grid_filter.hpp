@@ -11,7 +11,7 @@
 
 #include "ipe/baro.hpp"
 #include "ipe/beacon_integrity.hpp"
-#include "ipe/filter.hpp"
+#include "ipe/estimate.hpp"
 #include "ipe/fingerprint_map.hpp"
 #include "ipe/floor_classifier.hpp"
 #include "ipe/level_selector.hpp"
@@ -19,7 +19,6 @@
 #include "ipe/pdr.hpp"
 #include "ipe/rssi_model.hpp"
 #include "ipe/venue.hpp"
-#include "ipe/weighted_point.hpp"
 
 namespace ipe {
 
@@ -42,13 +41,8 @@ struct GridFilterConfig {
 
   double step_length_sigma = 0.08;  ///< Along-track noise per step [m].
   /// Along-track noise per step, relative to the step length. It also stands in for a per-user step-length
-  /// scale (experiment 14: 0.2 beat 0.1 and 0.15, and a scale state).
+  /// scale (docs/history.md, experiment 14: 0.2 beat 0.1 and 0.15, and a scale state).
   double step_length_rel_sigma = 0.2;
-  /// A persistent step-length scale as a state with this many values (1: none, odd).
-  int step_scale_bins = 1;
-  double step_scale_spread = 0.15;   ///< Spacing of the scale values.
-  double step_scale_sigma = 0.15;    ///< Prior spread of the scale.
-  double step_scale_switch = 0.002;  ///< Per step, probability of moving to a neighbouring scale value.
 
   bool estimate_rssi_offset = true;  ///< Device RSSI offset, a Gaussian per cell.
   double rssi_offset_sigma = 8.0;
@@ -60,16 +54,6 @@ struct GridFilterConfig {
   /// walk and the IPIN buildings; 1e-8 keeps a way back from a wrong lock at no measurable cost).
   double teleport_rate_per_s = 1e-8;
   double teleport_period_s = 0.5;
-  /// Adaptive recovery on top (augmented MCL's trigger): each teleport also mixes in 1 - w_fast / w_slow of
-  /// uniform mass, at most recovery_max_fraction, where w_* are averages of the radio updates' predictive
-  /// likelihood. Off when recovery_max_fraction is 0.
-  double recovery_alpha_slow = 0.02;
-  double recovery_alpha_fast = 0.05;
-  double recovery_max_fraction = 0.0;
-  /// Cells holding less than this share of the heaviest cell's mass are background: recovery mass, which
-  /// is spread evenly, so steps leave it in place and it is uniform over headings. Radio and barometer
-  /// still update it. 0 treats every cell in full (exact, and slow on large venues).
-  double active_floor_rel = 0.0;
 
   double level_change_prob_step = 0.08;
   double level_change_prob_baro = 0.1;
@@ -199,8 +183,8 @@ class GridMap {
 };
 
 /// Bayes filter on the GridMap: probability per cell, with the heading (an offset from the gyro-integrated
-/// yaw) and optionally a step scale as discrete states inside each cell, and the device RSSI offset and the
-/// barometer offset as a Gaussian per cell. Deterministic: no random numbers. O(cells x headings) per step
+/// yaw) as a discrete state inside each cell, and the device RSSI offset and the barometer offset as a
+/// Gaussian per cell. Deterministic: no random numbers. O(cells x headings) per step
 /// and magnetometer update, O(cells x readings) per radio update; nothing is allocated after construction
 /// except the wall counts of a beacon the first time it is heard (in the shared GridMap).
 class GridFilter {
@@ -225,7 +209,7 @@ class GridFilter {
   [[nodiscard]] std::span<const double> mass() const { return mass_; }
   /// Mass centroid of each cell.
   [[nodiscard]] Vec2 centroid(std::size_t cell) const { return {cx_[cell], cy_[cell]}; }
-  /// Heading distribution of a cell over heading_bins (step scales summed).
+  /// Heading distribution of a cell over heading_bins.
   [[nodiscard]] double heading_prob(std::size_t cell, int bin) const;
   /// Absolute heading of a bin [rad].
   [[nodiscard]] double bin_heading(int bin) const;
@@ -233,14 +217,17 @@ class GridFilter {
   [[nodiscard]] double rssi_offset_var(std::size_t cell) const { return dev_var_[cell]; }
   [[nodiscard]] bool beacon_excluded(std::size_t beacon_index) const { return integrity_.excluded(beacon_index); }
 
-  /// Replaces the distribution by a point mass at `p` on `level` with heading bin `bin` (all scales), for
-  /// tests.
+  /// Replaces the distribution by a point mass at `p` on `level` with heading bin `bin`, for tests.
   void set_point(Vec2 p, int level, int bin);
 
  private:
   void initialize_uniform();
   bool check_beacon(std::size_t beacon_index, double rssi);
+  /// One radio update: the terms below add a log-likelihood per cell to `loglik_`, then it is applied.
   void update_rssi(double t, std::span<const RssiReading> readings);
+  void add_radio_model_loglik(std::span<const RssiReading> readings);
+  void add_fingerprint_loglik();
+  void add_floor_vote_loglik();
   /// Mixes uniform mass in if the teleport period has passed.
   void maybe_teleport(double t);
   /// Moves `prob` of the mass of each connector cell to the levels next to it.
@@ -248,15 +235,11 @@ class GridFilter {
   /// Multiplies masses by exp(loglik - max) and renormalises; the estimate follows.
   void apply_cell_loglik(double t);
   void normalize();
-  /// Mass below which a cell is background (see active_floor_rel).
-  [[nodiscard]] double active_floor() const;
   void update_estimate(double t);
   /// Recomputes the cached heading of the cloud on `level` (H changes only at steps and headings).
   void update_heading(int level);
-  [[nodiscard]] std::size_t state(std::size_t cell, int scale, int bin) const {
-    return (cell * static_cast<std::size_t>(scales_) + static_cast<std::size_t>(scale)) *
-               static_cast<std::size_t>(bins_) +
-           static_cast<std::size_t>(bin);
+  [[nodiscard]] std::size_t state(std::size_t cell, int bin) const {
+    return cell * static_cast<std::size_t>(bins_) + static_cast<std::size_t>(bin);
   }
   [[nodiscard]] double expected_rssi(std::size_t beacon, std::size_t cell, Vec2 pos) const;
   [[nodiscard]] double elevation(int level) const { return map_->venue().level(level).elevation_m; }
@@ -265,10 +248,7 @@ class GridFilter {
   GridFilterConfig cfg_;
   RssiModel rssi_model_;
   int bins_ = 36;
-  int scales_ = 1;
   bool multi_level_ = false;
-  std::vector<double> scale_value_;
-  std::vector<double> scale_prior_;
 
   // Per cell.
   std::vector<double> mass_;
@@ -276,24 +256,23 @@ class GridFilter {
   std::vector<double> dev_mu_, dev_var_;
   std::vector<double> baro_mu_, baro_var_;
   std::vector<double> loglik_;
-  // Per (cell, scale, heading): conditional distribution within the cell.
+  // Per (cell, heading): conditional distribution within the cell.
   std::vector<float> h_;
   // Scratch for the step.
   std::vector<float> h_next_;
-  std::vector<std::uint8_t> touched_;  ///< Cells some active mass moved into during the current step.
+  std::vector<std::uint8_t> touched_;  ///< Cells some mass moved into during the current step.
   /// What a step moves into a cell: mass, mass times centroid, and mass times the offsets' first and second
   /// moments, side by side (64 bytes per cell) rather than in seven arrays.
   struct StepAcc {
     double mass, x, y, d1, d2, b1, b2, unused;
   };
   std::vector<StepAcc> acc_;
-  std::vector<double> move_x_, move_y_;     ///< Per (scale, heading, node): the move of the current step [m].
+  std::vector<double> move_x_, move_y_;     ///< Per (heading, node): the move of the current step [m].
   std::vector<int> move_offset_;            ///< The same move's lattice offset from the cell being moved, or -1.
   std::vector<std::int32_t> local_target_;  ///< Per lattice offset: target cell of the cell being moved, or -1.
   std::vector<double> local_w_, local_x_, local_y_;
-  std::vector<double> row_lik_;  ///< Magnetometer likelihood per (scale, heading).
   std::vector<double> bin_lik_;  ///< Per heading bin: magnetometer likelihood, or the cloud's heading histogram.
-  std::vector<double> row_;      ///< One cell's (scale, heading) row in double precision.
+  std::vector<double> row_;      ///< One cell's heading row in double precision.
   std::vector<RssiReading> scan_;
   std::vector<double> level_weight_;
   std::vector<WeightedPoint> points_;  ///< Cells as particles for MapConsistentEstimate.
@@ -315,8 +294,6 @@ class GridFilter {
   double now_ = 0.0;
   double last_teleport_t_ = 0.0;
   bool teleport_started_ = false;
-  double w_slow_ = 0.0;
-  double w_fast_ = 0.0;
   bool localized_ = false;
   bool baro_ready_ = false;
   double last_baro_update_t_ = -1e300;

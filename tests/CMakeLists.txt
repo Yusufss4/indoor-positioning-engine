@@ -19,7 +19,6 @@ add_executable(ipe_tests
   test_level_selector.cpp
   test_map_estimate.cpp
   test_pdr.cpp
-  test_plan.cpp
   test_reachable_area.cpp
   test_rng.cpp
   test_rooms.cpp
@@ -29,11 +28,21 @@ add_executable(ipe_tests
   test_trace_player.cpp
   test_track_smoother.cpp
   test_venue.cpp)
-target_link_libraries(ipe_tests PRIVATE ipe_eval ipe_geo ipe_plan GTest::gtest_main)
+target_link_libraries(ipe_tests PRIVATE ipe_eval ipe_geo GTest::gtest_main)
 target_compile_definitions(ipe_tests PRIVATE IPE_DATA_DIR="${PROJECT_SOURCE_DIR}/data")
 
 include(GoogleTest)
 gtest_discover_tests(ipe_tests DISCOVERY_TIMEOUT 60)
+
+if(IPE_BUILD_TOOLS AND IPE_BUILD_EXAMPLES)
+  # The library example on a simulated office walk: it must build against ipe::core alone and run.
+  add_test(NAME example_minimal
+           COMMAND sh -c "\"$0\" --scenario \"$2\" --out \"$3\" && \"$1\" \"$4\" \"$3\""
+                   $<TARGET_FILE:ipe-sim> $<TARGET_FILE:ipe-minimal>
+                   ${PROJECT_SOURCE_DIR}/data/scenarios/office_nominal.json ${CMAKE_BINARY_DIR}/example_trace.csv
+                   ${PROJECT_SOURCE_DIR}/data/venues/office_floor.json)
+  set_tests_properties(example_minimal PROPERTIES PASS_REGULAR_EXPRESSION "error [0-9.]+ m" TIMEOUT 300)
+endif()
 
 if(IPE_BUILD_TOOLS)
   set(IPE_REGRESSION_SEEDS 3 CACHE STRING "Seeds per scenario in the accuracy regression test")
@@ -43,7 +52,7 @@ if(IPE_BUILD_TOOLS)
                    --seeds ${IPE_REGRESSION_SEEDS})
   set_tests_properties(accuracy_regression PROPERTIES LABELS regression TIMEOUT 900)
 
-  # Real phone traces (docs/real_data.md). The data is not in the repository:
+  # Real phone traces (docs/datasets.md). The data is not in the repository:
   # the test is skipped until datasets/msil/fetch.sh and
   # convert.py --wifi --scans --out datasets/msil/out_scans have run.
   set(IPE_MSIL_MANIFEST ${PROJECT_SOURCE_DIR}/datasets/msil/out_scans/manifest_holdout.json)
@@ -53,7 +62,7 @@ if(IPE_BUILD_TOOLS)
                    ${PROJECT_SOURCE_DIR}/tests/regression/msil_baseline.json)
   set_tests_properties(real_data_regression PROPERTIES LABELS "regression;realdata" SKIP_RETURN_CODE 77 TIMEOUT 1800)
 
-  # IPIN Track 3 scoring walks with position fingerprints (docs/benchmarks.md), skipped until
+  # IPIN Track 3 scoring walks with position fingerprints (docs/datasets.md), skipped until
   # datasets/ipin/fetch.sh and convert.py --wifi --scans --fingerprints --positions --unmodelled
   # --out datasets/ipin/out_fp have run.
   set(IPE_IPIN_MANIFEST ${PROJECT_SOURCE_DIR}/datasets/ipin/out_fp/manifest_holdout.json)

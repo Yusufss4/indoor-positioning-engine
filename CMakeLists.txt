@@ -18,6 +18,7 @@ endif()
 
 option(IPE_BUILD_TOOLS "Build command line tools (sim, replay, regress)" ${_ipe_native})
 option(IPE_BUILD_TESTS "Build unit and regression tests" ${_ipe_native})
+option(IPE_BUILD_EXAMPLES "Build the example programs" ${_ipe_native})
 option(IPE_BUILD_WASM "Build the WebAssembly demo module" ${EMSCRIPTEN})
 option(IPE_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
 set(IPE_SANITIZE "" CACHE STRING "Comma separated sanitizers, e.g. address,undefined")
@@ -50,14 +51,17 @@ add_subdirectory(core)
 add_subdirectory(sim)
 add_subdirectory(eval)
 
-# Map import/export and beacon planning are native tooling; the wasm demo reads venue JSON directly.
+# Map import/export is native tooling; the wasm demo reads venue JSON directly.
 if(IPE_BUILD_TOOLS OR IPE_BUILD_TESTS)
   add_subdirectory(geo)
-  add_subdirectory(plan)
 endif()
 
 if(IPE_BUILD_TOOLS)
   add_subdirectory(tools)
+endif()
+
+if(IPE_BUILD_EXAMPLES)
+  add_subdirectory(examples)
 endif()
 
 if(IPE_BUILD_TESTS)

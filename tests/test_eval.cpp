@@ -6,6 +6,7 @@
 #include <sstream>
 #include <stdexcept>
 
+#include "ipe/config.hpp"
 #include "ipe/eval.hpp"
 #include "ipe/regression.hpp"
 #include "ipe/simulator.hpp"
@@ -139,7 +140,7 @@ TEST(Eval, ReplayRecordsAnEvenTrack) {
   const auto sc = sim::load_scenario_file(test::data_path("scenarios/office_nominal.json"));
   const auto venue = load_venue_file(sc.venue_path);
   const auto trace = sim::simulate(sc, venue);
-  const auto result = replay(venue, trace, preset_config("grid"));
+  const auto result = replay(venue, trace, EngineConfig{});
   ASSERT_GT(result.track.size(), 10u);
   for (std::size_t i = 1; i < result.track.size(); ++i) {
     EXPECT_NEAR(result.track[i].t - result.track[i - 1].t, 0.2, 1e-9);
@@ -186,7 +187,7 @@ TEST(Eval, ReplayReportsRoomEvents) {
   const auto venue = load_venue_file(sc.venue_path);
   ASSERT_FALSE(venue.rooms().empty());
   const auto trace = sim::simulate(sc, venue);
-  const auto r = replay(venue, trace, preset_config("grid"));
+  const auto r = replay(venue, trace, EngineConfig{});
   EXPECT_FALSE(r.truth_room_events.empty());
   EXPECT_FALSE(r.room_events.empty());
   for (std::size_t k = 1; k < r.room_events.size(); ++k) EXPECT_LE(r.room_events[k - 1].t, r.room_events[k].t);
@@ -248,8 +249,8 @@ TEST(Eval, ReplayGroupsScans) {
   const auto trace = sim::simulate(sc, venue);
   Trace scanned = trace;
   for (std::size_t b = 0; b < scanned.ble.size(); ++b) scanned.ble[b].scan = static_cast<std::uint32_t>(b + 1);
-  const auto a = replay(venue, trace, preset_config("grid"));
-  const auto b = replay(venue, scanned, preset_config("grid"));
+  const auto a = replay(venue, trace, EngineConfig{});
+  const auto b = replay(venue, scanned, EngineConfig{});
   ASSERT_EQ(a.records.size(), b.records.size());
   for (std::size_t i = 0; i < a.records.size(); ++i) {
     EXPECT_EQ(a.records[i].estimate.x, b.records[i].estimate.x);
@@ -258,41 +259,39 @@ TEST(Eval, ReplayGroupsScans) {
   EXPECT_GT(a.metrics.coverage95, 0.0);
 }
 
-TEST(Eval, OnlyTheGridPreset) {
-  EXPECT_EQ(preset_names(), std::vector<std::string>{"grid"});
-  EXPECT_TRUE(preset_config("grid").rssi.wall_aware);
-  EXPECT_TRUE(preset_config("grid").filter.map_consistent_estimate);
+TEST(Eval, OnlyTheGridFilter) {
+  EXPECT_NO_THROW(check_filter_name("grid"));
   for (const char* gone : {"pf", "pf-nomap", "ekf", "wcl", "kalman"}) {
-    EXPECT_THROW(preset_config(gone), std::invalid_argument) << gone;
+    EXPECT_THROW(check_filter_name(gone), std::invalid_argument) << gone;
   }
   // The removed particle filter's section and switches are rejected like any typo.
   for (const char* gone : {R"({"pf": {"num_particles": 500}})", R"({"filter": {"num_particles": 500}})",
                            R"({"filter": {"init_proposal": true}})", R"({"filter": {"baro_jump": true}})"}) {
-    auto cfg = preset_config("grid");
-    EXPECT_THROW(apply_config_overrides(cfg, gone), std::invalid_argument) << gone;
+    EngineConfig cfg;
+    EXPECT_THROW(apply_config_patch(cfg, gone), std::invalid_argument) << gone;
   }
 }
 
 TEST(Eval, ConfigOverridesMergeAndRejectTypos) {
-  auto cfg = preset_config("grid");
-  apply_config_overrides(cfg, R"({"filter": {"heading_bins": 72}, "rssi": {"sigma_db": 7.5}})");
+  EngineConfig cfg;
+  apply_config_patch(cfg, R"({"filter": {"heading_bins": 72}, "rssi": {"sigma_db": 7.5}})");
   EXPECT_EQ(cfg.filter.heading_bins, 72);
   EXPECT_DOUBLE_EQ(cfg.rssi.sigma_db, 7.5);
   EXPECT_TRUE(cfg.filter.map_consistent_estimate);  // untouched keys keep their values
-  EXPECT_THROW(apply_config_overrides(cfg, R"({"filter": {"heading_binz": 10}})"), std::invalid_argument);
-  EXPECT_THROW(apply_config_overrides(cfg, R"({"filter": "nope"})"), std::invalid_argument);
+  EXPECT_THROW(apply_config_patch(cfg, R"({"filter": {"heading_binz": 10}})"), std::invalid_argument);
+  EXPECT_THROW(apply_config_patch(cfg, R"({"filter": "nope"})"), std::invalid_argument);
 }
 
 TEST(Eval, ConfigJsonRoundTrip) {
-  auto cfg = preset_config("grid");
+  EngineConfig cfg;
   cfg.filter.heading_bins = 48;
   cfg.rssi.wall_aware = false;
-  auto copy = preset_config("grid");
-  apply_config_overrides(copy, config_to_json(cfg));
+  EngineConfig copy;
+  apply_config_patch(copy, config_to_json(cfg));
   EXPECT_EQ(copy.filter.heading_bins, 48);
   EXPECT_FALSE(copy.rssi.wall_aware);
   // Keys of the removed filters are rejected like any typo.
-  EXPECT_THROW(apply_config_overrides(copy, R"({"ekf": {"rssi_min_dbm": -80}})"), std::invalid_argument);
+  EXPECT_THROW(apply_config_patch(copy, R"({"ekf": {"rssi_min_dbm": -80}})"), std::invalid_argument);
 }
 
 TEST(Eval, ShippedConfigPatchesApply) {
@@ -301,8 +300,8 @@ TEST(Eval, ShippedConfigPatchesApply) {
     ASSERT_TRUE(in) << name;
     std::stringstream text;
     text << in.rdbuf();
-    auto cfg = preset_config("grid");
-    EXPECT_NO_THROW(apply_config_overrides(cfg, text.str())) << name;
+    EngineConfig cfg;
+    EXPECT_NO_THROW(apply_config_patch(cfg, text.str())) << name;
   }
 }
 
@@ -312,7 +311,7 @@ TEST(Eval, ReplayProducesOneRecordPerTruthSample) {
   const auto trace = sim::simulate(sc, venue);
   ReplayOptions opts;
   opts.snapshot_every = 10;
-  const auto r = replay(venue, trace, preset_config("grid"), opts);
+  const auto r = replay(venue, trace, EngineConfig{}, opts);
   EXPECT_EQ(r.records.size(), trace.truth.size());
   EXPECT_FALSE(r.snapshots.empty());
   EXPECT_GT(r.metrics.steps, 100u);
@@ -354,7 +353,7 @@ TEST(Eval, TraceManifestGroupsRecordedTraces) {
 TEST(Eval, BaselineComparisonFlagsRegressions) {
   BenchmarkCase c;
   c.scenario = "s";
-  c.preset = "grid";
+  c.filter = "grid";
   c.cep50_m = 1.0;
   c.cep95_m = 3.0;
   const std::string baseline =

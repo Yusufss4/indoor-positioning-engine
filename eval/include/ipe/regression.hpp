@@ -8,10 +8,10 @@
 
 namespace ipe::eval {
 
-/// Metrics for one (scenario, preset) pair averaged over several seeds.
+/// Metrics for one scenario averaged over several seeds.
 struct BenchmarkCase {
   std::string scenario;
-  std::string preset;
+  std::string filter;
   int runs = 0;
   double mean_m = 0.0;
   double cep50_m = 0.0;
@@ -43,21 +43,20 @@ struct BenchmarkCase {
 };
 
 struct BenchmarkOptions {
-  std::vector<std::string> presets = preset_names();
   int seeds = 1;  ///< Runs per scenario use seeds scenario.seed + k, k < seeds.
   ReplayOptions replay;
   bool parallel = true;
-  /// JSON merge patches applied in order to every preset (A/B experiments).
+  /// JSON merge patches applied in order to the default config (A/B experiments).
   std::vector<std::string> config_patches;
 };
 
-/// Simulates every scenario file in `scenario_dir` and replays it through
-/// each preset. Results are sorted by scenario then preset order.
+/// Simulates every scenario file in `scenario_dir` and replays it through the engine. Results are sorted
+/// by scenario.
 std::vector<BenchmarkCase> run_benchmark(const std::string& scenario_dir, const BenchmarkOptions& opts);
 
-/// Replays recorded traces listed in a manifest through each preset:
+/// Replays recorded traces listed in a manifest through the engine:
 ///   {"traces": [{"name": ..., "group": ..., "venue": "a/venue.json", "trace": "a/x.csv"}, ...]}
-/// Paths are relative to the manifest. One case per (group, preset), plus an
+/// Paths are relative to the manifest. One case per group, plus an
 /// "all" group over every trace. `opts.seeds` is ignored: a recording is one run.
 std::vector<BenchmarkCase> run_trace_benchmark(const std::string& manifest_path, const BenchmarkOptions& opts);
 
@@ -70,7 +69,7 @@ struct Tolerance {
 struct Finding {
   enum class Status { Ok, Improved, Regressed, Missing, New } status = Status::Ok;
   std::string scenario;
-  std::string preset;
+  std::string filter;
   std::string metric;
   double baseline = 0.0;
   double current = 0.0;

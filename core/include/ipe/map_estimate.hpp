@@ -5,9 +5,15 @@
 #include <vector>
 
 #include "ipe/venue.hpp"
-#include "ipe/weighted_point.hpp"
 
 namespace ipe {
+
+/// A point of the posterior with its share of the mass: a grid cell's mass at its centroid.
+struct WeightedPoint {
+  Vec2 pos;
+  double weight = 0.0;
+  int level = 0;  ///< Level index.
+};
 
 /// Keeps a reported position on the map. The weighted mean of a posterior
 /// split across a wall can fall on the wall, in an empty room or behind

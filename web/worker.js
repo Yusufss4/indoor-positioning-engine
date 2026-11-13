@@ -1,7 +1,7 @@
 "use strict";
 
 // Runs the engine off the page's thread and streams the frames it records to app.js. The grid filter is
-// expensive: on the larger mall floors it takes about as long as the walk itself (docs/grid.md#cost), and the
+// expensive: on the larger mall floors it takes about as long as the walk itself (docs/design.md#cost), and the
 // page must stay responsive meanwhile. app.js starts a new worker for every run and terminates the old one, so
 // nothing here needs to be reset.
 importScripts("ipe_wasm.js");

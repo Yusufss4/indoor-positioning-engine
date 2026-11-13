@@ -7,9 +7,8 @@
 
 #include "ipe/venue.hpp"
 
-/// Venue interchange with the map formats indoor-mapping platforms use:
-/// GeoJSON (driven by a property mapping table) and a subset of Apple's IMDF.
-/// See docs/formats.md for the exact subset.
+/// Venue interchange with GeoJSON, the format indoor-mapping platforms export: a property mapping table
+/// says which features mean what. See docs/formats.md.
 namespace ipe::geo {
 
 /// Serialises a venue to the JSON format read by parse_venue. Coordinates
@@ -23,10 +22,6 @@ struct ExportOptions {
 /// Writes the venue as a GeoJSON FeatureCollection in WGS84 using the "ipe"
 /// property scheme (data/mappings/ipe.json). Throws if the venue has no georef.
 std::string export_geojson(const Venue& venue, const ExportOptions& opts = {});
-
-/// Writes the IMDF subset (manifest, venue, level, unit, opening) plus a
-/// beacons.json sidecar into `dir`, which must exist. Throws without georef.
-void export_imdf(const Venue& venue, const std::string& dir, const ExportOptions& opts = {});
 
 /// Says which GeoJSON properties and values mean what. A map platform's
 /// export is supported by writing one of these tables, not code.
@@ -81,12 +76,5 @@ struct ImportResult {
 /// Builds a venue from a GeoJSON FeatureCollection in WGS84. The local frame
 /// is anchored at the south-west corner of the map's extent.
 ImportResult import_geojson(std::string_view geojson, const Mapping& mapping, const ImportOptions& opts = {});
-
-/// Reads an IMDF directory (venue, level, unit, opening GeoJSON files). Unit
-/// categories map to walls (structure, concrete, ...), connectors (stairs,
-/// elevator, escalator) or rooms whose outlines are walls; units carrying
-/// "ipe:room_id" (written by export_imdf) become venue rooms. A beacons.json
-/// sidecar in the directory is used when opts.beacons_json is empty.
-ImportResult import_imdf(const std::string& dir, const ImportOptions& opts = {});
 
 }  // namespace ipe::geo

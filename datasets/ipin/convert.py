@@ -12,7 +12,7 @@ Per site (sites.json; one site can draw on several yearly packages):
   ipe traces: earth-frame IMU in the engine's convention, barometer, BLE and Wi-Fi rows and one
   ground-truth row per landmark. Validation walks form the tune manifest, scoring walks the holdout.
 
-See docs/ipin.md.
+See docs/datasets.md.
 """
 
 from __future__ import annotations

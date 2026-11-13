@@ -241,7 +241,7 @@ std::optional<std::string> prop_string(const json& props, const std::string& key
   if (v.is_string()) return v.get<std::string>();
   if (v.is_number_integer()) return std::to_string(v.get<long long>());
   if (v.is_number()) return v.dump();
-  if (v.is_object() && !v.empty()) {  // IMDF labels: {"en": "Ground"}
+  if (v.is_object() && !v.empty()) {  // localised labels: {"en": "Ground"}
     if (v.contains("en") && v.at("en").is_string()) return v.at("en").get<std::string>();
     if (v.begin()->is_string()) return v.begin()->get<std::string>();
   }

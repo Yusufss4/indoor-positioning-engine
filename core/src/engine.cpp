@@ -30,17 +30,30 @@ PositioningEngine::PositioningEngine(const Venue& venue, EngineConfig cfg, std::
 
 void PositioningEngine::on_imu(const ImuSample& sample) {
   now_ = std::max(now_, sample.t);
-  if (const auto step = pdr_.process(sample)) {
-    ++steps_;
-    const Estimate before = filter_.estimate();
-    filter_.on_step(*step);
-    smoother_.on_step(step->t, before, filter_.estimate(), filter_.step_motion());
-    if (step->mag_valid) {
-      filter_.on_heading(step->t, step->mag_heading, deg2rad(cfg_.mag_heading_sigma_deg));
-      smoother_.on_update(step->t, filter_.estimate());
-    }
-  }
+  if (const auto step = pdr_.process(sample)) apply_step(*step);
   update_rooms(sample.t);
+}
+
+void PositioningEngine::on_step(const StepEvent& step) {
+  now_ = std::max(now_, step.t);
+  apply_step(step);
+  update_rooms(step.t);
+}
+
+void PositioningEngine::on_heading(double t, double heading, double sigma) {
+  filter_.on_heading(t, heading, sigma);
+  after_update(t);
+}
+
+void PositioningEngine::apply_step(const StepEvent& step) {
+  ++steps_;
+  const Estimate before = filter_.estimate();
+  filter_.on_step(step);
+  smoother_.on_step(step.t, before, filter_.estimate(), filter_.step_motion());
+  if (step.mag_valid) {
+    filter_.on_heading(step.t, step.mag_heading, deg2rad(cfg_.mag_heading_sigma_deg));
+    smoother_.on_update(step.t, filter_.estimate());
+  }
 }
 
 void PositioningEngine::on_ble(double t, std::string_view beacon_id, double rssi) {

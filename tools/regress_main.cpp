@@ -17,26 +17,16 @@ With --traces, recorded traces listed in the manifest are replayed instead
 
 options:
   --seeds N           runs per scenario (default 3; ignored with --traces)
-  --presets LIST      comma separated presets; grid is the only one (default grid)
+  --presets LIST      grid, the only filter (kept for existing scripts)
   --update            overwrite the baseline with the current results
   --markdown FILE     write a markdown results table
   --json FILE         write the current results as JSON
   --tolerance REL     allowed relative increase (default 0.10)
   --serial            disable parallel execution
-  --config FILE       JSON merge patch file applied to every preset (before --set)
-  --set JSON          merge patch applied to every preset, for A/B experiments
+  --config FILE       JSON merge patch file applied to the default config (before --set)
+  --set JSON          merge patch applied on top, for A/B experiments
   --no-baseline       only print results, do not compare
 )";
-
-std::vector<std::string> split_csv(const std::string& s) {
-  std::vector<std::string> out;
-  std::stringstream ss(s);
-  std::string item;
-  while (std::getline(ss, item, ',')) {
-    if (!item.empty()) out.push_back(item);
-  }
-  return out;
-}
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -51,7 +41,7 @@ int main(int argc, char** argv) {
     BenchmarkOptions opts;
     opts.seeds = std::stoi(args.get("seeds", "3"));
     opts.parallel = !args.has("serial");
-    if (args.has("presets")) opts.presets = split_csv(args.get("presets"));
+    if (args.has("presets")) check_filter_name(args.get("presets"));
     if (args.has("config")) {
       std::ifstream cfg(args.get("config"));
       if (!cfg) throw std::runtime_error("cannot open " + args.get("config"));
@@ -89,7 +79,7 @@ int main(int argc, char** argv) {
       if (f.status == Finding::Status::Ok) continue;
       if (f.status == Finding::Status::Regressed) ++regressions;
       std::printf("%-10s %-24s %-9s %-8s baseline=%.3f current=%.3f\n", to_string(f.status).c_str(), f.scenario.c_str(),
-                  f.preset.c_str(), f.metric.c_str(), f.baseline, f.current);
+                  f.filter.c_str(), f.metric.c_str(), f.baseline, f.current);
     }
     std::cout << (regressions ? "FAIL: " + std::to_string(regressions) + " regression(s)\n"
                               : "PASS: no accuracy regressions\n");
