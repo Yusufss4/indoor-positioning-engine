@@ -21,7 +21,9 @@ accuracy. [docs/design.md](docs/design.md) explains the engine and maps each con
 - `tests/` - GoogleTest unit tests and the regression CTests; `tests/regression/*.json` are the accepted
   accuracy baselines. `tests/install` is a program outside this build that uses the engine, installed
   (`find_package(ipe)`, package files in `cmake/`) and as a subdirectory.
-- `web/` - Emscripten bindings and the browser demo. `viz/` - figures and the README GIF.
+- `web/` - Emscripten bindings, the browser demo (`index.html`, replays) and the live page (`live.html`,
+  the engine fed by a phone's motion sensors). `web/check_live.py` tests the live page in headless Chrome.
+  `viz/` - figures and the README GIF.
 - `data/venues`, `data/scenarios` - inputs. `data/geojson` is generated from `data/venues` by `ipe-import`;
   a unit test fails when it is stale.
 - `data/configs` - config patches for `--config`: `msil_wifi.json` (Wi-Fi), `ipin.json` (plus the floor

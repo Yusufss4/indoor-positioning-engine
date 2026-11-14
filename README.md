@@ -6,7 +6,8 @@ A C++20 engine that turns a phone's sensor data (IMU, BLE and Wi-Fi signal stren
 position on the right floor of a building, with the tools to measure how well it does.
 
 **[Live demo](https://yusufss4.github.io/indoor-positioning-engine/)**: the same engine, compiled to
-WebAssembly, running in your browser.
+WebAssembly, running in your browser. **[On your phone](https://yusufss4.github.io/indoor-positioning-engine/live.html)**
+it runs on the phone's own motion sensors as you walk.
 
 ![a recorded mall walk replayed through the engine](docs/img/demo.gif)
 
@@ -78,6 +79,7 @@ ipe::PositioningEngine engine(venue);                           // settings chos
 engine.on_imu(sample);                // accelerometer, gyroscope, magnetometer
 engine.on_scan(t, readings);          // a Wi-Fi scan (or on_ble for one BLE packet)
 engine.on_pressure(t, hpa);           // barometer
+engine.on_position_fix(t, {x, y}, floor, 1.0);   // a known position: a tap on the map, a QR code
 const ipe::Estimate fix = engine.estimate();   // x, y, floor, covariance
 ```
 
@@ -104,6 +106,9 @@ or `ipe::apply_config_patch`. `ipe-replay --print-config` lists every setting. U
 emcmake cmake -S . -B build-wasm -DCMAKE_BUILD_TYPE=Release && cmake --build build-wasm -j
 python3 -m http.server -d build-wasm/site 8000      # open http://localhost:8000
 ```
+
+`live.html` on that site is the live page. A phone only gives a web page its motion sensors over https,
+so use the deployed page on a phone; `web/check_live.py` tests it on a desktop.
 
 ## Documentation
 

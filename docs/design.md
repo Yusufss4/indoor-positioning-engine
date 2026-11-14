@@ -33,6 +33,7 @@ WebAssembly demo all use it, so they see identical inputs.
 | A radio update: integrity gate, log-distance model | `core/src/filter/radio.cpp`, `core/src/rssi_model.cpp`, `core/src/beacon_integrity.cpp` |
 | Fingerprints and the floor vote | `core/src/filter/fingerprint.cpp`, `core/src/fingerprint_map.cpp`, `core/src/floor_classifier.cpp` |
 | Barometer, floor changes | `core/src/filter/pressure.cpp`, `core/src/baro.cpp` |
+| A position given from outside (a tap, a tag) | `core/src/filter/position_fix.cpp` |
 | Recovery | `core/src/filter/recovery.cpp` |
 | Reported estimate: level, position on the map | `core/src/filter/estimate.cpp`, `core/src/level_selector.cpp`, `core/src/map_estimate.cpp` |
 | Drawn position between updates | `core/src/track_smoother.cpp` |
@@ -49,7 +50,8 @@ WebAssembly demo all use it, so they see identical inputs.
   filter does not trust it: its along-track noise grows with the step length.
 - **Heading**: gyro z integrated between steps gives the turn; the magnetometer heading averaged over the
   step is a separate, outlier-prone absolute observation. Keeping them apart lets the filter decide how
-  much to trust the magnetometer.
+  much to trust the magnetometer. A sample whose horizontal field is exactly zero has no magnetometer
+  reading; steps then carry no absolute heading.
 
 A motion model of your own can replace this stage: `PositioningEngine::on_step` takes its steps
 ([extending.md](extending.md#a-motion-model)).
@@ -134,6 +136,12 @@ bin exactly; only the 3° per step process noise moves mass between bins.
   with a Gaussian plus a 5% uniform part over 20 m, then an update of the cell's offset. The first sample
   sets each cell's offset from its own level, so the barometer argues about changes, not absolute height.
   Lift rides produce no steps, so each barometer update also moves 10% of the mass in connector cells.
+- **Position fix** (`position_fix.cpp`). A position known from outside the engine: a tap on the map, a QR
+  code or NFC tag at a known place, a GNSS fix at an entrance. 1% of the uniform prior is mixed in first,
+  so that it can move an estimate that is confidently somewhere else; then a Gaussian of the fix's sigma
+  around it, on its level. Mass that is already near the fix outweighs the mixed-in prior and keeps its
+  heading and offsets. Like a radio update it makes the estimate valid, so a venue without any radio can
+  be walked from a fix on steps and walls alone.
 - **Recovery** (`recovery.cpp`). A tiny share of uniform mass is mixed in (`teleport_rate_per_s`, 1e-8 per
   second): a way back from a wrong lock that a misbehaving beacon cannot exploit. If all mass dies, the
   filter starts again from the uniform prior.
