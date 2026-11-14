@@ -14,7 +14,8 @@ double TracePlayer::next_time() const {
   if (finished()) return kNever;
   const auto& tr = *trace_;
   return std::min({i_ < tr.imu.size() ? tr.imu[i_].t : kNever, b_ < tr.ble.size() ? tr.ble[b_].t : kNever,
-                   p_ < tr.baro.size() ? tr.baro[p_].t : kNever, tr.truth[g_].t});
+                   p_ < tr.baro.size() ? tr.baro[p_].t : kNever, x_ < tr.fixes.size() ? tr.fixes[x_].t : kNever,
+                   tr.truth[g_].t});
 }
 
 }  // namespace ipe

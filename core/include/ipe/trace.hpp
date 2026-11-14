@@ -26,6 +26,14 @@ struct BaroSample {
   double hpa = 0.0;  ///< Barometric pressure as reported by the phone.
 };
 
+/// A position known from outside the engine (PositioningEngine::on_position_fix).
+struct FixSample {
+  double t = 0.0;
+  Vec2 pos;
+  int level = 0;         ///< Level index in the venue; negative when the floor is not known.
+  double sigma_m = 1.0;  ///< How well the position is known.
+};
+
 struct TruthSample {
   double t = 0.0;
   Vec2 pos;
@@ -40,6 +48,7 @@ struct Trace {
   std::vector<ImuSample> imu;
   std::vector<BleSample> ble;
   std::vector<BaroSample> baro;  ///< Optional; empty when the phone has no barometer.
+  std::vector<FixSample> fixes;  ///< Optional; positions given to the engine from outside.
   std::vector<TruthSample> truth;
 
   [[nodiscard]] double duration() const;

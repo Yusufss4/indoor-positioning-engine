@@ -9,6 +9,7 @@ add_library(ipe_core STATIC
   src/filter/fingerprint.cpp
   src/filter/grid_filter.cpp
   src/filter/motion.cpp
+  src/filter/position_fix.cpp
   src/filter/pressure.cpp
   src/filter/radio.cpp
   src/filter/recovery.cpp

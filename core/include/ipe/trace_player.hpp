@@ -14,14 +14,15 @@ namespace ipe {
 
 /// Feeds a recorded or simulated trace into a PositioningEngine in timestamp
 /// order: the one place that knows how the trace's streams interleave. On equal
-/// timestamps IMU comes first, then radio, then pressure, then the truth sample.
+/// timestamps IMU comes first, then radio, then pressure, then a position fix,
+/// then the truth sample.
 /// Readings that share a scan id are delivered as one scan; packets from
 /// beacons the venue does not know reach the engine with an out-of-range index,
 /// which it ignores. A new sensor stream is added here once, and every replay
 /// (eval, the web demo) picks it up.
 class TracePlayer {
  public:
-  enum class Event { Imu, Radio, Pressure, Truth };
+  enum class Event { Imu, Radio, Pressure, Fix, Truth };
 
   /// Both must outlive the player. Beacon ids are resolved once, here.
   TracePlayer(const Venue& venue, const Trace& trace);
@@ -32,7 +33,7 @@ class TracePlayer {
   [[nodiscard]] double next_time() const;
   /// Feeds the next sensor event to `engine`, or consumes the next truth
   /// sample (see truth()). Must not be called when finished(). `Engine` is
-  /// PositioningEngine, or anything with its on_imu/on_ble/on_scan/on_pressure.
+  /// PositioningEngine, or anything with its on_imu/on_ble/on_scan/on_pressure/on_position_fix.
   template <class Engine>
   Event step(Engine& engine);
 
@@ -52,6 +53,7 @@ class TracePlayer {
   std::size_t i_ = 0;  ///< Next imu sample.
   std::size_t b_ = 0;  ///< Next ble row.
   std::size_t p_ = 0;  ///< Next barometer sample.
+  std::size_t x_ = 0;  ///< Next position fix.
   std::size_t g_ = 0;  ///< Next truth sample.
 };
 
@@ -62,13 +64,14 @@ TracePlayer::Event TracePlayer::step(Engine& engine) {
   const double ti = i_ < tr.imu.size() ? tr.imu[i_].t : kNever;
   const double tb = b_ < tr.ble.size() ? tr.ble[b_].t : kNever;
   const double tp = p_ < tr.baro.size() ? tr.baro[p_].t : kNever;
+  const double tx = x_ < tr.fixes.size() ? tr.fixes[x_].t : kNever;
   const double tg = tr.truth[g_].t;
 
-  if (ti <= tb && ti <= tp && ti <= tg) {
+  if (ti <= tb && ti <= tp && ti <= tx && ti <= tg) {
     engine.on_imu(tr.imu[i_++]);
     return Event::Imu;
   }
-  if (tb <= tp && tb <= tg) {
+  if (tb <= tp && tb <= tx && tb <= tg) {
     const std::size_t end = scan_end(tr.ble, b_);
     const std::size_t known = venue_->beacons().size();
     fed_ble_.clear();
@@ -86,10 +89,15 @@ TracePlayer::Event TracePlayer::step(Engine& engine) {
     b_ = end;
     return Event::Radio;
   }
-  if (tp <= tg) {
+  if (tp <= tx && tp <= tg) {
     engine.on_pressure(tr.baro[p_].t, tr.baro[p_].hpa);
     ++p_;
     return Event::Pressure;
+  }
+  if (tx <= tg) {
+    const FixSample& fix = tr.fixes[x_++];
+    engine.on_position_fix(fix.t, fix.pos, fix.level, fix.sigma_m);
+    return Event::Fix;
   }
   ++g_;
   return Event::Truth;

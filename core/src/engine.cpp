@@ -91,6 +91,11 @@ void PositioningEngine::on_pressure(double t, double hpa) {
   after_update(t);
 }
 
+void PositioningEngine::on_position_fix(double t, Vec2 pos, int level, double sigma_m) {
+  filter_.on_position_fix(t, pos, level, sigma_m);
+  after_update(t);
+}
+
 void PositioningEngine::after_update(double t) {
   now_ = std::max(now_, t);
   smoother_.on_update(t, filter_.estimate());
