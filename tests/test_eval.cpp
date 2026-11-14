@@ -305,6 +305,31 @@ TEST(Eval, ShippedConfigPatchesApply) {
   }
 }
 
+TEST(Eval, RecommendedConfigIsTheShippedPatchThatFitsTheVenue) {
+  const auto shipped = [](const char* name) {
+    std::ifstream in(test::data_path(std::string("configs/") + name));
+    std::stringstream text;
+    text << in.rdbuf();
+    return config_to_json(config_from_json(text.str()));
+  };
+  const auto recommended = [](const char* venue) {
+    return config_to_json(recommended_config(load_venue_file(test::data_path(venue))));
+  };
+  // Surveyed beacons, no training scans: the engine as shipped.
+  EXPECT_EQ(recommended("venues/office_floor.json"), config_to_json(EngineConfig{}));
+  EXPECT_EQ(recommended("venues/office_two_floor.json"), config_to_json(EngineConfig{}));
+  // Training scans with a floor only, then with positions.
+  EXPECT_EQ(recommended("ipin/nuremberg.json"), shipped("ipin.json"));
+  EXPECT_EQ(recommended("demo/msil/site1_F2/venue.json"), shipped("fingerprint.json"));
+}
+
+TEST(Eval, EngineWithoutAConfigUsesTheRecommendedOne) {
+  const Venue venue = load_venue_file(test::data_path("ipin/nuremberg.json"));
+  const PositioningEngine engine(venue);
+  EXPECT_EQ(config_to_json(engine.config()), config_to_json(recommended_config(venue)));
+  EXPECT_DOUBLE_EQ(engine.config().filter.floor_prior_weight, 3.0);
+}
+
 TEST(Eval, ReplayProducesOneRecordPerTruthSample) {
   const auto sc = sim::load_scenario_file(test::data_path("scenarios/office_nominal.json"));
   const auto venue = load_venue_file(sc.venue_path);

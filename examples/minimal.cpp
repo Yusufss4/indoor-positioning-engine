@@ -2,7 +2,7 @@
 //
 //   ./build/examples/ipe-minimal VENUE.json TRACE.csv [CONFIG_PATCH.json]
 //
-// for example with data/demo/msil/site1_F2/venue.json, the .csv next to it and data/configs/fingerprint.json.
+// for example with data/demo/msil/site1_F2/venue.json and the .csv next to it.
 //
 // It links ipe::core only. In an app the four on_*() calls below come from the phone's sensor callbacks;
 // here a recorded trace supplies them, and its surveyed truth gives an error to print.
@@ -26,8 +26,9 @@ int main(int argc, char** argv) {
   // The map: walls, floors, beacons or Wi-Fi access points, optionally training scans (docs/formats.md).
   const ipe::Venue venue = ipe::load_venue_file(argv[1]);
 
-  // The default config is the engine as shipped; a JSON merge patch changes what a deployment needs.
-  ipe::EngineConfig config;
+  // The settings that fit this venue (Wi-Fi fingerprints when it has training scans). A JSON merge patch
+  // changes what a deployment needs; without one, `ipe::PositioningEngine engine(venue);` does the same.
+  ipe::EngineConfig config = ipe::recommended_config(venue);
   if (argc > 3) {
     std::ifstream file(argv[3]);
     std::stringstream patch;

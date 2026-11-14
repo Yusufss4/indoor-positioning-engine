@@ -23,10 +23,17 @@ namespace ipe::eval {
 namespace fs = std::filesystem;
 
 namespace {
-EngineConfig engine_config(const BenchmarkOptions& opts) {
-  EngineConfig cfg;
+/// The config a venue's runs use: the one recommended for the venue or the engine's default, patched.
+EngineConfig engine_config(const BenchmarkOptions& opts, const Venue& venue) {
+  EngineConfig cfg = opts.venue_config ? recommended_config(venue) : EngineConfig{};
   for (const auto& patch : opts.config_patches) apply_config_patch(cfg, patch);
   return cfg;
+}
+
+/// Throws on a patch that does not apply, before any run starts.
+void check_patches(const BenchmarkOptions& opts) {
+  EngineConfig cfg;
+  for (const auto& patch : opts.config_patches) apply_config_patch(cfg, patch);
 }
 
 /// At most one job per hardware thread at a time. Every job gets its own thread up front (std::async), and
@@ -75,8 +82,8 @@ class MapCache {
 };
 
 /// Metrics of one trace through the engine.
-Metrics replay_metrics(const Venue& venue, const Trace& trace, const EngineConfig& cfg, const BenchmarkOptions& opts,
-                       MapCache& maps) {
+Metrics replay_metrics(const Venue& venue, const Trace& trace, const BenchmarkOptions& opts, MapCache& maps) {
+  const EngineConfig cfg = engine_config(opts, venue);
   return replay(venue, trace, cfg, opts.replay, maps.get(venue, cfg.filter)).metrics;
 }
 
@@ -141,7 +148,7 @@ std::vector<BenchmarkCase> run_benchmark(const std::string& scenario_dir, const 
     scenarios.push_back(std::move(sc));
   }
 
-  const EngineConfig cfg = engine_config(opts);
+  check_patches(opts);
   MapCache maps;
 
   // One job per (scenario, seed): simulate, replay.
@@ -155,7 +162,7 @@ std::vector<BenchmarkCase> run_benchmark(const std::string& scenario_dir, const 
       const auto& sc = scenarios[si];
       const Venue& venue = *venues.at(sc.venue_path);
       const Trace trace = sim::simulate(sc, venue, sc.seed + static_cast<std::uint64_t>(k));
-      return JobResult{si, replay_metrics(venue, trace, cfg, opts, maps)};
+      return JobResult{si, replay_metrics(venue, trace, opts, maps)};
     });
   };
 
@@ -243,7 +250,7 @@ std::vector<BenchmarkCase> run_trace_benchmark(const std::string& manifest_path,
   }
   if (entries.empty()) throw std::runtime_error("no traces in " + manifest_path);
 
-  const EngineConfig cfg = engine_config(opts);
+  check_patches(opts);
   MapCache maps;
 
   JobLimit limit;
@@ -251,7 +258,7 @@ std::vector<BenchmarkCase> run_trace_benchmark(const std::string& manifest_path,
     return limit.run([&] {
       const Venue& venue = *venues.at(entries[i].venue);
       const Trace trace = read_trace_file(entries[i].trace);
-      return replay_metrics(venue, trace, cfg, opts, maps);
+      return replay_metrics(venue, trace, opts, maps);
     });
   };
   std::vector<Metrics> results(entries.size());

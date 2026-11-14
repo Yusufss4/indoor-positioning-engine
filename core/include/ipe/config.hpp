@@ -8,7 +8,8 @@
 namespace ipe {
 
 /// The engine's settings as JSON. `EngineConfig{}` is the engine as shipped; everything else is a patch on
-/// top of it (data/configs/*.json, `--config`, `--set`).
+/// top of it (data/configs/*.json, `--config`, `--set`). recommended_config(venue) in engine.hpp picks the
+/// shipped patch that fits a venue.
 
 /// Applies an RFC 7386 merge patch to `cfg`, e.g. `{"filter": {"heading_bins": 72}}`. Unknown keys throw
 /// std::invalid_argument, so a typo fails loudly instead of silently leaving a default in place.

@@ -46,7 +46,9 @@ struct BenchmarkOptions {
   int seeds = 1;  ///< Runs per scenario use seeds scenario.seed + k, k < seeds.
   ReplayOptions replay;
   bool parallel = true;
-  /// JSON merge patches applied in order to the default config (A/B experiments).
+  /// True: every venue starts from recommended_config(venue). False: from the engine's default config.
+  bool venue_config = true;
+  /// JSON merge patches applied in order on top of that (a config file, A/B experiments).
   std::vector<std::string> config_patches;
 };
 

@@ -233,9 +233,14 @@ class Demo {
   }
 
   void init(const std::string& config_patch) {
-    // The engine's default config, patched. The lattice is built here and kept, so the page can draw it.
+    // A recording's own config patch on the engine's defaults, or else what the venue calls for. The
+    // lattice is built here and kept, so the page can draw it.
     ipe::EngineConfig cfg;
-    if (!config_patch.empty()) ipe::apply_config_patch(cfg, config_patch);
+    if (config_patch.empty()) {
+      cfg = ipe::recommended_config(venue_);
+    } else {
+      ipe::apply_config_patch(cfg, config_patch);
+    }
     grid_map_ = std::make_shared<const ipe::GridMap>(venue_, cfg.filter);
     grid_ = std::make_unique<ipe::PositioningEngine>(venue_, cfg, grid_map_);
     // venue_ and trace_ are members and the Demo is never moved, so the player's references stay valid.
