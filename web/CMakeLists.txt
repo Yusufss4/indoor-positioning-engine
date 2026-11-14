@@ -24,6 +24,7 @@ add_custom_target(ipe_site ALL
           ${IPE_SITE_DIR}
   COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/index.html ${CMAKE_CURRENT_SOURCE_DIR}/app.js
           ${CMAKE_CURRENT_SOURCE_DIR}/worker.js ${CMAKE_CURRENT_SOURCE_DIR}/map3d.js
-          ${CMAKE_CURRENT_SOURCE_DIR}/style.css ${IPE_SITE_DIR}
+          ${CMAKE_CURRENT_SOURCE_DIR}/live.html ${CMAKE_CURRENT_SOURCE_DIR}/live.js
+          ${CMAKE_CURRENT_SOURCE_DIR}/live-worker.js ${CMAKE_CURRENT_SOURCE_DIR}/style.css ${IPE_SITE_DIR}
   COMMAND ${CMAKE_COMMAND} -E copy_directory ${PROJECT_SOURCE_DIR}/data ${IPE_SITE_DIR}/data
   COMMENT "Assembling web demo in ${IPE_SITE_DIR}")
