@@ -32,6 +32,7 @@ engine.on_imu(sample);                 // 50 Hz accelerometer, gyroscope, magnet
 engine.on_scan(t, readings);           // a Wi-Fi scan: {beacon index, dBm} per access point
 engine.on_ble(t, "beacon-id", rssi);   // one BLE advertisement
 engine.on_pressure(t, hpa);            // barometer
+engine.on_position_fix(t, {x, y}, level, 1.0);   // a position known from outside: a tap, a QR code
 const ipe::Estimate fix = engine.estimate();   // position, level, covariance, valid
 ```
 
@@ -50,8 +51,13 @@ const ipe::Estimate fix = engine.estimate();   // position, level, covariance, v
   `ipe::core`. The CTests `package_install` and `package_subdirectory` build the example both ways.
 - Building the lattice is the expensive part of start-up on a large venue. Build a `GridMap` once and pass
   it to every engine on that venue (`PositioningEngine`'s third constructor argument).
-- In the browser, `web/bindings.cpp` wraps a replay of a trace or a scenario (`Demo`). A live binding with
-  `onImu` / `onScan` does not exist yet; it would be a second embind class next to it.
+- The estimate is valid once a radio reading or a position fix has arrived. Without radio, a fix at the
+  start is what the engine walks on from, with steps and the map.
+- In the browser, `web/bindings.cpp` has two embind classes: `Demo` replays a trace or a scenario, and
+  `Live` is the engine fed one event at a time (`onImu`, `onBle`, `onPressure`, `onPositionFix`), keeping
+  what it was fed as a trace. `web/live.js` feeds it from a phone's motion sensors and is the place to
+  see how browser sensor data becomes the engine's frame; `web/check_live.py` tests the page without a
+  phone. A native app does the same against `PositioningEngine` directly.
 
 ## A config field
 
@@ -81,7 +87,9 @@ apply_cell_loglik(t);                                 // multiply the masses, no
 **Another reading of the same scan** (say, a learned fingerprint model): add an `add_*_loglik()` next to
 these, with its weight as a config field that is 0 by default.
 
-**A new sensor** (a UWB range, a GNSS fix near an entrance, a QR code scan):
+**A new sensor** (a UWB range, a time-of-flight distance to an access point). The position fix
+(`core/src/filter/position_fix.cpp`, added for taps, tags and GNSS at an entrance) went through exactly
+these steps and is the shortest complete example:
 
 1. `GridFilter::on_x(t, ...)` in a new file under `core/src/filter/`: fill `loglik_` for every cell with
    mass, then `apply_cell_loglik(t)`. `pressure.cpp` is the shortest example, including a per-cell nuisance

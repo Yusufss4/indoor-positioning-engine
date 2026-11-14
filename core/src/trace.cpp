@@ -50,6 +50,7 @@ double Trace::duration() const {
   if (!imu.empty()) span(imu.front().t), span(imu.back().t);
   if (!ble.empty()) span(ble.front().t), span(ble.back().t);
   if (!baro.empty()) span(baro.front().t), span(baro.back().t);
+  if (!fixes.empty()) span(fixes.front().t), span(fixes.back().t);
   if (!truth.empty()) span(truth.front().t), span(truth.back().t);
   return t1 > t0 ? t1 - t0 : 0.0;
 }
@@ -71,21 +72,25 @@ void write_trace(std::ostream& out, const Trace& trace) {
   out << "# imu,t,ax,ay,az,gx,gy,gz,mx,my,mz\n";
   out << (scans ? "# ble,t,beacon_id,rssi[,scan]\n" : "# ble,t,beacon_id,rssi\n");
   if (!trace.baro.empty()) out << "# baro,t,pressure_hpa\n";
+  if (!trace.fixes.empty()) out << "# fix,t,x,y,level,sigma_m\n";
   out << (vertical ? "# gt,t,x,y,heading,level,z\n" : "# gt,t,x,y,heading\n");
 
   // Merge the streams by timestamp so the file reads like a live log.
-  std::size_t i = 0, b = 0, p = 0, g = 0;
+  // Merge the streams by timestamp so the file reads like a live log (ties in TracePlayer's order).
+  std::size_t i = 0, b = 0, p = 0, x = 0, g = 0;
   char buf[256];
-  while (i < trace.imu.size() || b < trace.ble.size() || p < trace.baro.size() || g < trace.truth.size()) {
+  while (i < trace.imu.size() || b < trace.ble.size() || p < trace.baro.size() || x < trace.fixes.size() ||
+         g < trace.truth.size()) {
     const double ti = i < trace.imu.size() ? trace.imu[i].t : 1e300;
     const double tb = b < trace.ble.size() ? trace.ble[b].t : 1e300;
     const double tp = p < trace.baro.size() ? trace.baro[p].t : 1e300;
+    const double tx = x < trace.fixes.size() ? trace.fixes[x].t : 1e300;
     const double tg = g < trace.truth.size() ? trace.truth[g].t : 1e300;
-    if (ti <= tb && ti <= tp && ti <= tg) {
+    if (ti <= tb && ti <= tp && ti <= tx && ti <= tg) {
       const auto& s = trace.imu[i++];
       std::snprintf(buf, sizeof(buf), "imu,%.3f,%.4f,%.4f,%.4f,%.5f,%.5f,%.5f,%.3f,%.3f,%.3f\n", s.t, s.accel.x,
                     s.accel.y, s.accel.z, s.gyro.x, s.gyro.y, s.gyro.z, s.mag.x, s.mag.y, s.mag.z);
-    } else if (tb <= tp && tb <= tg) {
+    } else if (tb <= tp && tb <= tx && tb <= tg) {
       const auto& s = trace.ble[b++];
       if (s.scan != 0) {
         std::snprintf(buf, sizeof(buf), "ble,%.3f,%s,%.0f,%u\n", s.t, s.beacon_id.c_str(), s.rssi,
@@ -93,9 +98,12 @@ void write_trace(std::ostream& out, const Trace& trace) {
       } else {
         std::snprintf(buf, sizeof(buf), "ble,%.3f,%s,%.0f\n", s.t, s.beacon_id.c_str(), s.rssi);
       }
-    } else if (tp <= tg) {
+    } else if (tp <= tx && tp <= tg) {
       const auto& s = trace.baro[p++];
       std::snprintf(buf, sizeof(buf), "baro,%.3f,%.4f\n", s.t, s.hpa);
+    } else if (tx <= tg) {
+      const auto& s = trace.fixes[x++];
+      std::snprintf(buf, sizeof(buf), "fix,%.3f,%.3f,%.3f,%d,%.3f\n", s.t, s.pos.x, s.pos.y, s.level, s.sigma_m);
     } else {
       const auto& s = trace.truth[g++];
       if (vertical) {
@@ -152,6 +160,12 @@ Trace read_trace(std::istream& in) {
     } else if (f[0] == "baro") {
       if (f.size() != 3) throw bad();
       trace.baro.push_back({to_double(f[1], line_no), to_double(f[2], line_no)});
+    } else if (f[0] == "fix") {
+      if (f.size() != 6) throw bad();
+      trace.fixes.push_back({to_double(f[1], line_no),
+                             {to_double(f[2], line_no), to_double(f[3], line_no)},
+                             static_cast<int>(to_double(f[4], line_no)),
+                             to_double(f[5], line_no)});
     } else if (f[0] == "gt") {
       if (f.size() != 5 && f.size() != 7) throw bad();
       TruthSample s{
@@ -171,6 +185,7 @@ Trace read_trace(std::istream& in) {
   std::stable_sort(trace.imu.begin(), trace.imu.end(), by_time);
   std::stable_sort(trace.ble.begin(), trace.ble.end(), by_time);
   std::stable_sort(trace.baro.begin(), trace.baro.end(), by_time);
+  std::stable_sort(trace.fixes.begin(), trace.fixes.end(), by_time);
   std::stable_sort(trace.truth.begin(), trace.truth.end(), by_time);
   return trace;
 }

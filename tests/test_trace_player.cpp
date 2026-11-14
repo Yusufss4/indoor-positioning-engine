@@ -20,6 +20,7 @@ Trace tied_trace() {
   tr.imu.push_back({1.0, {}, {}, {}});
   tr.ble.push_back({1.0, "A", -60.0, 0});
   tr.baro.push_back({1.0, 1000.0});
+  tr.fixes.push_back({1.0, {15.0, 3.0}, 0, 1.0});
   tr.truth.push_back({1.0, {5, 5}});
   return tr;
 }
@@ -32,13 +33,15 @@ std::vector<Event> play_all(TracePlayer& player, PositioningEngine& engine) {
 
 }  // namespace
 
-TEST(TracePlayer, TiesGoImuRadioPressureTruth) {
+TEST(TracePlayer, TiesGoImuRadioPressureFixTruth) {
   const Venue v = test::two_room_venue();
   const Trace tr = tied_trace();
   PositioningEngine engine(v, {});
   TracePlayer player(v, tr);
   EXPECT_DOUBLE_EQ(player.next_time(), 1.0);
-  EXPECT_EQ(play_all(player, engine), (std::vector<Event>{Event::Imu, Event::Radio, Event::Pressure, Event::Truth}));
+  EXPECT_EQ(play_all(player, engine),
+            (std::vector<Event>{Event::Imu, Event::Radio, Event::Pressure, Event::Fix, Event::Truth}));
+  EXPECT_NEAR(engine.raw_estimate().pos.x, 15.0, 0.5);  // the fix reached the engine, after the packet
   EXPECT_DOUBLE_EQ(player.truth().pos.x, 5.0);
   EXPECT_TRUE(std::isinf(player.next_time()));
   EXPECT_THROW(player.step(engine), std::logic_error);

@@ -60,6 +60,44 @@ constexpr const char* kGrid = "grid";
 constexpr std::size_t kMaxCells = 2500;
 constexpr double kCellFloor = 1e-3;
 
+/// Flat [x0, y0, m0, level0, x1, ...] view of a grid filter's heaviest cells, heaviest first: cell centre
+/// and mass relative to the heaviest cell. At most kMaxCells, none below kCellFloor of the heaviest. Cells
+/// of equal mass (the uniform prior) are picked spread over the map rather than in index order. The view
+/// aliases WASM memory and is only valid until the next call.
+class CellPicker {
+ public:
+  val view(const ipe::PositioningEngine& engine) {
+    buf_.clear();
+    const auto mass = engine.filter().mass();
+    const double top = mass.empty() ? 0.0 : *std::max_element(mass.begin(), mass.end());
+    order_.clear();
+    for (std::size_t c = 0; c < mass.size(); ++c) {
+      if (top > 0.0 && mass[c] >= kCellFloor * top) order_.push_back(static_cast<std::uint32_t>(c));
+    }
+    // Ties broken by a multiplicative hash of the index, so that equal cells are a spatial sample.
+    const auto heavier = [&](std::uint32_t a, std::uint32_t b) {
+      if (mass[a] != mass[b]) return mass[a] > mass[b];
+      return a * 2654435761u < b * 2654435761u;
+    };
+    const std::size_t k = std::min(kMaxCells, order_.size());
+    std::partial_sort(order_.begin(), order_.begin() + static_cast<std::ptrdiff_t>(k), order_.end(), heavier);
+    const ipe::GridMap& map = engine.map();
+    for (std::size_t i = 0; i < k; ++i) {
+      const std::uint32_t c = order_[i];
+      const ipe::Vec2 p = map.centre(c);
+      buf_.push_back(static_cast<float>(p.x));
+      buf_.push_back(static_cast<float>(p.y));
+      buf_.push_back(static_cast<float>(mass[c] / top));
+      buf_.push_back(static_cast<float>(map.cell(c).level));
+    }
+    return val(emscripten::typed_memory_view(buf_.size(), buf_.data()));
+  }
+
+ private:
+  std::vector<float> buf_;
+  std::vector<std::uint32_t> order_;
+};
+
 class Demo {
  public:
   /// Simulates the scenario and runs the grid filter on it, with `config_patch` (may be empty) on top of the
@@ -149,37 +187,8 @@ class Demo {
   /// Fraction of fixes (after the 5 s warm-up) on the true level; -1 before the first.
   double floorAccuracy(const std::string& name) const { return name == kGrid ? score_.floor_accuracy() : -1.0; }
 
-  /// Flat [x0, y0, m0, level0, x1, ...] view of the grid filter's heaviest cells, heaviest first: cell centre
-  /// and mass relative to the heaviest cell. At most kMaxCells, none below kCellFloor of the heaviest. Cells
-  /// of equal mass (the uniform prior) are picked spread over the map rather than in index order. The view
-  /// aliases WASM memory and is only valid until the next call.
-  val gridCells() {
-    cell_buf_.clear();
-    const auto mass = grid_->filter().mass();
-    const double top = mass.empty() ? 0.0 : *std::max_element(mass.begin(), mass.end());
-    cell_order_.clear();
-    for (std::size_t c = 0; c < mass.size(); ++c) {
-      if (top > 0.0 && mass[c] >= kCellFloor * top) cell_order_.push_back(static_cast<std::uint32_t>(c));
-    }
-    // Ties broken by a multiplicative hash of the index, so that equal cells are a spatial sample.
-    const auto heavier = [&](std::uint32_t a, std::uint32_t b) {
-      if (mass[a] != mass[b]) return mass[a] > mass[b];
-      return a * 2654435761u < b * 2654435761u;
-    };
-    const std::size_t k = std::min(kMaxCells, cell_order_.size());
-    std::partial_sort(cell_order_.begin(), cell_order_.begin() + static_cast<std::ptrdiff_t>(k), cell_order_.end(),
-                      heavier);
-    const ipe::GridMap& map = *grid_map_;
-    for (std::size_t i = 0; i < k; ++i) {
-      const std::uint32_t c = cell_order_[i];
-      const ipe::Vec2 p = map.centre(c);
-      cell_buf_.push_back(static_cast<float>(p.x));
-      cell_buf_.push_back(static_cast<float>(p.y));
-      cell_buf_.push_back(static_cast<float>(mass[c] / top));
-      cell_buf_.push_back(static_cast<float>(map.cell(c).level));
-    }
-    return val(emscripten::typed_memory_view(cell_buf_.size(), cell_buf_.data()));
-  }
+  /// The grid filter's heaviest cells for the page (CellPicker::view).
+  val gridCells() { return cells_.view(*grid_); }
 
   /// Beacon packets received during the last advance(): [{id, rssi}].
   val recentBle() const {
@@ -288,11 +297,122 @@ class Demo {
   std::vector<std::size_t> recent_ble_;
   std::vector<std::pair<std::string, ipe::RoomEvent>> recent_rooms_;
   std::optional<ipe::RoomTracker> truth_rooms_;
-  std::vector<float> cell_buf_;
-  std::vector<std::uint32_t> cell_order_;
+  CellPicker cells_;
   ipe::TruthSample truth_{};
   double now_ = 0.0;
   std::size_t truth_seen_ = 0;  ///< Truth samples consumed so far.
+};
+
+/// The engine fed live, one sensor event at a time (live.js, from a phone's own sensors). Everything it is
+/// fed is kept as a trace, rounded to the trace file's precision before it reaches the engine, so that
+/// replaying the saved trace with ipe-replay gives exactly what the page showed.
+class Live {
+ public:
+  /// `config_patch` (may be empty) on the engine's defaults; without one, the config the venue calls for.
+  Live(const std::string& venue_json, const std::string& config_patch) : venue_(ipe::parse_venue(venue_json)) {
+    ipe::EngineConfig cfg;
+    if (config_patch.empty()) {
+      cfg = ipe::recommended_config(venue_);
+    } else {
+      ipe::apply_config_patch(cfg, config_patch);
+    }
+    engine_ = std::make_unique<ipe::PositioningEngine>(venue_, cfg);
+    trace_.metadata["source"] = "web live";
+    trace_.metadata["venue"] = venue_.name();
+  }
+
+  /// One inertial sample in the engine's frame (docs/formats.md): m/s^2, rad/s with z the rate about the
+  /// vertical, and a magnetic field whose horizontal part gives the heading on the map, or zero for none.
+  void onImu(double t, double ax, double ay, double az, double gx, double gy, double gz, double mx, double my,
+             double mz) {
+    ipe::ImuSample s;
+    s.t = stamp(t);
+    s.accel = {q(ax, 1e4), q(ay, 1e4), q(az, 1e4)};
+    s.gyro = {q(gx, 1e5), q(gy, 1e5), q(gz, 1e5)};
+    s.mag = {q(mx, 1e3), q(my, 1e3), q(mz, 1e3)};
+    trace_.imu.push_back(s);
+    engine_->on_imu(s);
+  }
+
+  void onBle(double t, const std::string& beacon_id, double rssi) {
+    trace_.ble.push_back({stamp(t), beacon_id, q(rssi, 1.0), 0});
+    engine_->on_ble(trace_.ble.back().t, beacon_id, trace_.ble.back().rssi);
+  }
+
+  void onPressure(double t, double hpa) {
+    trace_.baro.push_back({stamp(t), q(hpa, 1e4)});
+    engine_->on_pressure(trace_.baro.back().t, trace_.baro.back().hpa);
+  }
+
+  /// A position known from outside: the tap that says "I am here, start from this".
+  void onPositionFix(double t, double x, double y, int level, double sigma_m) {
+    const ipe::FixSample fix{stamp(t), {q(x, 1e3), q(y, 1e3)}, level, q(sigma_m, 1e3)};
+    trace_.fixes.push_back(fix);
+    engine_->on_position_fix(fix.t, fix.pos, fix.level, fix.sigma_m);
+  }
+
+  /// A place the user says they are at, kept as ground truth and not shown to the engine. Returns the
+  /// estimate's distance from it, or -1 without a fix or on another floor.
+  double mark(double t, double x, double y, int level) {
+    ipe::TruthSample truth;
+    truth.t = stamp(t);
+    truth.pos = {q(x, 1e3), q(y, 1e3)};
+    truth.level = std::clamp(level, 0, venue_.level_count() - 1);
+    truth.z = q(venue_.level(truth.level).elevation_m, 1e3);
+    trace_.truth.push_back(truth);
+    const ipe::Estimate e = engine_->estimate();
+    return e.valid && e.level == truth.level ? ipe::distance(e.pos, truth.pos) : -1.0;
+  }
+
+  /// What to draw: {valid, x, y, level, sigma, heading}.
+  val estimate() const {
+    const ipe::Estimate e = engine_->estimate();
+    val o = val::object();
+    o.set("valid", e.valid);
+    o.set("x", e.pos.x);
+    o.set("y", e.pos.y);
+    o.set("level", e.level);
+    o.set("sigma", e.sigma_radius());
+    o.set("heading", engine_->raw_estimate().heading);
+    return o;
+  }
+
+  val gridCells() { return cells_.view(*engine_); }
+  double time() const { return last_t_; }
+  int steps() const { return static_cast<int>(engine_->step_count()); }
+  int levelCount() const { return venue_.level_count(); }
+  double gridCellSize() const { return engine_->map().cell_m(); }
+  int gridCellCount() const { return static_cast<int>(engine_->map().size()); }
+
+  /// Adds a `# key: value` line to the saved trace.
+  void setMetadata(const std::string& key, const std::string& value) { trace_.metadata[key] = value; }
+
+  /// Everything fed so far as a trace file (docs/formats.md). ipe-replay scores it up to the last mark.
+  std::string trace() const {
+    std::ostringstream out;
+    ipe::write_trace(out, trace_);
+    return out.str();
+  }
+
+ private:
+  /// Rounds to the precision the trace file keeps.
+  static double q(double v, double scale) { return std::round(v * scale) / scale; }
+
+  /// Event time in whole milliseconds, strictly after the previous event: a replay orders events by time
+  /// alone, so two events of one millisecond would be fed in the trace player's order, not in this one.
+  double stamp(double t) {
+    const double ms = std::max(std::round(t * 1000.0), last_ms_ + 1.0);
+    last_ms_ = ms;
+    last_t_ = ms / 1000.0;
+    return last_t_;
+  }
+
+  ipe::Venue venue_;
+  std::unique_ptr<ipe::PositioningEngine> engine_;
+  ipe::Trace trace_;
+  CellPicker cells_;
+  double last_ms_ = -1.0;
+  double last_t_ = 0.0;
 };
 
 }  // namespace
@@ -316,4 +436,21 @@ EMSCRIPTEN_BINDINGS(ipe) {
       .function("roomEvents", &Demo::roomEvents)
       .function("currentRooms", &Demo::currentRooms)
       .function("steps", &Demo::steps);
+
+  emscripten::class_<Live>("Live")
+      .constructor<std::string, std::string>()
+      .function("onImu", &Live::onImu)
+      .function("onBle", &Live::onBle)
+      .function("onPressure", &Live::onPressure)
+      .function("onPositionFix", &Live::onPositionFix)
+      .function("mark", &Live::mark)
+      .function("estimate", &Live::estimate)
+      .function("gridCells", &Live::gridCells)
+      .function("time", &Live::time)
+      .function("steps", &Live::steps)
+      .function("levelCount", &Live::levelCount)
+      .function("gridCellSize", &Live::gridCellSize)
+      .function("gridCellCount", &Live::gridCellCount)
+      .function("setMetadata", &Live::setMetadata)
+      .function("trace", &Live::trace);
 }

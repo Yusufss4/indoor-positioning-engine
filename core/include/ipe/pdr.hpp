@@ -11,7 +11,8 @@ struct Vec3 {
 };
 
 /// One inertial sample in the phone frame (phone held flat, x pointing in the
-/// walking direction). Units: m/s^2, rad/s, microtesla.
+/// walking direction). Units: m/s^2, rad/s, microtesla. A magnetometer reading of
+/// (0, 0, z) means "none": steps then carry no absolute heading.
 struct ImuSample {
   double t = 0.0;
   Vec3 accel;

@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>Indoor Positioning Engine - live on your phone</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600&display=swap">
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="style.css">
+  <style>
+    body { max-width: 900px; padding: 12px; }
+    header p { font-size: 0.9rem; }
+    .controls { gap: 10px 14px; }
+    .controls button, .controls select { min-height: 34px; }
+    button.primary { background: var(--ink); color: var(--sheet); padding: 6px 18px; }
+    button:disabled { opacity: 0.4; cursor: default; }
+    #status {
+      font-size: 0.95rem; color: var(--ink); padding: 6px 0 8px; min-height: 1.4em;
+    }
+    #status.warn { color: #a23b00; }
+    .mapbox { position: relative; }
+    #map { display: block; width: 100%; height: 62vh; min-height: 320px; }
+    .zoom { position: absolute; right: 8px; top: 8px; display: flex; flex-direction: column; gap: 4px; }
+    .zoom button { background: var(--sheet); width: 38px; height: 38px; padding: 0; font-size: 1.1rem; }
+    #readout { margin-top: 10px; }
+    #readout th { text-align: left; }
+    #saved { font-size: 0.85rem; color: var(--muted); }
+    #saved code { word-break: break-all; }
+    input[type="file"] { display: none; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Live on your phone</h1>
+    <p>The same engine, fed by this phone's motion sensors. Hold the phone in front of you, screen up, its top
+      edge pointing where you walk. A web page cannot read Wi-Fi or Bluetooth signal strength, so the position
+      comes from your steps, the compass and the walls of the map, starting from the point you tap.
+      <a href="index.html">Back to the demo</a></p>
+  </header>
+
+  <section class="controls">
+    <label>Map
+      <select id="venue">
+        <option value="open">Open area, 40 x 40 m, no walls</option>
+        <option value="data/venues/office_floor.json">Office floor (demo map)</option>
+        <option value="data/venues/office_two_floor.json">Office, two floors (demo map)</option>
+        <option value="data/venues/airport_hall.json">Airport hall (demo map)</option>
+        <option value="data/venues/kit_informatikbau.json">University building, 7 floors</option>
+        <option value="file">Open a venue file...</option>
+      </select>
+    </label>
+    <input id="venue-file" type="file" accept=".json,application/json">
+    <label id="floor-control" hidden>Floor <select id="floor"></select></label>
+    <button id="start" class="primary">Start</button>
+    <button id="save" disabled>Save recording</button>
+    <label title="Off: a tap marks where you really are, to measure the error. On: a tap moves the estimate there.">
+      <input id="tap-fixes" type="checkbox"> taps correct the position</label>
+    <label><input id="follow" type="checkbox" checked> follow</label>
+  </section>
+
+  <div id="status">Choose a map and press Start.</div>
+
+  <div class="mapbox">
+    <canvas id="map"></canvas>
+    <div class="zoom">
+      <button id="zoom-in" title="Zoom in">+</button>
+      <button id="zoom-out" title="Zoom out">&minus;</button>
+      <button id="zoom-fit" title="Fit the whole map">&#9633;</button>
+    </div>
+  </div>
+
+  <table id="readout">
+    <tbody>
+      <tr><th>Time</th><td id="r-time">-</td><th>Steps</th><td id="r-steps">-</td></tr>
+      <tr><th>Position</th><td id="r-pos">-</td><th>Uncertainty</th><td id="r-sigma">-</td></tr>
+      <tr><th>Compass</th><td id="r-compass">-</td><th>Sensor rate</th><td id="r-rate">-</td></tr>
+      <tr><th>Engine load</th><td id="r-load">-</td><th>Cells</th><td id="r-cells">-</td></tr>
+      <tr><th>Marks</th><td id="r-marks">-</td><th>Mean error at marks</th><td id="r-error">-</td></tr>
+    </tbody>
+  </table>
+  <p id="saved" hidden></p>
+  <p class="hint">The green dot is the engine's estimate, the green squares are where it holds probability. A
+    tap on the map after the start leaves a black square: "I am really here". The error at each one is shown,
+    and the saved recording keeps them, so the walk can be replayed and scored with <code>ipe-replay</code>.
+    Engine load is the time the engine needs per second of sensor data.</p>
+
+  <script src="live.js"></script>
+</body>
+</html>

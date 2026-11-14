@@ -92,3 +92,20 @@ TEST(Pdr, MagHeadingConvention) {
     EXPECT_NEAR(wrap_angle(PdrProcessor::heading_from_mag(facing(psi)) - psi), 0.0, 1e-9);
   }
 }
+
+TEST(Pdr, AZeroFieldIsNoHeading) {
+  auto samples = walking_signal(10, 1.8, 0.7, 0.48, 0.0, 0.0, 1);
+  PdrProcessor with_mag, without_mag;
+  int steps = 0;
+  for (ImuSample s : samples) {
+    if (const auto ev = with_mag.process(s)) {
+      EXPECT_TRUE(ev->mag_valid);
+    }
+    s.mag = {0.0, 0.0, -30.0};
+    if (const auto ev = without_mag.process(s)) {
+      EXPECT_FALSE(ev->mag_valid);
+      ++steps;
+    }
+  }
+  EXPECT_GE(steps, 8);
+}

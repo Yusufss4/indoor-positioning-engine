@@ -197,6 +197,10 @@ class GridFilter {
   void on_rssi(double t, std::size_t beacon_index, double rssi);
   void on_rssi_scan(double t, std::span<const RssiReading> readings);
   void on_pressure(double t, double hpa);
+  /// A position known from outside: a Gaussian of `sigma_m` (at least one cell) around `p` on `level`, or on
+  /// any level with `level` < 0. It makes the estimate valid, as a radio update does. A level the venue
+  /// does not have is ignored.
+  void on_position_fix(double t, Vec2 p, int level, double sigma_m);
 
   [[nodiscard]] Estimate estimate() const { return estimate_; }
   /// The step's own move: mean displacement of the mass that survived it. The estimate's change across the
@@ -230,6 +234,8 @@ class GridFilter {
   void add_floor_vote_loglik();
   /// Mixes uniform mass in if the teleport period has passed.
   void maybe_teleport(double t);
+  /// Replaces the share `rho` of the distribution by the uniform prior.
+  void mix_uniform(double rho);
   /// Moves `prob` of the mass of each connector cell to the levels next to it.
   void change_levels(double prob);
   /// Multiplies masses by exp(loglik - max) and renormalises; the estimate follows.

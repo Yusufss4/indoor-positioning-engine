@@ -28,6 +28,7 @@ Numbers are means over seeds on the simulated scenarios unless a dataset is name
 | 16 | Are two filters needed? | No | The grid filter alone |
 | 17 | What can go? | The planner, IMDF, the UJI study, three unused filter options | A smaller repository, identical results |
 | 18 | Why must a user know which config file to pass? | The three files are one patch, limited by what the venue has | `recommended_config(venue)`; an installable package |
+| 19 | Can the engine run live in a phone's browser? | Yes on motion sensors; a web page gets no radio | `on_position_fix`, `web/live.html`, recordings as traces |
 
 ## 2. A moved beacon hijacking the estimate (`office_field_issue`)
 
@@ -174,6 +175,28 @@ venue marks as such.
 
 The library also became installable (`find_package(ipe)`), and inside another project's build it builds
 only itself and no longer passes this repository's warning flags on.
+
+## 19. Live in a phone's browser
+
+Until here the engine only replayed: recordings and simulations. `web/live.html` feeds it from the phone's
+own sensors as the user walks, and saves what it fed as a trace.
+
+- **What a browser gives:** acceleration, turn rate and a compass heading. No Wi-Fi or BLE signal
+  strength and, on most phones, no barometer. Live mode in a browser is therefore steps, heading and the
+  map, from a start the user taps. Radio needs a native app.
+- **A position fix** became an engine input for that tap (`on_position_fix`, a `fix` row in traces); it
+  also serves a QR code or a GNSS fix at an entrance. Before it, the estimate was only valid after a
+  radio reading.
+- **No magnetometer** is now expressible: a zero horizontal field gives steps without an absolute
+  heading. It used to read as "heading east".
+- **The recording is the test.** The binding rounds every value to the trace file's precision before the
+  engine sees it, so `ipe-replay` of a saved recording gives exactly what the page showed.
+  `web/check_live.py` checks that in headless Chrome, feeding a simulated walk as browser sensor events.
+- **Measured without a phone:** on the simulated office walk, a start fix, steps and walls alone give
+  0.47 m mean error (0.50 m with the 12 beacons). Simulated steps are far cleaner than a real phone's, so
+  this shows the plumbing, not what a phone will do.
+- **Not known until tried on phones:** the step detector on browser sensor data at 60 Hz, the compass
+  indoors, and the engine's load on a phone's processor (the page shows it).
 
 ## Open questions
 

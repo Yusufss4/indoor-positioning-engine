@@ -21,7 +21,10 @@ void GridFilter::maybe_teleport(double t) {
   const double dt = t - last_teleport_t_;
   if (dt < cfg_.teleport_period_s) return;
   last_teleport_t_ = t;
-  const double rho = std::min(1.0 - std::exp(-std::max(cfg_.teleport_rate_per_s, 0.0) * dt), 1.0);
+  mix_uniform(std::min(1.0 - std::exp(-std::max(cfg_.teleport_rate_per_s, 0.0) * dt), 1.0));
+}
+
+void GridFilter::mix_uniform(double rho) {
   if (rho <= 0.0) return;
   const std::size_t n = map_->size();
   const double u = rho / static_cast<double>(n);

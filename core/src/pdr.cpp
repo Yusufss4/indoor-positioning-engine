@@ -29,10 +29,13 @@ std::optional<StepEvent> PdrProcessor::process(const ImuSample& s) {
   yaw_ += s.gyro.z * dt;
   filtered_ += cfg_.lowpass_alpha * (a_dyn - filtered_);
 
-  const double mag_psi = heading_from_mag(s.mag);
-  mag_sin_sum_ += std::sin(mag_psi);
-  mag_cos_sum_ += std::cos(mag_psi);
-  ++mag_count_;
+  // A field of exactly zero in the horizontal plane is a phone without a magnetometer reading, not a heading.
+  if (s.mag.x != 0.0 || s.mag.y != 0.0) {
+    const double mag_psi = heading_from_mag(s.mag);
+    mag_sin_sum_ += std::sin(mag_psi);
+    mag_cos_sum_ += std::cos(mag_psi);
+    ++mag_count_;
+  }
 
   if (!in_peak_) {
     valley_min_ = std::min(valley_min_, filtered_);

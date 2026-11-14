@@ -132,21 +132,30 @@ Line-oriented, one sample per row, merged in timestamp order. Lines starting wit
 imu,t,ax,ay,az,gx,gy,gz,mx,my,mz
 ble,t,beacon_id,rssi[,scan]
 baro,t,pressure_hpa
+fix,t,x,y,level,sigma_m
 gt,t,x,y,heading,level,z
 ```
 
-- IMU in the phone frame (phone flat, x forward): m/s^2, rad/s, uT.
+- IMU in the phone frame (phone flat, x forward): m/s^2, rad/s, uT. Only three things are read from it:
+  the magnitude of the acceleration, the gyro's z (the turn rate about the vertical) and the horizontal
+  magnetic field, whose direction is the heading on the map (`mx = B sin psi`, `my = B cos psi` for a
+  heading `psi` counter-clockwise from the map's +x). `mx = my = 0` means no magnetometer reading.
 - `ble` rows with the optional `scan` column (a positive integer) are readings delivered together in one
   Wi-Fi scan. The rows of a scan share `t` and are contiguous; replay hands them to the engine as one
   batch (`PositioningEngine::on_scan`). Rows without the column are single packets, as before.
 - `baro` rows are optional phone barometer samples in hPa (Android `TYPE_PRESSURE`, iOS `CMAltimeter`
   reports kPa). Only pressure changes matter; the absolute value is never trusted.
+- `fix` rows are optional positions given to the engine from outside (`PositioningEngine::on_position_fix`):
+  a tap on the map, a tag at a known place. `level` is the level index, or negative when the floor is not
+  known; `sigma_m` is how well the position is known. The live web page writes one for the tapped start.
 - `gt` rows are optional ground truth; replay scores the estimate at each one. `level` is the level index
   and `z` the walking-surface height in metres. Single-floor traces keep the short `gt,t,x,y,heading` form,
   and both forms are accepted.
-- A phone logger that writes this format can be replayed directly. `datasets/msil/convert.py` is a
-  worked example: it rotates Android sensor data into the expected frame (see
-  [datasets.md](datasets.md#conversion-datasetsmsilconvertpy)).
+- On equal timestamps replay feeds IMU, then radio, then pressure, then a fix, and scores truth last.
+- A phone logger that writes this format can be replayed directly. The live web page (`web/live.html`)
+  is one: its "Save recording" writes this file, with the taps that mark the true position as `gt` rows.
+  `datasets/msil/convert.py` is a worked example for an Android logger: it rotates the sensor data into
+  the expected frame (see [datasets.md](datasets.md#conversion-datasetsmsilconvertpy)).
 
 ## Config patches (`data/configs/*.json`)
 

@@ -14,6 +14,9 @@ inline constexpr double kMinVar = 1e-6;
 /// cell holds some recovery mass, and that mass is not a group of hypotheses.
 inline constexpr double kPointFloorRel = 1e-3;
 
+/// Share of the uniform prior mixed in before a position fix is applied (position_fix.cpp).
+inline constexpr double kFixPriorShare = 0.01;
+
 /// std::floor to int, for |v| < 2^31.
 inline int floor_int(double v) {
   const int i = static_cast<int>(v);

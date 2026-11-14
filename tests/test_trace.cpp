@@ -119,3 +119,31 @@ TEST(Trace, MalformedRowsReportLineNumber) {
   std::stringstream negative_scan("ble,1.0,A,-70,-2\n");
   EXPECT_THROW(read_trace(negative_scan), std::runtime_error);
 }
+
+TEST(Trace, PositionFixesRoundTrip) {
+  Trace t;
+  t.imu.push_back({0.5, {0, 0, 9.8}, {}, {}});
+  t.fixes.push_back({0.5, {4.25, 6.5}, 1, 1.5});
+  t.fixes.push_back({9.0, {12.0, 3.0}, -1, 0.75});
+  t.truth.push_back({0.5, {4.25, 6.5}, 0.0, 1, 3.0});
+  std::stringstream ss;
+  write_trace(ss, t);
+  EXPECT_NE(ss.str().find("# fix,t,x,y,level,sigma_m"), std::string::npos);
+  // On a tie the fix is written after the IMU sample and before the truth sample, as it is replayed.
+  EXPECT_LT(ss.str().find("\nimu,0.500"), ss.str().find("\nfix,0.500"));
+  EXPECT_LT(ss.str().find("\nfix,0.500"), ss.str().find("\ngt,0.500"));
+  const Trace r = read_trace(ss);
+  ASSERT_EQ(r.fixes.size(), 2u);
+  EXPECT_DOUBLE_EQ(r.fixes[0].pos.x, 4.25);
+  EXPECT_EQ(r.fixes[0].level, 1);
+  EXPECT_DOUBLE_EQ(r.fixes[0].sigma_m, 1.5);
+  EXPECT_EQ(r.fixes[1].level, -1);
+  EXPECT_NEAR(r.duration(), 8.5, 1e-9);
+
+  std::stringstream bad("fix,1.0,2.0,3.0\n");
+  EXPECT_THROW(read_trace(bad), std::runtime_error);
+  // A trace without fixes does not mention them.
+  std::stringstream plain;
+  write_trace(plain, Trace{});
+  EXPECT_EQ(plain.str().find("fix"), std::string::npos);
+}

@@ -13,6 +13,7 @@
 #include "ipe/rng.hpp"
 #include "ipe/rssi_model.hpp"
 #include "ipe/simulator.hpp"
+#include "ipe/trace_player.hpp"
 #include "test_util.hpp"
 
 using namespace ipe;
@@ -456,4 +457,87 @@ TEST(Engine, AnAbsoluteHeadingTurnsTheHeadingDistribution) {
   PositioningEngine engine(v, EngineConfig{});
   engine.on_heading(1.0, 1.0, 0.1);
   EXPECT_NEAR(engine.raw_estimate().heading, 1.0, 0.05);
+}
+
+TEST(GridFilter, APositionFixLocalisesFromTheUniformPrior) {
+  const Venue v = test::two_room_venue();
+  GridFilterConfig cfg;
+  auto map = std::make_shared<const GridMap>(v, cfg);
+  GridFilter f(map, cfg, {});
+  EXPECT_FALSE(f.estimate().valid);  // no radio yet
+  f.on_position_fix(1.0, {4.0, 6.0}, 0, 1.0);
+  const Estimate e = f.estimate();
+  EXPECT_TRUE(e.valid);
+  EXPECT_NEAR(e.pos.x, 4.0, 0.3);
+  EXPECT_NEAR(e.pos.y, 6.0, 0.3);
+  EXPECT_NEAR(e.sigma_radius(), 1.0, 0.2);
+  double sum = 0.0;
+  for (double m : f.mass()) sum += m;
+  EXPECT_NEAR(sum, 1.0, 1e-12);
+}
+
+TEST(GridFilter, APositionFixMovesAnEstimateThatIsConfidentlyElsewhere) {
+  const Venue v = test::two_room_venue();
+  GridFilterConfig cfg;
+  auto map = std::make_shared<const GridMap>(v, cfg);
+  GridFilter f(map, cfg, {});
+  f.set_point({17.0, 3.0}, 0, 0);  // every other cell holds no mass at all
+  f.on_position_fix(1.0, {4.0, 6.0}, 0, 0.5);
+  EXPECT_NEAR(f.estimate().pos.x, 4.0, 0.3);
+  EXPECT_NEAR(f.estimate().pos.y, 6.0, 0.3);
+}
+
+TEST(GridFilter, APositionFixKeepsTheHeadingOfMassThatIsAlreadyThere) {
+  const Venue v = test::two_room_venue();
+  GridFilterConfig cfg;
+  auto map = std::make_shared<const GridMap>(v, cfg);
+  GridFilter f(map, cfg, {});
+  f.set_point({4.2, 6.2}, 0, 9);  // heading bin 9 of 36: 90 degrees
+  f.on_position_fix(1.0, {4.0, 6.0}, 0, 1.0);
+  EXPECT_NEAR(f.estimate().heading, f.bin_heading(9), 0.05);
+}
+
+TEST(GridFilter, APositionFixSelectsTheLevel) {
+  const Venue v = test::two_level_venue();
+  GridFilterConfig cfg;
+  auto map = std::make_shared<const GridMap>(v, cfg);
+  const int first = *v.level_index(1);
+  GridFilter f(map, cfg, {});
+  f.on_position_fix(1.0, {15.0, 5.0}, first, 1.0);
+  EXPECT_EQ(f.estimate().level, first);
+  for (std::size_t c = 0; c < map->size(); ++c) {
+    if (map->cell(c).level != first) {
+      ASSERT_EQ(f.mass()[c], 0.0);
+    }
+  }
+  // A level the venue does not have is ignored; a negative one means "any floor".
+  const Estimate before = f.estimate();
+  f.on_position_fix(2.0, {3.0, 3.0}, 7, 1.0);
+  EXPECT_EQ(f.estimate().pos.x, before.pos.x);
+  GridFilter any(map, cfg, {});
+  any.on_position_fix(1.0, {15.0, 5.0}, -1, 1.0);
+  EXPECT_TRUE(any.estimate().valid);
+  EXPECT_NEAR(any.estimate().pos.x, 15.0, 0.3);
+}
+
+TEST(Engine, AFixAndStepsAloneFollowAWalkBetweenWalls) {
+  // The office walk without its beacons: a start position, the step detector and the map.
+  const auto sc = sim::load_scenario_file(test::data_path("scenarios/office_nominal.json"));
+  const Venue venue = load_venue_file(sc.venue_path);
+  Trace trace = sim::simulate(sc, venue);
+  trace.ble.clear();
+  const TruthSample start = trace.truth.front();
+  trace.fixes.push_back({start.t, start.pos, start.level, 1.0});
+  PositioningEngine engine(venue);
+  TracePlayer player(venue, trace);
+  double worst = 0.0;
+  int scored = 0;
+  while (!player.finished()) {
+    if (player.step(engine) != TracePlayer::Event::Truth) continue;
+    ASSERT_TRUE(engine.estimate().valid);
+    worst = std::max(worst, distance(engine.estimate().pos, player.truth().pos));
+    ++scored;
+  }
+  EXPECT_GT(scored, 500);
+  EXPECT_LT(worst, 5.0);
 }

@@ -70,6 +70,11 @@ class PositioningEngine {
   /// One scan's readings; beacon indices outside the venue are dropped.
   void on_scan(double t, std::span<const RssiReading> readings);
   void on_pressure(double t, double hpa);
+  /// A position known from outside the engine: a tap on the map, a QR code or NFC tag at a known place, a
+  /// GNSS fix at an entrance. `level` is a level index, or negative when the floor is not known; `sigma_m`
+  /// is how well the position is known. Without radio it is what makes the estimate valid: steps and the
+  /// map carry it on from there.
+  void on_position_fix(double t, Vec2 pos, int level, double sigma_m);
 
   /// What to draw: the filter's estimate through the track smoother (EngineConfig::smoothing).
   [[nodiscard]] Estimate estimate() const {
