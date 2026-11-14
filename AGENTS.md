@@ -19,12 +19,16 @@ accuracy. [docs/design.md](docs/design.md) explains the engine and maps each con
 - `geo/` - GeoJSON import and export; native tooling only, not linked by the engine.
 - `tools/` - `ipe-sim`, `ipe-replay`, `ipe-regress`, `ipe-import`. `examples/` - the engine as a library.
 - `tests/` - GoogleTest unit tests and the regression CTests; `tests/regression/*.json` are the accepted
-  accuracy baselines.
+  accuracy baselines. `tests/install` is a program outside this build that uses the engine, installed
+  (`find_package(ipe)`, package files in `cmake/`) and as a subdirectory.
 - `web/` - Emscripten bindings and the browser demo. `viz/` - figures and the README GIF.
 - `data/venues`, `data/scenarios` - inputs. `data/geojson` is generated from `data/venues` by `ipe-import`;
   a unit test fails when it is stale.
 - `data/configs` - config patches for `--config`: `msil_wifi.json` (Wi-Fi), `ipin.json` (plus the floor
   vote) and `fingerprint.json` (plus the fingerprint likelihood, for venues with fingerprint positions).
+  Without `--config`, the tools and `PositioningEngine(venue)` use `recommended_config(venue)`
+  (`core/src/engine.cpp`), which picks among these from the venue's training scans; a unit test keeps the
+  two in step.
 - `data/demo/{msil,ipin}` - recordings for the web demo, written by `datasets/*/export_demo.py`; a unit
   test checks them. `data/demo/kaggle` is the same for the Kaggle set, git-ignored (see below).
 - `datasets/` - download and conversion scripts for the real datasets ([docs/datasets.md](docs/datasets.md)):
@@ -82,7 +86,8 @@ Sanitizers: `-DIPE_SANITIZE=address,undefined` with `CMAKE_BUILD_TYPE=Debug`.
    only code and aggregate numbers. `data/demo/kaggle/` must stay git-ignored.
 10. **New behaviour is off by default** behind a config field, until it has earned its place on the
     scenarios and the real walks. A config field must be listed in `core/src/config.cpp` (the build fails
-    otherwise).
+    otherwise). A setting that has earned it for a kind of venue goes into `recommended_config`, not into
+    the field's default.
 11. Format with `clang-format-18` (CI enforces it).
 
 ## Useful commands

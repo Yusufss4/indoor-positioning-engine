@@ -154,14 +154,23 @@ JSON merge patches over the engine's default config, the same shape as `--print-
 `ipe-replay` and `ipe-regress` take `--config FILE`. It is applied before any `--set`, and unknown keys
 are rejected.
 
+Without `--config`, the tools run each venue with `ipe::recommended_config(venue)`: the default config
+for a venue without `floor_fingerprints`, `ipin.json` for one with them, and `fingerprint.json` when they
+carry positions. `--set` then applies on top of that, and
+`ipe-replay --venue VENUE.json --print-config` shows the result. A Wi-Fi venue without training scans
+needs `--config data/configs/msil_wifi.json`.
+
 The sections are `pdr`, `rssi`, `baro`, `filter` (the grid filter: lattice, motion noise, recovery, floor
 prior, fingerprints), `rooms` and `smoothing`. The shipped patches:
 
 | File | What it sets | For |
 |---|---|---|
 | `msil_wifi.json` | RSSI sigma 8 dB, drawn corrections capped at 1.5 m/s | Wi-Fi with a log-distance radio map |
-| `ipin.json` | the same, plus `filter.floor_prior_weight` 3 | multi-floor venues with floor fingerprints |
+| `ipin.json` | the same, plus `filter.floor_prior_weight` 3 | venues with floor fingerprints |
 | `fingerprint.json` | the same, plus `filter.fingerprint_weight` 3 | venues whose fingerprints carry positions |
+
+Each file equals the one before it on a venue that lacks what it adds: the floor vote needs several floors
+and floor fingerprints, the fingerprint likelihood needs positions.
 
 The `rooms` section tunes the room event detector (defaults shown; see
 [design.md](design.md#room-enter-and-exit-events)):

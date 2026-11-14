@@ -64,18 +64,16 @@ ctest --test-dir build -L regression --output-on-failure     # accuracy gate, un
 ```bash
 ./build/tools/ipe-replay --scenario data/scenarios/office_nominal.json              # simulate and replay
 ./build/tools/ipe-replay --venue data/demo/msil/site1_F2/venue.json \
-    --trace data/demo/msil/site1_F2/5dda5afcc5b77e0006b17719.csv \
-    --config data/configs/fingerprint.json --out /tmp/estimates.csv                 # a recorded mall walk
+    --trace data/demo/msil/site1_F2/5dda5afcc5b77e0006b17719.csv --out /tmp/estimates.csv   # a recorded mall walk
 ./build/tools/ipe-regress --scenarios data/scenarios --no-baseline --seeds 10 \
     --set '{"filter": {"beacon_integrity": false}}'                                 # an A/B test of a setting
 ```
 
-**As a library.** Link `ipe::core`; [`examples/minimal.cpp`](examples/minimal.cpp) is a complete program.
+**As a library.** [`examples/minimal.cpp`](examples/minimal.cpp) is a complete program.
 
 ```cpp
 const ipe::Venue venue = ipe::load_venue_file("venue.json");   // walls, floors, beacons, training scans
-ipe::EngineConfig config;                                       // defaults; change with a JSON patch
-ipe::PositioningEngine engine(venue, config);
+ipe::PositioningEngine engine(venue);                           // settings chosen from the venue
 
 engine.on_imu(sample);                // accelerometer, gyroscope, magnetometer
 engine.on_scan(t, readings);          // a Wi-Fi scan (or on_ble for one BLE packet)
@@ -83,11 +81,21 @@ engine.on_pressure(t, hpa);           // barometer
 const ipe::Estimate fix = engine.estimate();   // x, y, floor, covariance
 ```
 
+In your CMake project, either build the engine with it or install it first
+(`cmake --install build --prefix <dir>`):
+
+```cmake
+add_subdirectory(indoor-positioning-engine)   # or FetchContent; builds the library only
+# or: find_package(ipe REQUIRED)
+target_link_libraries(app PRIVATE ipe::core)
+```
+
 **Your own building.** A venue is a JSON file of walls, floors and beacons in local metres
 ([docs/formats.md](docs/formats.md)). `ipe-import` converts GeoJSON exports of indoor-mapping platforms,
 and `datasets/osm/convert.py` converts OpenStreetMap indoor data.
 
-**Settings** are JSON patches over the defaults: `--config data/configs/fingerprint.json`, `--set '{...}'`,
+**Settings** are chosen from the venue: one with training scans runs with Wi-Fi fingerprints, one with
+surveyed beacons with the defaults. To change them, patch them with JSON: `--set '{...}'`, `--config FILE`
 or `ipe::apply_config_patch`. `ipe-replay --print-config` lists every setting. Unknown keys are rejected.
 
 **Web demo** (needs the [Emscripten SDK](https://emscripten.org/docs/getting_started/downloads.html)):
