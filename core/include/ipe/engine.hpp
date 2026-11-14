@@ -31,6 +31,14 @@ struct EngineConfig {
   double mag_heading_sigma_deg = 12.0;
 };
 
+/// The config to run `venue` with, chosen from what the venue contains:
+///  - surveyed beacons only: `EngineConfig{}`;
+///  - training scans (`floor_fingerprints`): the settings for a radio map fitted from scans, with the floor
+///    vote (data/configs/ipin.json);
+///  - training scans with positions: the same plus the fingerprint likelihood (data/configs/fingerprint.json).
+/// A Wi-Fi venue without training scans is not recognisable from the venue: use data/configs/msil_wifi.json.
+[[nodiscard]] EngineConfig recommended_config(const Venue& venue);
+
 /// Platform-independent entry point: feed raw IMU samples, BLE advertisements, Wi-Fi scans and
 /// (optionally) barometer readings in timestamp order, read back the fused estimate. This is the surface
 /// a mobile SDK or the WebAssembly module wraps.
@@ -41,6 +49,8 @@ struct EngineConfig {
 /// cells.
 class PositioningEngine {
  public:
+  /// With recommended_config(venue): what to use unless a deployment needs its own settings.
+  explicit PositioningEngine(const Venue& venue);
   /// Builds the venue's cell lattice (GridMap) from `cfg.filter`.
   PositioningEngine(const Venue& venue, EngineConfig cfg);
   /// With a lattice built before, to share one between engines on the same venue: the lattice and its

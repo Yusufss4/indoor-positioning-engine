@@ -4,4 +4,4 @@ add_library(ipe::geo ALIAS ipe_geo)
 target_include_directories(ipe_geo PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(ipe_geo
   PUBLIC ipe_core
-  PRIVATE nlohmann_json::nlohmann_json)
+  PRIVATE ipe_options nlohmann_json::nlohmann_json)

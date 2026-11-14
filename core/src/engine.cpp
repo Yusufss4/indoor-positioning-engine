@@ -12,6 +12,21 @@ double Estimate::sigma_radius() const {
   return det > 0.0 ? std::sqrt(std::sqrt(det)) : 0.0;
 }
 
+EngineConfig recommended_config(const Venue& venue) {
+  EngineConfig cfg;
+  const FloorFingerprints& scans = venue.floor_fingerprints();
+  if (scans.empty()) return cfg;
+  // A radio map fitted from training scans: a wider RSSI spread than surveyed beacons have, and corrections
+  // drawn no faster than a walk. The floor vote only acts on venues with several levels.
+  cfg.rssi.sigma_db = 8.0;
+  cfg.smoothing.max_correction_mps = 1.5;
+  cfg.filter.floor_prior_weight = 3.0;
+  if (scans.has_positions()) cfg.filter.fingerprint_weight = 3.0;
+  return cfg;
+}
+
+PositioningEngine::PositioningEngine(const Venue& venue) : PositioningEngine(venue, recommended_config(venue)) {}
+
 PositioningEngine::PositioningEngine(const Venue& venue, EngineConfig cfg)
     : PositioningEngine(venue, cfg, std::make_shared<const GridMap>(venue, cfg.filter)) {}
 

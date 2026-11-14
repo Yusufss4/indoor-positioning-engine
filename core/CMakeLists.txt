@@ -27,7 +27,11 @@ add_library(ipe_core STATIC
   src/venue.cpp)
 add_library(ipe::core ALIAS ipe_core)
 
-target_include_directories(ipe_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(ipe_core
-  PUBLIC ipe_options
-  PRIVATE nlohmann_json::nlohmann_json)
+# `ipe::core` in this build and, installed, after find_package(ipe).
+set_target_properties(ipe_core PROPERTIES EXPORT_NAME core)
+target_compile_features(ipe_core PUBLIC cxx_std_20)
+target_include_directories(ipe_core PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+                                           $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+# Both are build-time only: the project's flags, and a header-only library no public header includes.
+target_link_libraries(ipe_core PRIVATE $<BUILD_INTERFACE:ipe_options>
+                                       $<BUILD_INTERFACE:nlohmann_json::nlohmann_json>)

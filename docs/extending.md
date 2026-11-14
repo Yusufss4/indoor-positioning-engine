@@ -21,9 +21,12 @@ whole pattern, built and run by CTest:
 
 ```cpp
 const ipe::Venue venue = ipe::load_venue_file("venue.json");
-ipe::EngineConfig config;                                   // the engine as shipped
-ipe::apply_config_patch(config, R"({"filter": {"fingerprint_weight": 3.0}})");
-ipe::PositioningEngine engine(venue, config);
+ipe::PositioningEngine engine(venue);                       // with recommended_config(venue)
+
+// or with settings of your own (include ipe/config.hpp):
+ipe::EngineConfig config = ipe::recommended_config(venue);
+ipe::apply_config_patch(config, R"({"smoothing": {"max_correction_mps": 2.0}})");
+ipe::PositioningEngine tuned(venue, config);
 
 engine.on_imu(sample);                 // 50 Hz accelerometer, gyroscope, magnetometer
 engine.on_scan(t, readings);           // a Wi-Fi scan: {beacon index, dBm} per access point
@@ -34,8 +37,17 @@ const ipe::Estimate fix = engine.estimate();   // position, level, covariance, v
 
 - Events must arrive in time order. `engine.estimate()` is what to draw; `raw_estimate()` is the filter's
   own, unsmoothed.
-- From CMake: `add_subdirectory(indoor-positioning-engine)` (or `FetchContent`) with
-  `-DIPE_BUILD_TOOLS=OFF -DIPE_BUILD_TESTS=OFF`, then `target_link_libraries(app PRIVATE ipe::core)`.
+- `recommended_config(venue)` picks the settings from what the venue contains: the defaults for surveyed
+  beacons, the Wi-Fi settings with the floor vote for a venue with training scans, and the fingerprint
+  likelihood on top when those scans carry positions (the three files in `data/configs/`, see
+  [formats.md](formats.md#config-patches-dataconfigsjson)). A Wi-Fi venue without training scans cannot be
+  told from a beacon venue: give it `data/configs/msil_wifi.json`.
+- From CMake, as part of your build: `add_subdirectory(indoor-positioning-engine)` or `FetchContent`, then
+  `target_link_libraries(app PRIVATE ipe::core)`. Inside another project only the library is built, with
+  that project's own compiler flags.
+- From CMake, installed: `cmake --install build --prefix <dir>` installs the library, its headers, the
+  tools and a package; then `find_package(ipe REQUIRED)` with `<dir>` in `CMAKE_PREFIX_PATH`, and the same
+  `ipe::core`. The CTests `package_install` and `package_subdirectory` build the example both ways.
 - Building the lattice is the expensive part of start-up on a large venue. Build a `GridMap` once and pass
   it to every engine on that venue (`PositioningEngine`'s third constructor argument).
 - In the browser, `web/bindings.cpp` wraps a replay of a trace or a scenario (`Demo`). A live binding with

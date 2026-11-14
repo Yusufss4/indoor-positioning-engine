@@ -19,7 +19,9 @@ JSON. With --scenario the trace is simulated in memory first.
 
 options:
   --filter NAME          grid, the only filter (kept for existing scripts)
-  --config FILE          JSON merge patch applied to the default config
+  --config FILE          JSON merge patch applied to the default config. Without it, the config
+                         recommended for the venue is used: the Wi-Fi fingerprint settings when
+                         the venue has training scans
   --set JSON             inline JSON merge patch, e.g. '{"filter":{"heading_bins":72}}'
   --warmup SECONDS       exclude the first seconds from error stats (default 5)
   --out FILE             per-truth-sample estimates CSV
@@ -28,7 +30,8 @@ options:
   --metrics FILE         write metrics JSON to a file as well
   --cells FILE           snapshots of the posterior's heaviest cells, CSV
   --cells-every N        snapshot every N truth samples (default 5)
-  --print-config         print the effective engine config and exit
+  --print-config         print the effective engine config and exit (with a venue or scenario:
+                         the config that run would use)
 )";
 
 std::string read_file(const std::string& path) {
@@ -49,11 +52,20 @@ int main(int argc, char** argv) {
     }
 
     ipe::eval::check_filter_name(args.get("filter", ipe::eval::kFilterName));
-    ipe::EngineConfig cfg;
-    if (args.has("config")) ipe::apply_config_patch(cfg, read_file(args.get("config")));
-    if (args.has("set")) ipe::apply_config_patch(cfg, args.get("set"));
-    if (args.has("print-config")) {
-      std::cout << ipe::config_to_json(cfg) << "\n";
+    // The config: a --config file on the engine's defaults, or else what the venue calls for; then --set.
+    const auto config_for = [&](const ipe::Venue* venue) {
+      ipe::EngineConfig cfg;
+      if (args.has("config")) {
+        ipe::apply_config_patch(cfg, read_file(args.get("config")));
+      } else if (venue != nullptr) {
+        cfg = ipe::recommended_config(*venue);
+      }
+      if (args.has("set")) ipe::apply_config_patch(cfg, args.get("set"));
+      return cfg;
+    };
+    const bool print_config = args.has("print-config");
+    if (print_config && !args.has("scenario") && !args.has("venue")) {
+      std::cout << ipe::config_to_json(config_for(nullptr)) << "\n";
       return 0;
     }
 
@@ -64,10 +76,15 @@ int main(int argc, char** argv) {
       venue = ipe::load_venue_file(args.has("venue") ? args.get("venue") : sc.venue_path);
       std::optional<std::uint64_t> seed;
       if (args.has("seed")) seed = std::stoull(args.get("seed"));
-      trace = ipe::sim::simulate(sc, venue, seed);
+      if (!print_config) trace = ipe::sim::simulate(sc, venue, seed);
     } else {
       venue = ipe::load_venue_file(args.require("venue"));
-      trace = ipe::read_trace_file(args.require("trace"));
+      if (!print_config) trace = ipe::read_trace_file(args.require("trace"));
+    }
+    const ipe::EngineConfig cfg = config_for(&venue);
+    if (print_config) {
+      std::cout << ipe::config_to_json(cfg) << "\n";
+      return 0;
     }
 
     ipe::eval::ReplayOptions opts;

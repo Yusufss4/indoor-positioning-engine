@@ -27,6 +27,7 @@ Numbers are means over seeds on the simulated scenarios unless a dataset is name
 | 15 | How far is the engine from the competition winners? | Far, until training scans were used as position fingerprints | `filter.fingerprint_weight`, `fingerprint.json` |
 | 16 | Are two filters needed? | No | The grid filter alone |
 | 17 | What can go? | The planner, IMDF, the UJI study, three unused filter options | A smaller repository, identical results |
+| 18 | Why must a user know which config file to pass? | The three files are one patch, limited by what the venue has | `recommended_config(venue)`; an installable package |
 
 ## 2. A moved beacon hijacking the estimate (`office_field_issue`)
 
@@ -159,6 +160,20 @@ the 6 IPIN scoring walks to the last digit.
 **The UJI BLE study**, for the record: on surveyed beacons and standing-still fingerprints in a library and
 a lab (CC BY), the per-packet RSSI spread was 5 dB, a shelf edge cost about 1 dB rather than the 3 dB the
 map assumes per wall, and BLE alone gave 1.4–1.9 m CEP50.
+
+## 18. Settings chosen from the venue, and a package
+
+A mall walk replayed without `--config data/configs/fingerprint.json` ran with the settings for surveyed
+BLE beacons, without a warning: a mean error of 19.3 m instead of 3.2 m on the demo's first mall walk. The
+three config files turned out to be one patch:
+the floor vote does nothing on one floor or without floor fingerprints, and the fingerprint likelihood
+nothing without positions. `recommended_config(venue)` therefore needs only one question, whether the
+venue has training scans, and `PositioningEngine(venue)` and the tools use it when no config is given.
+The files stay for the regression gates and for Wi-Fi venues without training scans, which nothing in a
+venue marks as such.
+
+The library also became installable (`find_package(ipe)`), and inside another project's build it builds
+only itself and no longer passes this repository's warning flags on.
 
 ## Open questions
 
