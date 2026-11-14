@@ -28,7 +28,7 @@ add_executable(ipe_tests
   test_trace_player.cpp
   test_track_smoother.cpp
   test_venue.cpp)
-target_link_libraries(ipe_tests PRIVATE ipe_eval ipe_geo GTest::gtest_main)
+target_link_libraries(ipe_tests PRIVATE ipe_eval ipe_geo ipe_options GTest::gtest_main)
 target_compile_definitions(ipe_tests PRIVATE IPE_DATA_DIR="${PROJECT_SOURCE_DIR}/data")
 
 include(GoogleTest)
@@ -42,6 +42,18 @@ if(IPE_BUILD_TOOLS AND IPE_BUILD_EXAMPLES)
                    ${PROJECT_SOURCE_DIR}/data/scenarios/office_nominal.json ${CMAKE_BINARY_DIR}/example_trace.csv
                    ${PROJECT_SOURCE_DIR}/data/venues/office_floor.json)
   set_tests_properties(example_minimal PROPERTIES PASS_REGULAR_EXPRESSION "error [0-9.]+ m" TIMEOUT 300)
+endif()
+
+if(IPE_BUILD_TOOLS AND IPE_INSTALL AND NOT IPE_SANITIZE)
+  # The engine from a program's point of view: installed and found with find_package, and as a
+  # subdirectory of the program's build. Both build examples/minimal.cpp against ipe::core and run it.
+  foreach(mode install subdirectory)
+    add_test(NAME package_${mode}
+             COMMAND ${CMAKE_COMMAND} -DMODE=${mode} -DSOURCE_DIR=${PROJECT_SOURCE_DIR} -DBUILD_DIR=${CMAKE_BINARY_DIR}
+                     -DCONFIG=$<CONFIG> -DCXX=${CMAKE_CXX_COMPILER} -DSIM=$<TARGET_FILE:ipe-sim>
+                     -DJSON_DIR=${nlohmann_json_SOURCE_DIR} -P ${CMAKE_CURRENT_SOURCE_DIR}/install/run.cmake)
+    set_tests_properties(package_${mode} PROPERTIES PASS_REGULAR_EXPRESSION "error [0-9.]+ m" TIMEOUT 900)
+  endforeach()
 endif()
 
 if(IPE_BUILD_TOOLS)
