@@ -6,10 +6,6 @@
 
 namespace ipe {
 
-double RssiModel::expected_rssi_free_space(const Beacon& b, double d) const {
-  return b.tx_power_dbm - 10.0 * b.path_loss_exp * std::log10(std::max(d, cfg_.min_distance));
-}
-
 double RssiModel::expected_rssi(const Beacon& b, Vec2 p, int level, double wall_db, double floor_db) const {
   double rssi = 0.0;
   if (b.level == level) {

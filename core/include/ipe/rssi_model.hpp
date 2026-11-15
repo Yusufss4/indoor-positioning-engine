@@ -1,5 +1,8 @@
 #pragma once
 
+#include <algorithm>
+#include <cmath>
+
 #include "ipe/venue.hpp"
 
 namespace ipe {
@@ -26,7 +29,9 @@ class RssiModel {
   }
   /// As above with the per-wall and per-slab losses given instead of the venue's (estimated online).
   [[nodiscard]] double expected_rssi(const Beacon& b, Vec2 p, int level, double wall_db, double floor_db) const;
-  [[nodiscard]] double expected_rssi_free_space(const Beacon& b, double d) const;
+  [[nodiscard]] double expected_rssi_free_space(const Beacon& b, double d) const {
+    return b.tx_power_dbm - 10.0 * b.path_loss_exp * std::log10(std::max(d, cfg_.min_distance));
+  }
   [[nodiscard]] double log_likelihood(double residual_db) const;
 
   [[nodiscard]] const RssiModelConfig& config() const { return cfg_; }

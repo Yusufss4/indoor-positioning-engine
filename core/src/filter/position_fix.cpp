@@ -18,6 +18,9 @@ void GridFilter::on_position_fix(double t, Vec2 p, int level, double sigma_m) {
   // The fix must be able to move an estimate that is confidently somewhere else, where no mass is left to
   // reweight: a share of the prior goes in first. Mass that is already near the fix outweighs it and keeps
   // what it has learned (heading, device offset, barometer offset).
+  // A fix is rare and can be narrower than a block: every cell is scored, and the active set is chosen
+  // again from the result.
+  if (sparse_) activate_all();
   mix_uniform(kFixPriorShare);
   const double sigma = std::max(sigma_m, map_->cell_m());
   const double inv = -0.5 / (sigma * sigma);

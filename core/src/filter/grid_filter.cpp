@@ -6,7 +6,7 @@
 //
 // This file holds the state and what every update ends with. The updates are next to it: motion.cpp (steps
 // and heading), radio.cpp and fingerprint.cpp (a scan's log-likelihood terms), pressure.cpp (barometer and
-// floor changes), recovery.cpp and estimate.cpp.
+// floor changes), recovery.cpp, estimate.cpp and active_set.cpp (which cells an update visits).
 
 #include <algorithm>
 #include <cmath>
@@ -59,6 +59,19 @@ GridFilter::GridFilter(std::shared_ptr<const GridMap> map, GridFilterConfig cfg,
   bin_lik_.assign(static_cast<std::size_t>(bins_), 0.0);
   row_.assign(static_cast<std::size_t>(bins_), 0.0);
   level_weight_.assign(static_cast<std::size_t>(std::max(map_->venue().level_count(), 1)), 0.0);
+  level_dz_.assign(level_weight_.size(), 0.0);
+  level_loss_.assign(level_weight_.size(), 0.0);
+  sparse_ = cfg_.active_floor > 0.0;
+  active_floor_ = std::min(cfg_.active_floor, kMaxActiveFloor);
+  const std::size_t blocks = map_->block_count();
+  active_.reserve(n);
+  cell_active_.assign(n, 1);
+  block_active_.assign(blocks, 1);
+  block_edge_.assign(blocks, 0);
+  block_mark_.assign(blocks, 0);
+  bg_mass_.assign(blocks, 0.0);
+  for (auto* v : {&bg_dev_mu_, &bg_dev_var_, &bg_baro_mu_, &bg_baro_var_}) v->assign(blocks, 0.0);
+  block_loglik_.assign(blocks, 0.0);
   floor_p_.assign(level_weight_.size(), 0.0);
   points_.reserve(n);
   scan_.reserve(map_->venue().beacons().size());
@@ -77,43 +90,56 @@ double GridFilter::heading_prob(std::size_t cell, int bin) const { return h_[sta
 void GridFilter::initialize_uniform() {
   const std::size_t n = map_->size();
   const double u = 1.0 / static_cast<double>(n);
-  for (std::size_t c = 0; c < n; ++c) {
-    mass_[c] = u;
-    const Vec2 p = map_->centre(c);
-    cx_[c] = p.x;
-    cy_[c] = p.y;
-    dev_mu_[c] = 0.0;
-    dev_var_[c] = cfg_.estimate_rssi_offset ? cfg_.rssi_offset_sigma * cfg_.rssi_offset_sigma : 0.0;
-    const int level = map_->cell(c).level;
-    baro_mu_[c] = baro_ready_ ? altitude_ - elevation(level) : 0.0;
-    baro_var_[c] = cfg_.baro_offset_sigma_m * cfg_.baro_offset_sigma_m;
-    const auto v = static_cast<float>(1.0 / bins_);
-    for (int k = 0; k < bins_; ++k) h_[state(c, k)] = v;
-  }
+  std::fill(bg_mass_.begin(), bg_mass_.end(), 0.0);
+  activate_all();
+  for (std::size_t c = 0; c < n; ++c) reset_cell_to_prior(c, u);
+}
+
+void GridFilter::reset_cell_to_prior(std::size_t c, double mass) {
+  mass_[c] = mass;
+  const Vec2 p = map_->centre(c);
+  cx_[c] = p.x;
+  cy_[c] = p.y;
+  dev_mu_[c] = 0.0;
+  dev_var_[c] = prior_rssi_offset_var();
+  baro_mu_[c] = prior_baro_offset(map_->cell(c).level);
+  baro_var_[c] = prior_baro_offset_var();
+  const auto v = static_cast<float>(1.0 / bins_);
+  for (int k = 0; k < bins_; ++k) h_[state(c, k)] = v;
 }
 
 void GridFilter::set_point(Vec2 p, int level, int bin) {
   const std::int32_t target = map_->locate(p, level);
   if (target < 0) return;
+  std::fill(bg_mass_.begin(), bg_mass_.end(), 0.0);
+  activate_all();
   for (std::size_t c = 0; c < map_->size(); ++c) mass_[c] = 0.0;
   const auto c = static_cast<std::size_t>(target);
   mass_[c] = 1.0;
   cx_[c] = p.x;
   cy_[c] = p.y;
   for (int k = 0; k < bins_; ++k) h_[state(c, k)] = k == bin ? 1.0F : 0.0F;
+  refresh_active_set();
   update_heading(level);
   update_estimate(now_);
 }
 
 void GridFilter::apply_cell_loglik(double t) {
-  const std::size_t n = map_->size();
+  // Cells and background blocks share the reference: a block's mass stands for cells.
+  const std::size_t blocks = sparse_ ? map_->block_count() : 0;
   double max_ll = -std::numeric_limits<double>::infinity();
-  for (std::size_t c = 0; c < n; ++c) {
+  for (const std::uint32_t c : active_) {
     if (mass_[c] > 0.0) max_ll = std::max(max_ll, loglik_[c]);
   }
+  for (std::size_t b = 0; b < blocks; ++b) {
+    if (bg_mass_[b] > 0.0) max_ll = std::max(max_ll, block_loglik_[b]);
+  }
   if (std::isfinite(max_ll)) {
-    for (std::size_t c = 0; c < n; ++c) {
+    for (const std::uint32_t c : active_) {
       if (mass_[c] > 0.0) mass_[c] *= std::exp(loglik_[c] - max_ll);
+    }
+    for (std::size_t b = 0; b < blocks; ++b) {
+      if (bg_mass_[b] > 0.0) bg_mass_[b] *= std::exp(block_loglik_[b] - max_ll);
     }
   }
   normalize();
@@ -123,14 +149,21 @@ void GridFilter::apply_cell_loglik(double t) {
 
 void GridFilter::normalize() {
   double sum = 0.0;
-  for (double m : mass_) sum += m;
+  for (const std::uint32_t c : active_) sum += mass_[c];
+  if (sparse_) {
+    for (const double m : bg_mass_) sum += m;
+  }
   if (!(sum > 0.0) || !std::isfinite(sum)) {
     // Every hypothesis died (a door missing from the map, say): start again from the prior.
     initialize_uniform();
     return;
   }
   const double inv = 1.0 / sum;
-  for (double& m : mass_) m *= inv;
+  for (const std::uint32_t c : active_) mass_[c] *= inv;
+  if (sparse_) {
+    for (double& m : bg_mass_) m *= inv;
+    refresh_active_set();
+  }
 }
 
 }  // namespace ipe

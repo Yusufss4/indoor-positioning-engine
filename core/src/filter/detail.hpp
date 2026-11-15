@@ -17,6 +17,12 @@ inline constexpr double kPointFloorRel = 1e-3;
 /// Share of the uniform prior mixed in before a position fix is applied (position_fix.cpp).
 inline constexpr double kFixPriorShare = 0.01;
 
+/// A background block is updated cell by cell again when its mass per cell reaches this many times the
+/// active floor: the gap keeps a block at the floor from being folded and unfolded at every update.
+inline constexpr double kActivateRatio = 16.0;
+/// Upper bound of GridFilterConfig::active_floor.
+inline constexpr double kMaxActiveFloor = 1e-3;
+
 /// std::floor to int, for |v| < 2^31.
 inline int floor_int(double v) {
   const int i = static_cast<int>(v);

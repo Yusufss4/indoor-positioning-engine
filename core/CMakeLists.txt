@@ -5,6 +5,7 @@ add_library(ipe_core STATIC
   src/engine.cpp
   src/fingerprint_map.cpp
   src/floor_classifier.cpp
+  src/filter/active_set.cpp
   src/filter/estimate.cpp
   src/filter/fingerprint.cpp
   src/filter/grid_filter.cpp

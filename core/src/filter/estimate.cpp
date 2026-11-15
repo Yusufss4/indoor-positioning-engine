@@ -13,12 +13,14 @@ namespace ipe {
 using namespace filter_detail;
 
 void GridFilter::update_estimate(double t) {
-  const std::size_t n = map_->size();
   int top = 0;
   if (multi_level_) {
     for (int l = 0; l < static_cast<int>(level_weight_.size()); ++l) {
       double w = 0.0;
-      for (std::size_t c = map_->level_begin(l); c < map_->level_begin(l + 1); ++c) w += mass_[c];
+      for (const std::uint32_t c : active_on(l)) w += mass_[c];
+      if (sparse_) {
+        for (std::size_t b = map_->block_level_begin(l); b < map_->block_level_begin(l + 1); ++b) w += bg_mass_[b];
+      }
       level_weight_[static_cast<std::size_t>(l)] = w;
     }
     top = static_cast<int>(std::max_element(level_weight_.begin(), level_weight_.end()) - level_weight_.begin());
@@ -28,12 +30,12 @@ void GridFilter::update_estimate(double t) {
     Vec2 mean;
     double cxx = 0.0, cxy = 0.0, cyy = 0.0, dev = 0.0, max_mass = 0.0;
   };
+  // Position and spread are those of the cells: the background holds a share of about the recovery rate.
   const auto moments = [&](int level) {
-    const std::size_t begin = multi_level_ ? map_->level_begin(level) : 0;
-    const std::size_t end = multi_level_ ? map_->level_begin(level + 1) : n;
+    const std::span<const std::uint32_t> cells = active_on(level);
     Moments m;
     double w = 0.0, sx = 0.0, sy = 0.0;
-    for (std::size_t c = begin; c < end; ++c) {
+    for (const std::uint32_t c : cells) {
       w += mass_[c];
       sx += mass_[c] * cx_[c];
       sy += mass_[c] * cy_[c];
@@ -43,7 +45,7 @@ void GridFilter::update_estimate(double t) {
     if (w <= 0.0) return m;
     m.mean = {sx / w, sy / w};
     m.dev /= w;
-    for (std::size_t c = begin; c < end; ++c) {
+    for (const std::uint32_t c : cells) {
       const double dx = cx_[c] - m.mean.x, dy = cy_[c] - m.mean.y;
       m.cxx += mass_[c] * dx * dx;
       m.cxy += mass_[c] * dx * dy;
@@ -77,10 +79,8 @@ void GridFilter::update_estimate(double t) {
   estimate_ = to_estimate(shown, level);
   if (!map_estimate_ || !localized_) return;
   points_.clear();
-  const std::size_t begin = multi_level_ ? map_->level_begin(level) : 0;
-  const std::size_t end = multi_level_ ? map_->level_begin(level + 1) : n;
   const double floor = kPointFloorRel * shown.max_mass;
-  for (std::size_t c = begin; c < end; ++c) {
+  for (const std::uint32_t c : active_on(level)) {
     if (mass_[c] <= 0.0 || mass_[c] < floor) continue;
     WeightedPoint p;
     p.pos = {cx_[c], cy_[c]};
