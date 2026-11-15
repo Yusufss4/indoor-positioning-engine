@@ -46,25 +46,27 @@ void GridFilter::on_rssi_scan(double t, std::span<const RssiReading> readings) {
   neighbour_count_ = 0;
 }
 
-double GridFilter::expected_rssi(std::size_t beacon, std::size_t cell, Vec2 pos) const {
-  const Venue& v = map_->venue();
-  const Beacon& b = v.beacons()[beacon];
-  const int level = map_->cell(cell).level;
-  double rssi = 0.0;
-  if (b.level == level) {
-    rssi = rssi_model_.expected_rssi_free_space(b, distance(pos, b.pos));
-  } else {
-    const double dz = elevation(b.level) - elevation(level);
-    rssi = rssi_model_.expected_rssi_free_space(b, std::hypot(distance(pos, b.pos), dz)) -
-           v.floor_attenuation_db() * std::abs(b.level - level);
+void GridFilter::set_beacon_levels(const Beacon& beacon) {
+  if (!multi_level_) return;
+  const double slab_db = map_->venue().floor_attenuation_db();
+  for (int l = 0; l < static_cast<int>(level_dz_.size()); ++l) {
+    level_dz_[static_cast<std::size_t>(l)] = elevation(beacon.level) - elevation(l);
+    level_loss_[static_cast<std::size_t>(l)] = slab_db * std::abs(beacon.level - l);
   }
-  return rssi;
+}
+
+double GridFilter::expected_rssi(const Beacon& beacon, int level, Vec2 pos) const {
+  const double d = distance(pos, beacon.pos);
+  if (beacon.level == level) return rssi_model_.expected_rssi_free_space(beacon, d);
+  const auto l = static_cast<std::size_t>(level);
+  return rssi_model_.expected_rssi_free_space(beacon, std::hypot(d, level_dz_[l])) - level_loss_[l];
 }
 
 void GridFilter::update_rssi(double t, std::span<const RssiReading> readings) {
   // One radio update is a sum of log-likelihood terms per cell, applied together. A new measurement of the
   // same scan is another add_*_loglik() here.
-  std::fill(loglik_.begin(), loglik_.end(), 0.0);
+  for (const std::uint32_t c : active_) loglik_[c] = 0.0;
+  if (sparse_) std::fill(block_loglik_.begin(), block_loglik_.end(), 0.0);
   add_radio_model_loglik(readings);
   if (neighbour_count_ > 0) add_fingerprint_loglik();
   if (floor_prior_active_) add_floor_vote_loglik();
@@ -73,20 +75,23 @@ void GridFilter::update_rssi(double t, std::span<const RssiReading> readings) {
 }
 
 /// The log-distance model: each reading against the RSSI expected at the cell, through its walls, with the
-/// cell's device offset, which the reading also updates.
+/// cell's device offset, which the reading also updates. A background block is scored the same way, once,
+/// at its centre.
 void GridFilter::add_radio_model_loglik(std::span<const RssiReading> readings) {
   const RssiModelConfig& rc = rssi_model_.config();
   const double noise_var = rc.sigma_db * rc.sigma_db;
   const double outlier_density = 1.0 / rc.outlier_range_db;
   const double wall_db = map_->venue().wall_attenuation_db();
   const double walk2 = cfg_.rssi_offset_walk * cfg_.rssi_offset_walk;
-  const std::size_t n = map_->size();
+  const std::size_t blocks = sparse_ ? map_->block_count() : 0;
   for (const auto& r : readings) {
+    const Beacon& beacon = map_->venue().beacons()[r.beacon_index];
+    set_beacon_levels(beacon);
     const std::span<const std::uint8_t> walls =
         rc.wall_aware ? map_->wall_counts(r.beacon_index) : std::span<const std::uint8_t>{};
-    for (std::size_t c = 0; c < n; ++c) {
+    for (const std::uint32_t c : active_) {
       if (mass_[c] <= 0.0) continue;
-      double pred = expected_rssi(r.beacon_index, c, {cx_[c], cy_[c]}) + dev_mu_[c];
+      double pred = expected_rssi(beacon, map_->cell(c).level, {cx_[c], cy_[c]}) + dev_mu_[c];
       if (!walls.empty()) pred -= wall_db * walls[c];
       const double res = r.rssi - pred;
       double resp = 0.0;
@@ -94,9 +99,20 @@ void GridFilter::add_radio_model_loglik(std::span<const RssiReading> readings) {
       loglik_[c] += std::log(lik);
       if (cfg_.estimate_rssi_offset) adf_update(dev_mu_[c], dev_var_[c], res, noise_var, resp);
     }
+    for (std::size_t b = 0; b < blocks; ++b) {
+      if (!(bg_mass_[b] > 0.0)) continue;
+      double pred = expected_rssi(beacon, map_->block_level(b), map_->block_centre(b)) + bg_dev_mu_[b];
+      if (!walls.empty()) pred -= wall_db * walls[map_->block_cell(b)];
+      const double res = r.rssi - pred;
+      double resp = 0.0;
+      const double lik = mixture(res, noise_var + bg_dev_var_[b], rc.outlier_prob, outlier_density, resp);
+      block_loglik_[b] += std::log(lik);
+      if (cfg_.estimate_rssi_offset) adf_update(bg_dev_mu_[b], bg_dev_var_[b], res, noise_var, resp);
+    }
   }
   if (cfg_.estimate_rssi_offset) {
-    for (std::size_t c = 0; c < n; ++c) dev_var_[c] += walk2;
+    for (const std::uint32_t c : active_) dev_var_[c] += walk2;
+    for (std::size_t b = 0; b < blocks; ++b) bg_dev_var_[b] += walk2;
   }
 }
 

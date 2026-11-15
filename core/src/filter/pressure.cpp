@@ -22,6 +22,10 @@ void GridFilter::on_pressure(double t, double hpa) {
       baro_mu_[c] = altitude_ - elevation(map_->cell(c).level);
       baro_var_[c] = cfg_.baro_offset_sigma_m * cfg_.baro_offset_sigma_m;
     }
+    for (std::size_t b = 0; b < bg_baro_mu_.size(); ++b) {
+      bg_baro_mu_[b] = altitude_ - elevation(map_->block_level(b));
+      bg_baro_var_[b] = cfg_.baro_offset_sigma_m * cfg_.baro_offset_sigma_m;
+    }
     baro_ready_ = true;
     last_baro_update_t_ = t;
     return;
@@ -32,7 +36,7 @@ void GridFilter::on_pressure(double t, double hpa) {
   change_levels(cfg_.level_change_prob_baro);
   const double noise_var = cfg_.baro_sigma_m * cfg_.baro_sigma_m;
   const double walk2 = cfg_.baro_offset_walk_m * cfg_.baro_offset_walk_m;
-  for (std::size_t c = 0; c < n; ++c) {
+  for (const std::uint32_t c : active_) {
     if (mass_[c] <= 0.0) continue;
     baro_var_[c] += walk2;
     const double res = altitude_ - baro_mu_[c] - elevation(map_->cell(c).level);
@@ -40,6 +44,15 @@ void GridFilter::on_pressure(double t, double hpa) {
     const double lik = mixture(res, noise_var + baro_var_[c], cfg_.baro_outlier_prob, 1.0 / 20.0, resp);
     loglik_[c] = std::log(lik);
     adf_update(baro_mu_[c], baro_var_[c], res, noise_var, resp);
+  }
+  for (std::size_t b = 0; b < (sparse_ ? map_->block_count() : 0); ++b) {
+    if (!(bg_mass_[b] > 0.0)) continue;
+    bg_baro_var_[b] += walk2;
+    const double res = altitude_ - bg_baro_mu_[b] - elevation(map_->block_level(b));
+    double resp = 0.0;
+    const double lik = mixture(res, noise_var + bg_baro_var_[b], cfg_.baro_outlier_prob, 1.0 / 20.0, resp);
+    block_loglik_[b] = std::log(lik);
+    adf_update(bg_baro_mu_[b], bg_baro_var_[b], res, noise_var, resp);
   }
   apply_cell_loglik(t);
 }
@@ -51,6 +64,7 @@ void GridFilter::change_levels(double prob) {
   for (std::size_t i = 0; i < conns.size(); ++i) {
     const std::size_t c = conns[i];
     conn_mass_[i] = mass_[c];
+    if (!(mass_[c] > 0.0)) continue;  // nothing leaves it: its copy is not read
     conn_x_[i] = cx_[c];
     conn_y_[i] = cy_[c];
     conn_d1_[i] = dev_mu_[c];
@@ -69,6 +83,7 @@ void GridFilter::change_levels(double prob) {
     for (const std::int32_t to : {cell.up, cell.down}) {
       if (to < 0) continue;
       const auto t = static_cast<std::size_t>(to);
+      if (cell_active_[t] == 0) continue;  // into the background: only mass under the active floor
       const double w = out / targets;
       const double m = std::max(mass_[t], 0.0) + w;
       const double f = w / m;

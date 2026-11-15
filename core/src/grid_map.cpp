@@ -136,6 +136,84 @@ GridMap::GridMap(const Venue& venue, const GridFilterConfig& cfg) : venue_(&venu
   }
   room_begin_[cells_.size()] = static_cast<std::uint32_t>(room_list_.size());
 
+  // Blocks, in the order their first cell appears: level by level.
+  const int side = std::max({radius_, static_cast<int>(std::ceil(cfg.background_block_m / cell_m_)), 1});
+  const int bnx = (nx_ + side - 1) / side, bny = (ny_ + side - 1) / side;
+  const std::size_t blocks_per_level = static_cast<std::size_t>(bnx) * static_cast<std::size_t>(bny);
+  std::vector<std::int32_t> block_at(blocks_per_level * static_cast<std::size_t>(levels), -1);
+  const auto block_slot = [&](int level, int bx, int by) {
+    return static_cast<std::size_t>(level) * blocks_per_level +
+           static_cast<std::size_t>(by) * static_cast<std::size_t>(bnx) + static_cast<std::size_t>(bx);
+  };
+  block_of_.assign(cells_.size(), 0);
+  block_level_begin_.assign(static_cast<std::size_t>(levels) + 1, 0);
+  std::vector<std::uint32_t> block_size;
+  for (std::size_t i = 0; i < cells_.size(); ++i) {
+    const Cell& c = cells_[i];
+    std::int32_t& blk = block_at[block_slot(c.level, c.ix / side, c.iy / side)];
+    if (blk < 0) {
+      blk = static_cast<std::int32_t>(block_level_.size());
+      block_level_.push_back(c.level);
+      block_size.push_back(0);
+    }
+    block_of_[i] = static_cast<std::uint32_t>(blk);
+    ++block_size[static_cast<std::size_t>(blk)];
+  }
+  const std::size_t blocks = block_level_.size();
+  for (std::size_t blk = 0; blk < blocks; ++blk) ++block_level_begin_[static_cast<std::size_t>(block_level_[blk]) + 1];
+  for (int l = 0; l < levels; ++l) {
+    block_level_begin_[static_cast<std::size_t>(l) + 1] += block_level_begin_[static_cast<std::size_t>(l)];
+  }
+  block_cell_begin_.assign(blocks + 1, 0);
+  for (std::size_t blk = 0; blk < blocks; ++blk) block_cell_begin_[blk + 1] = block_cell_begin_[blk] + block_size[blk];
+  block_cell_list_.assign(cells_.size(), 0);
+  block_centre_.assign(blocks, Vec2{});
+  {
+    std::vector<std::uint32_t> next(block_cell_begin_.begin(), block_cell_begin_.end() - 1);
+    for (std::size_t i = 0; i < cells_.size(); ++i) {
+      const std::size_t blk = block_of_[i];
+      block_cell_list_[next[blk]++] = static_cast<std::uint32_t>(i);
+      block_centre_[blk] += centre(i);
+    }
+  }
+  block_rep_.assign(blocks, 0);
+  block_nb_begin_.assign(blocks + 1, 0);
+  for (std::size_t blk = 0; blk < blocks; ++blk) {
+    block_centre_[blk] = block_centre_[blk] * (1.0 / block_size[blk]);
+    const auto members = block_cells(blk);
+    double best = std::numeric_limits<double>::infinity();
+    for (const std::uint32_t i : members) {
+      const Vec2 d = centre(i) - block_centre_[blk];
+      if (const double d2 = dot(d, d); d2 < best) {
+        best = d2;
+        block_rep_[blk] = i;
+      }
+    }
+    const std::size_t first = block_nb_list_.size();
+    const auto add = [&](std::int32_t nb) {
+      if (nb < 0 || static_cast<std::size_t>(nb) == blk) return;
+      const auto u = static_cast<std::uint32_t>(nb);
+      if (std::find(block_nb_list_.begin() + static_cast<std::ptrdiff_t>(first), block_nb_list_.end(), u) ==
+          block_nb_list_.end()) {
+        block_nb_list_.push_back(u);
+      }
+    };
+    const Cell& any = cells_[members.front()];
+    const int bx = any.ix / side, by = any.iy / side;
+    for (int dy = -1; dy <= 1; ++dy) {
+      for (int dx = -1; dx <= 1; ++dx) {
+        if (bx + dx < 0 || by + dy < 0 || bx + dx >= bnx || by + dy >= bny) continue;
+        add(block_at[block_slot(any.level, bx + dx, by + dy)]);
+      }
+    }
+    for (const std::uint32_t i : members) {
+      for (const std::int32_t linked : {cells_[i].up, cells_[i].down}) {
+        if (linked >= 0) add(static_cast<std::int32_t>(block_of_[static_cast<std::size_t>(linked)]));
+      }
+    }
+    block_nb_begin_[blk + 1] = static_cast<std::uint32_t>(block_nb_list_.size());
+  }
+
   const std::size_t beacons = venue.beacons().size();
   walls_.resize(beacons);
   walls_once_ = std::make_unique<std::once_flag[]>(std::max<std::size_t>(beacons, 1));

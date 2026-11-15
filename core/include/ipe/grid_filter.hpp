@@ -34,6 +34,16 @@ struct GridFilterConfig {
   /// a stairwell or lift is closed (a room without a door, an island drawn as an outline). 0 turns it off.
   double closed_region_fraction = 0.1;
   double closed_region_min_m2 = 10.0;
+  /// Side of the blocks the lattice is cut into for `active_floor` [m]; at least the reach of a step.
+  double background_block_m = 4.0;
+
+  /// Update only where the mass is. A block of cells is updated cell by cell when one of its cells holds at
+  /// least this share of the heaviest cell's mass, or when it is next to such a block. Every other block is
+  /// background: one mass and one pair of offsets for all of its cells, scored once per radio and barometer
+  /// update at the block's centre, without a heading and not moved by steps. A background block whose share
+  /// per cell grows to 16 times the floor is updated cell by cell again. 0: every cell at every update
+  /// (exact).
+  double active_floor = 0.0;
 
   int heading_bins = 36;  ///< Bins of the heading offset from the gyro-integrated yaw.
   double heading_sigma_deg = 3.0;
@@ -159,6 +169,29 @@ class GridMap {
   /// Cells with a connector link (up or down), for the level-change loop.
   [[nodiscard]] std::span<const std::uint32_t> connector_cells() const { return connector_cells_; }
 
+  /// Blocks: squares of the lattice of GridFilterConfig::background_block_m, per level, each with at least
+  /// one cell. A step from a cell ends in the cell's block or in one of the block's neighbours.
+  [[nodiscard]] std::size_t block_count() const { return block_level_.size(); }
+  [[nodiscard]] std::uint32_t block_of(std::size_t cell) const { return block_of_[cell]; }
+  /// The block's cells, in index order.
+  [[nodiscard]] std::span<const std::uint32_t> block_cells(std::size_t b) const {
+    return {block_cell_list_.data() + block_cell_begin_[b], block_cell_begin_[b + 1] - block_cell_begin_[b]};
+  }
+  /// Blocks a step or a level change from this block's cells can reach: the up to 8 around it on its level,
+  /// and those its connector cells link to.
+  [[nodiscard]] std::span<const std::uint32_t> block_neighbours(std::size_t b) const {
+    return {block_nb_list_.data() + block_nb_begin_[b], block_nb_begin_[b + 1] - block_nb_begin_[b]};
+  }
+  [[nodiscard]] int block_level(std::size_t b) const { return block_level_[b]; }
+  /// Mean of the centres of the block's cells.
+  [[nodiscard]] Vec2 block_centre(std::size_t b) const { return block_centre_[b]; }
+  /// The block's cell nearest to block_centre(), standing for the block in per-cell tables (wall counts).
+  [[nodiscard]] std::uint32_t block_cell(std::size_t b) const { return block_rep_[b]; }
+  /// Blocks on `level`, in index order: [block_level_begin(level), block_level_begin(level + 1)).
+  [[nodiscard]] std::size_t block_level_begin(int level) const {
+    return block_level_begin_[static_cast<std::size_t>(level)];
+  }
+
   /// Walls on the cell's level between its centre and the beacon (Venue::count_wall_crossings), per cell.
   /// Thread-safe; computed the first time the beacon is used.
   [[nodiscard]] std::span<const std::uint8_t> wall_counts(std::size_t beacon) const;
@@ -178,6 +211,13 @@ class GridMap {
   std::vector<std::uint32_t> room_begin_;
   std::vector<std::uint32_t> room_list_;
   std::vector<std::uint32_t> connector_cells_;
+  std::vector<std::uint32_t> block_of_;
+  std::vector<std::uint32_t> block_cell_begin_, block_cell_list_;
+  std::vector<std::uint32_t> block_nb_begin_, block_nb_list_;
+  std::vector<std::int32_t> block_level_;
+  std::vector<Vec2> block_centre_;
+  std::vector<std::uint32_t> block_rep_;
+  std::vector<std::size_t> block_level_begin_;
   mutable std::vector<std::vector<std::uint8_t>> walls_;
   mutable std::unique_ptr<std::once_flag[]> walls_once_;
 };
@@ -187,6 +227,9 @@ class GridMap {
 /// Gaussian per cell. Deterministic: no random numbers. O(cells x headings) per step
 /// and magnetometer update, O(cells x readings) per radio update; nothing is allocated after construction
 /// except the wall counts of a beacon the first time it is heard (in the shared GridMap).
+///
+/// With GridFilterConfig::active_floor the cells are those of the active blocks, plus one evaluation per
+/// background block in a radio or barometer update (docs/design.md).
 class GridFilter {
  public:
   GridFilter(std::shared_ptr<const GridMap> map, GridFilterConfig cfg, RssiModelConfig rssi_cfg,
@@ -209,8 +252,14 @@ class GridFilter {
 
   [[nodiscard]] const GridMap& map() const { return *map_; }
   [[nodiscard]] const GridFilterConfig& config() const { return cfg_; }
-  /// Probability of each cell (sums to 1).
+  /// Probability of each cell. It sums to 1, or with `active_floor` to 1 - background_mass(): a cell of a
+  /// background block reads 0.
   [[nodiscard]] std::span<const double> mass() const { return mass_; }
+  /// The cells that are updated one by one, in index order: all of them without `active_floor`. Every other
+  /// cell has no mass of its own.
+  [[nodiscard]] std::span<const std::uint32_t> active_cells() const { return active_; }
+  /// Mass held by the background blocks (0 without `active_floor`).
+  [[nodiscard]] double background_mass() const;
   /// Mass centroid of each cell.
   [[nodiscard]] Vec2 centroid(std::size_t cell) const { return {cx_[cell], cy_[cell]}; }
   /// Heading distribution of a cell over heading_bins.
@@ -226,6 +275,23 @@ class GridFilter {
 
  private:
   void initialize_uniform();
+  /// The state of prior and recovery mass: at the cell's centre, any heading, the prior offsets.
+  void reset_cell_to_prior(std::size_t cell, double mass);
+  [[nodiscard]] double prior_rssi_offset_var() const {
+    return cfg_.estimate_rssi_offset ? cfg_.rssi_offset_sigma * cfg_.rssi_offset_sigma : 0.0;
+  }
+  /// The barometer offset that puts the current altitude on `level`.
+  [[nodiscard]] double prior_baro_offset(int level) const { return baro_ready_ ? altitude_ - elevation(level) : 0.0; }
+  [[nodiscard]] double prior_baro_offset_var() const { return cfg_.baro_offset_sigma_m * cfg_.baro_offset_sigma_m; }
+  /// Chooses the blocks that are updated cell by cell from where the mass is (`active_floor`).
+  void refresh_active_set();
+  void activate_block(std::size_t block);
+  void fold_block(std::size_t block);
+  /// Makes every block active, each background block's mass spread over its cells.
+  void activate_all();
+  void rebuild_active_cells();
+  /// The active cells on `level` (all of them in a single-level venue).
+  [[nodiscard]] std::span<const std::uint32_t> active_on(int level) const;
   bool check_beacon(std::size_t beacon_index, double rssi);
   /// One radio update: the terms below add a log-likelihood per cell to `loglik_`, then it is applied.
   void update_rssi(double t, std::span<const RssiReading> readings);
@@ -247,7 +313,10 @@ class GridFilter {
   [[nodiscard]] std::size_t state(std::size_t cell, int bin) const {
     return cell * static_cast<std::size_t>(bins_) + static_cast<std::size_t>(bin);
   }
-  [[nodiscard]] double expected_rssi(std::size_t beacon, std::size_t cell, Vec2 pos) const;
+  /// RSSI of `beacon` expected at `pos` on `level`, before walls. `level_dz_` and `level_loss_` must hold
+  /// the beacon's height difference and slab loss per level (set_beacon_levels).
+  [[nodiscard]] double expected_rssi(const Beacon& beacon, int level, Vec2 pos) const;
+  void set_beacon_levels(const Beacon& beacon);
   [[nodiscard]] double elevation(int level) const { return map_->venue().level(level).elevation_m; }
 
   std::shared_ptr<const GridMap> map_;
@@ -281,10 +350,24 @@ class GridFilter {
   std::vector<double> row_;      ///< One cell's heading row in double precision.
   std::vector<RssiReading> scan_;
   std::vector<double> level_weight_;
-  std::vector<WeightedPoint> points_;  ///< Cells as particles for MapConsistentEstimate.
+  std::vector<double> level_dz_, level_loss_;  ///< Per level, for the beacon of the reading being applied.
+  std::vector<WeightedPoint> points_;          ///< Cells as particles for MapConsistentEstimate.
   // Scratch for level changes: per connector cell, a copy of its state before the change.
   std::vector<double> conn_mass_, conn_x_, conn_y_, conn_d1_, conn_d2_, conn_b1_, conn_b2_;
   std::vector<float> conn_h_;
+
+  // The active set (`active_floor`). Without it every block is active and `active_` lists every cell.
+  bool sparse_ = false;
+  double active_floor_ = 0.0;
+  std::vector<std::uint32_t> active_;             ///< Cells of the active blocks, in index order.
+  std::vector<std::uint8_t> cell_active_;         ///< Per cell: its block is active.
+  std::vector<std::uint8_t> block_active_;        ///< Per block.
+  std::vector<std::uint8_t> block_edge_;          ///< Per block: active, next to a background block.
+  std::vector<std::uint8_t> block_mark_;          ///< Scratch of refresh_active_set.
+  std::vector<double> bg_mass_;                   ///< Per block: the mass of a background block's cells, else 0.
+  std::vector<double> bg_dev_mu_, bg_dev_var_;    ///< Per background block: device RSSI offset.
+  std::vector<double> bg_baro_mu_, bg_baro_var_;  ///< Per background block: barometer offset.
+  std::vector<double> block_loglik_;              ///< Per block: the log-likelihood of the update being applied.
 
   BeaconIntegrityMonitor integrity_;
   FloorClassifier floor_classifier_;

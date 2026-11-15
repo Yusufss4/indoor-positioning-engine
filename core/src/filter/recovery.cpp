@@ -32,7 +32,17 @@ void GridFilter::mix_uniform(double rho) {
   const double baro_var0 = cfg_.baro_offset_sigma_m * cfg_.baro_offset_sigma_m;
   const auto row = static_cast<std::size_t>(bins_);
   const double prior = 1.0 / bins_;
-  for (std::size_t c = 0; c < n; ++c) {
+  for (std::size_t b = 0; b < (sparse_ ? bg_mass_.size() : 0); ++b) {
+    if (block_active_[b] != 0) continue;
+    const double added = u * static_cast<double>(map_->block_cells(b).size());
+    const double m = (1.0 - rho) * bg_mass_[b] + added;
+    const double f = added / m;
+    mix_gaussian(bg_dev_mu_[b], bg_dev_var_[b], 0.0, dev_var0, f);
+    if (!cfg_.estimate_rssi_offset) bg_dev_var_[b] = 0.0;
+    mix_gaussian(bg_baro_mu_[b], bg_baro_var_[b], prior_baro_offset(map_->block_level(b)), baro_var0, f);
+    bg_mass_[b] = m;
+  }
+  for (const std::uint32_t c : active_) {
     const double kept = (1.0 - rho) * mass_[c];
     const double m = kept + u;
     const double f = u / m;

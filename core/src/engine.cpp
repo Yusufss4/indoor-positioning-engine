@@ -2,7 +2,6 @@
 
 #include <cmath>
 #include <numbers>
-#include <numeric>
 #include <stdexcept>
 
 namespace ipe {
@@ -109,7 +108,7 @@ void PositioningEngine::update_rooms(double t) {
   if (filter_.estimate().valid) {
     const GridMap& map = filter_.map();
     const auto mass = filter_.mass();
-    for (std::size_t c = 0; c < map.size(); ++c) {
+    for (const std::uint32_t c : filter_.active_cells()) {
       for (const std::uint32_t r : map.rooms(c)) room_prob_[r] += mass[c];
     }
   }
@@ -129,8 +128,8 @@ std::vector<std::size_t> PositioningEngine::current_rooms() const {
 void append_snapshot(const PositioningEngine& engine, std::vector<std::array<float, 4>>& out, std::size_t max) {
   const GridFilter& f = engine.filter();
   const auto mass = f.mass();
-  std::vector<std::size_t> order(mass.size());
-  std::iota(order.begin(), order.end(), std::size_t{0});
+  const auto active = f.active_cells();
+  std::vector<std::size_t> order(active.begin(), active.end());
   const std::size_t k = std::min(max, order.size());
   std::partial_sort(order.begin(), order.begin() + static_cast<std::ptrdiff_t>(k), order.end(),
                     [&](std::size_t a, std::size_t b) { return mass[a] > mass[b] || (mass[a] == mass[b] && a < b); });

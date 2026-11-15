@@ -1,6 +1,7 @@
 // Motion: a step moves every cell's mass along its heading distribution; the magnetometer reweights it.
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <limits>
 #include <numbers>
@@ -15,7 +16,6 @@ using namespace filter_detail;
 void GridFilter::on_step(const StepEvent& step) {
   now_ = step.t;
   yaw_ = wrap_angle(yaw_ + step.heading_delta);
-  const std::size_t n = map_->size();
   const auto row = static_cast<std::size_t>(bins_);
 
   // Heading noise: a 3-tap kernel over the bins with the variance of heading_sigma per step. The bins are
@@ -23,7 +23,7 @@ void GridFilter::on_step(const StepEvent& step) {
   const double bin_rad = kTwoPi / bins_;
   const double sigma = deg2rad(cfg_.heading_sigma_deg);
   const double a = std::clamp(0.5 * (sigma / bin_rad) * (sigma / bin_rad), 0.0, 1.0 / 3.0);
-  for (std::size_t c = 0; c < n; ++c) {
+  for (const std::uint32_t c : active_) {
     if (mass_[c] <= 0.0) continue;
     float* hc = &h_[c * row];
     for (int k = 0; k < bins_; ++k) {
@@ -52,8 +52,10 @@ void GridFilter::on_step(const StepEvent& step) {
     }
   }
 
-  std::fill(acc_.begin(), acc_.end(), StepAcc{});
-  std::fill(touched_.begin(), touched_.end(), std::uint8_t{0});
+  for (const std::uint32_t c : active_) {
+    acc_[c] = StepAcc{};
+    touched_[c] = 0;
+  }
   const int radius = map_->radius();
   const int side = 2 * radius + 1;
   const std::ptrdiff_t lattice_nx = map_->lattice_nx();
@@ -77,16 +79,36 @@ void GridFilter::on_step(const StepEvent& step) {
   StepAcc* const acc = acc_.data();
   int* const move_offset = move_offset_.data();
   std::array<std::uint16_t, (2 * GridMap::kMaxRadius + 1) * (2 * GridMap::kMaxRadius + 1)> used{};
-  for (std::size_t c = 0; c < n; ++c) {
+  const std::uint32_t* const active = active_.data();
+  const std::size_t n_active = active_.size();
+  const bool sparse = sparse_;
+  const std::uint8_t* const cell_active = cell_active_.data();
+  const std::uint8_t* const block_edge = block_edge_.data();
+  for (std::size_t ai = 0; ai < n_active; ++ai) {
+    const std::size_t c = active[ai];
     const double m = mass[c];
     if (m <= 0.0) continue;
     const double d1 = dev_mu_[c], d2 = dev_var_[c] + d1 * d1;
     const double b1 = baro_mu_[c], b2 = baro_var_[c] + b1 * b1;
     const GridMap::Cell& cell = map_->cell(c);
     const int cell_ix = cell.ix, cell_iy = cell.iy;
-    const std::uint64_t mask_lo = cell.mask[0], mask_hi = cell.mask[1];
+    std::uint64_t mask_lo = cell.mask[0], mask_hi = cell.mask[1];
     const std::int32_t* const around =
         map_->lattice_index(cell.level) + static_cast<std::ptrdiff_t>(cell_iy) * lattice_nx + cell_ix;
+    if (sparse && block_edge[map_->block_of(c)] != 0) {
+      // Next to the background: a move into a background block is not made, as if a wall stood there.
+      // Only mass under the active floor can be here (refresh_active_set keeps a ring of active blocks
+      // around every cell above it).
+      for (std::uint64_t* word : {&mask_lo, &mask_hi}) {
+        const int base = word == &mask_lo ? 0 : 64;
+        for (std::uint64_t bits = *word; bits != 0; bits &= bits - 1) {
+          const int b = base + std::countr_zero(bits);
+          const int dx = b % side - radius, dy = b / side - radius;
+          const std::int32_t t = around[static_cast<std::ptrdiff_t>(dy) * lattice_nx + dx];
+          if (cell_active[static_cast<std::size_t>(t)] == 0) *word &= ~(std::uint64_t{1} << (b - base));
+        }
+      }
+    }
     const double bx = cx_[c], by = cy_[c];
     const double ux = (bx - origin.x) * inv_cell, uy = (by - origin.y) * inv_cell;
     // Per target offset, the mass and its move summed over the cell's headings and nodes; the per-cell
@@ -174,7 +196,7 @@ void GridFilter::on_step(const StepEvent& step) {
   }
   step_motion_ = w_level > 0.0 ? move_level * (1.0 / w_level) : w_all > 0.0 ? move_all * (1.0 / w_all) : Vec2{};
 
-  for (std::size_t c = 0; c < n; ++c) {
+  for (const std::uint32_t c : active_) {
     const StepAcc& in = acc[c];
     const double m = in.mass;
     mass_[c] = m;
@@ -214,7 +236,7 @@ void GridFilter::on_heading(double t, double heading, double sigma) {
     bin_lik_[static_cast<std::size_t>(k)] = (1.0 - eps) * norm * std::exp(-0.5 * z * z) + eps / kTwoPi;
   }
   const auto row = static_cast<std::size_t>(bins_);
-  for (std::size_t c = 0; c < map_->size(); ++c) {
+  for (const std::uint32_t c : active_) {
     if (mass_[c] <= 0.0) continue;
     float* hc = &h_[c * row];
     double sum = 0.0;
@@ -227,6 +249,13 @@ void GridFilter::on_heading(double t, double heading, double sigma) {
     for (std::size_t i = 0; i < row; ++i) hc[i] = static_cast<float>(hc[i] * bin_lik_[i] * inv);
     mass_[c] *= sum;
   }
+  if (sparse_) {
+    // The background has any heading: its mass gets the likelihood's mean over the bins.
+    double mean = 0.0;
+    for (std::size_t i = 0; i < row; ++i) mean += bin_lik_[i];
+    mean /= static_cast<double>(row);
+    for (double& bg : bg_mass_) bg *= mean;
+  }
   normalize();
   maybe_teleport(t);
   update_heading(cloud_.level);
@@ -234,10 +263,8 @@ void GridFilter::on_heading(double t, double heading, double sigma) {
 }
 
 void GridFilter::update_heading(int level) {
-  const std::size_t begin = multi_level_ ? map_->level_begin(level) : 0;
-  const std::size_t end = multi_level_ ? map_->level_begin(level + 1) : map_->size();
   std::fill(bin_lik_.begin(), bin_lik_.end(), 0.0);
-  for (std::size_t c = begin; c < end; ++c) {
+  for (const std::uint32_t c : active_on(level)) {
     if (mass_[c] <= 0.0) continue;
     for (int k = 0; k < bins_; ++k) bin_lik_[static_cast<std::size_t>(k)] += mass_[c] * h_[state(c, k)];
   }

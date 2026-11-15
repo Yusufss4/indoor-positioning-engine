@@ -384,25 +384,29 @@ TEST(GridMap, WallCountsMatchTheVenueOnAShopWallMall) {
 
 TEST(GridFilter, IsDeterministic) {
   const Venue v = test::two_room_venue();
-  GridFilterConfig cfg;
-  auto map = std::make_shared<const GridMap>(v, cfg);
-  GridFilter a(map, cfg, {}), b(map, cfg, {});
-  const RssiModel model(v);
-  for (GridFilter* f : {&a, &b}) {
-    double t = 0.0;
-    for (int i = 0; i < 20; ++i) {
-      t += 0.5;
-      f->on_step(step(t, 0.65, 0.05));
-      f->on_heading(t, 0.3, deg2rad(12.0));
-      const Vec2 p{3.0 + 0.6 * i, 3.0};
-      for (std::size_t k = 0; k < v.beacons().size(); ++k) {
-        f->on_rssi(t + 0.01 * static_cast<double>(k), k, model.expected_rssi(v.beacons()[k], p));
+  for (const double floor : {0.0, 1e-9}) {
+    GridFilterConfig cfg;
+    cfg.active_floor = floor;
+    auto map = std::make_shared<const GridMap>(v, cfg);
+    GridFilter a(map, cfg, {}), b(map, cfg, {});
+    const RssiModel model(v);
+    for (GridFilter* f : {&a, &b}) {
+      double t = 0.0;
+      for (int i = 0; i < 20; ++i) {
+        t += 0.5;
+        f->on_step(step(t, 0.65, 0.05));
+        f->on_heading(t, 0.3, deg2rad(12.0));
+        const Vec2 p{3.0 + 0.6 * i, 3.0};
+        for (std::size_t k = 0; k < v.beacons().size(); ++k) {
+          f->on_rssi(t + 0.01 * static_cast<double>(k), k, model.expected_rssi(v.beacons()[k], p));
+        }
       }
     }
+    for (std::size_t c = 0; c < map->size(); ++c) ASSERT_EQ(a.mass()[c], b.mass()[c]);
+    EXPECT_EQ(a.background_mass(), b.background_mass());
+    EXPECT_EQ(a.estimate().pos.x, b.estimate().pos.x);
+    EXPECT_EQ(a.estimate().pos.y, b.estimate().pos.y);
   }
-  for (std::size_t c = 0; c < map->size(); ++c) ASSERT_EQ(a.mass()[c], b.mass()[c]);
-  EXPECT_EQ(a.estimate().pos.x, b.estimate().pos.x);
-  EXPECT_EQ(a.estimate().pos.y, b.estimate().pos.y);
 }
 
 TEST(Engine, RoomProbabilityIsTheMassInTheRoom) {
@@ -478,13 +482,16 @@ TEST(GridFilter, APositionFixLocalisesFromTheUniformPrior) {
 
 TEST(GridFilter, APositionFixMovesAnEstimateThatIsConfidentlyElsewhere) {
   const Venue v = test::two_room_venue();
-  GridFilterConfig cfg;
-  auto map = std::make_shared<const GridMap>(v, cfg);
-  GridFilter f(map, cfg, {});
-  f.set_point({17.0, 3.0}, 0, 0);  // every other cell holds no mass at all
-  f.on_position_fix(1.0, {4.0, 6.0}, 0, 0.5);
-  EXPECT_NEAR(f.estimate().pos.x, 4.0, 0.3);
-  EXPECT_NEAR(f.estimate().pos.y, 6.0, 0.3);
+  for (const double floor : {0.0, 1e-9}) {
+    GridFilterConfig cfg;
+    cfg.active_floor = floor;
+    auto map = std::make_shared<const GridMap>(v, cfg);
+    GridFilter f(map, cfg, {});
+    f.set_point({17.0, 3.0}, 0, 0);  // every other cell holds no mass at all
+    f.on_position_fix(1.0, {4.0, 6.0}, 0, 0.5);
+    EXPECT_NEAR(f.estimate().pos.x, 4.0, 0.3);
+    EXPECT_NEAR(f.estimate().pos.y, 6.0, 0.3);
+  }
 }
 
 TEST(GridFilter, APositionFixKeepsTheHeadingOfMassThatIsAlreadyThere) {
@@ -540,4 +547,187 @@ TEST(Engine, AFixAndStepsAloneFollowAWalkBetweenWalls) {
   }
   EXPECT_GT(scored, 500);
   EXPECT_LT(worst, 5.0);
+}
+
+TEST(GridMap, BlocksHoldEveryCellOnceAndEveryMoveStaysNextDoor) {
+  for (const Venue& v : {open_venue(), test::two_level_venue()}) {
+    const GridFilterConfig cfg;
+    const GridMap map(v, cfg);
+    ASSERT_GT(map.block_count(), 1u);
+    std::vector<int> seen(map.size(), 0);
+    for (std::size_t b = 0; b < map.block_count(); ++b) {
+      const auto cells = map.block_cells(b);
+      ASSERT_FALSE(cells.empty());
+      EXPECT_TRUE(std::is_sorted(cells.begin(), cells.end()));
+      EXPECT_EQ(map.block_of(map.block_cell(b)), b);
+      for (const std::uint32_t c : cells) {
+        ++seen[c];
+        EXPECT_EQ(map.block_of(c), b);
+        EXPECT_EQ(map.cell(c).level, map.block_level(b));
+      }
+      EXPECT_GE(b, map.block_level_begin(map.block_level(b)));
+      EXPECT_LT(b, map.block_level_begin(map.block_level(b) + 1));
+    }
+    EXPECT_EQ(std::count(seen.begin(), seen.end(), 1), static_cast<std::ptrdiff_t>(map.size()));
+
+    // A step, or a level change, ends in the cell's own block or in one of its neighbours.
+    const auto next_door = [&](std::size_t from, std::int32_t to) {
+      const std::uint32_t a = map.block_of(from), b = map.block_of(static_cast<std::size_t>(to));
+      const auto nb = map.block_neighbours(a);
+      return a == b || std::find(nb.begin(), nb.end(), b) != nb.end();
+    };
+    const int r = map.radius();
+    for (std::size_t c = 0; c < map.size(); ++c) {
+      const GridMap::Cell& cell = map.cell(c);
+      for (int dy = -r; dy <= r; ++dy) {
+        for (int dx = -r; dx <= r; ++dx) {
+          if (!GridMap::test(cell, map.bit(dx, dy))) continue;
+          ASSERT_TRUE(next_door(c, map.at(cell.level, cell.ix + dx, cell.iy + dy)));
+        }
+      }
+      for (const std::int32_t linked : {cell.up, cell.down}) {
+        if (linked >= 0) {
+          ASSERT_TRUE(next_door(c, linked));
+        }
+      }
+    }
+  }
+}
+
+TEST(GridFilter, WithoutAnActiveFloorEveryCellIsActive) {
+  const Venue v = open_venue();
+  const GridFilterConfig cfg;
+  auto map = std::make_shared<const GridMap>(v, cfg);
+  GridFilter f(map, cfg, {});
+  const RssiModel model(v);
+  for (int r = 0; r < 30; ++r) {
+    for (std::size_t b = 0; b < v.beacons().size(); ++b) {
+      f.on_rssi(0.05 * (4 * r + static_cast<int>(b)), b, model.expected_rssi(v.beacons()[b], {30.0, 8.0}));
+    }
+  }
+  EXPECT_EQ(f.active_cells().size(), map->size());
+  EXPECT_EQ(f.background_mass(), 0.0);
+}
+
+TEST(GridFilter, TheActiveSetShrinksToWhereTheMassIs) {
+  const Venue v = open_venue();
+  GridFilterConfig cfg;
+  cfg.active_floor = 1e-9;
+  auto map = std::make_shared<const GridMap>(v, cfg);
+  GridFilter f(map, cfg, {});
+  EXPECT_EQ(f.active_cells().size(), map->size());  // the uniform prior: every cell is the heaviest
+  const RssiModel model(v);
+  const Vec2 p{30.0, 8.0};
+  double t = 0.0;
+  for (int r = 0; r < 30; ++r) {
+    for (std::size_t b = 0; b < v.beacons().size(); ++b) {
+      f.on_rssi(t, b, model.expected_rssi(v.beacons()[b], p));
+      t += 0.05;
+    }
+    f.on_step(step(t, 0.0));
+    f.on_heading(t, 0.3, deg2rad(12.0));
+  }
+  EXPECT_LT(f.active_cells().size(), map->size() / 2);
+  EXPECT_LT(distance(f.estimate().pos, p), 1.0);
+  EXPECT_NEAR(total_mass(f) + f.background_mass(), 1.0, 1e-12);
+  EXPECT_LT(f.background_mass(), 1e-6);
+  // A cell outside the active set has no mass of its own.
+  std::vector<char> active(map->size(), 0);
+  for (const std::uint32_t c : f.active_cells()) active[c] = 1;
+  EXPECT_TRUE(std::is_sorted(f.active_cells().begin(), f.active_cells().end()));
+  for (std::size_t c = 0; c < map->size(); ++c) {
+    if (!active[c]) {
+      ASSERT_EQ(f.mass()[c], 0.0);
+    }
+  }
+}
+
+TEST(GridFilter, WithAnActiveFloorStepsCarryTheMassAcrossBlocks) {
+  // 28 m in a straight line: the mass leaves the blocks it started in several times over. Mass that
+  // stepped into the background would be lost, and the mean with it.
+  const Venue v = open_venue();
+  GridFilterConfig cfg = quiet_config();
+  cfg.active_floor = 1e-9;
+  cfg.step_length_sigma = 0.08;
+  cfg.step_length_rel_sigma = 0.1;
+  auto map = std::make_shared<const GridMap>(v, cfg);
+  GridFilter f(map, cfg, {});
+  f.set_point({5.0, 12.0}, 0, 0);
+  for (int i = 0; i < 40; ++i) {
+    f.on_step(step(0.5 * (i + 1), 0.7));
+    ASSERT_LT(f.active_cells().size(), map->size() / 2);
+  }
+  EXPECT_NEAR(mean_position(f).x, 33.0, 1e-9);
+  EXPECT_NEAR(mean_position(f).y, 12.0, 1e-9);
+  EXPECT_NEAR(total_mass(f) + f.background_mass(), 1.0, 1e-12);
+}
+
+TEST(GridFilter, TheBackgroundBringsAWrongLockBack) {
+  // All of the mass in one corner, the walker in the opposite one: only recovery mass is there to grow.
+  // With an active floor that mass is in background blocks, scored once per block.
+  const Venue v = open_venue();
+  const RssiModel model(v);
+  const Vec2 p{33.0, 17.0};
+  int rounds[2] = {0, 0};
+  for (int mode = 0; mode < 2; ++mode) {
+    GridFilterConfig cfg;
+    cfg.active_floor = mode == 0 ? 0.0 : 1e-9;
+    cfg.beacon_integrity = false;  // it would distrust the beacons that disagree with the lock
+    auto map = std::make_shared<const GridMap>(v, cfg);
+    GridFilter f(map, cfg, {});
+    double t = 0.0;
+    for (int r = 0; r < 20; ++r) {  // lock in the wrong corner
+      for (std::size_t b = 0; b < v.beacons().size(); ++b) {
+        f.on_rssi(t, b, model.expected_rssi(v.beacons()[b], {6.0, 6.0}));
+        t += 0.05;
+      }
+    }
+    ASSERT_LT(distance(f.estimate().pos, {6.0, 6.0}), 2.5);
+    if (mode == 1) {
+      ASSERT_LT(f.active_cells().size(), map->size() / 2);
+    }
+    // Back within 6 m: four beacons 30 m apart and a device offset to learn leave metres of play.
+    int r = 0;
+    for (; r < 50 && distance(f.estimate().pos, p) > 6.0; ++r) {
+      for (std::size_t b = 0; b < v.beacons().size(); ++b) {
+        f.on_rssi(t, b, model.expected_rssi(v.beacons()[b], p));
+        t += 0.05;
+      }
+    }
+    rounds[mode] = r;
+    EXPECT_LT(r, 50) << "active_floor " << cfg.active_floor;
+  }
+  // One evaluation per block is coarser than one per cell, but not a different order of delay.
+  EXPECT_LE(rounds[1], 2 * rounds[0] + 5) << rounds[0] << " rounds per cell, " << rounds[1] << " per block";
+}
+
+TEST(Engine, AnActiveFloorFollowsTheWalksOfTheExactFilter) {
+  for (const char* name : {"scenarios/office_nominal.json", "scenarios/office_stairs_up_down.json"}) {
+    const auto sc = sim::load_scenario_file(test::data_path(name));
+    const Venue venue = load_venue_file(sc.venue_path);
+    const Trace trace = sim::simulate(sc, venue);
+    EngineConfig exact_cfg, floor_cfg;
+    floor_cfg.filter.active_floor = 1e-9;
+    auto map = std::make_shared<const GridMap>(venue, exact_cfg.filter);
+    PositioningEngine exact(venue, exact_cfg, map), with_floor(venue, floor_cfg, map);
+    TracePlayer a(venue, trace), b(venue, trace);
+    double worst = 0.0;
+    int scored = 0, level_differs = 0;
+    std::size_t most_active = 0;
+    while (!a.finished()) {
+      const auto event = a.step(exact);
+      ASSERT_EQ(b.step(with_floor), event);
+      if (event != TracePlayer::Event::Truth) continue;
+      if (a.truth().t < 10.0) continue;  // converged: before, the exact filter's tail is still mass
+      const Estimate x = exact.raw_estimate(), y = with_floor.raw_estimate();
+      worst = std::max(worst, distance(x.pos, y.pos));
+      level_differs += x.level != y.level;
+      most_active = std::max(most_active, with_floor.filter().active_cells().size());
+      ++scored;
+    }
+    EXPECT_GT(scored, 500) << name;
+    EXPECT_LT(worst, 0.05) << name;
+    EXPECT_EQ(level_differs, 0) << name;
+    EXPECT_LT(most_active, map->size() / 2) << name;
+  }
 }
