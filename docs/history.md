@@ -29,6 +29,7 @@ Numbers are means over seeds on the simulated scenarios unless a dataset is name
 | 17 | What can go? | The planner, IMDF, the UJI study, three unused filter options | A smaller repository, identical results |
 | 18 | Why must a user know which config file to pass? | The three files are one patch, limited by what the venue has | `recommended_config(venue)`; an installable package |
 | 19 | Can the engine run live in a phone's browser? | Yes on motion sensors; a web page gets no radio | `on_position_fix`, `web/live.html`, recordings as traces |
+| 20 | Must every update touch every cell? | No: 300 cells hold the mass; the rest can be coarse blocks | `filter.active_floor`, off by default |
 
 ## 2. A moved beacon hijacking the estimate (`office_field_issue`)
 
@@ -198,10 +199,78 @@ own sensors as the user walks, and saves what it fed as a trace.
 - **Not known until tried on phones:** the step detector on browser sensor data at 60 Hz, the compass
   indoors, and the engine's load on a phone's processor (the page shows it).
 
+## 20. Updating only where the mass is
+
+Compute was the grid filter's cost since experiment 14: a mall walk took a third of its duration on a
+desktop core. Half of the work scaled with cells × heading bins, the rest with cells × readings.
+
+- **Measured first:** on an office, the airport hall, the KIT building and a mall floor of 136,491 cells,
+  the 300 heaviest cells hold all of the mass once the walk has converged; the 300th is typically at 1e-13
+  to 1e-10 of the total. Everything else is recovery mass. Experiment 14's active floor saved nothing because
+  recovery was 1e-4 per second then, which kept every cell near any useful floor, and because it still
+  visited every cell to test it.
+- **Change** (`filter.active_floor`, [design.md](design.md#the-active-set)): the lattice is cut into 4 m
+  blocks. Blocks holding a cell above the floor, and their neighbours, are updated cell by cell. Every
+  other block is one coarse cell that radio and barometer updates score once. Dropping the far cells
+  instead would have removed the way back from a wrong lock; a unit test locks the filter in the wrong
+  corner of a hall, and with and without the floor it comes back after the same 16 packets.
+- **Off (the default):** results identical to before on the 12 scenarios (10 seeds), the 109 mall tune
+  walks and the 27 IPIN tune walks, and 1–2% faster.
+
+At 1e-9, 10 seeds, before → after (compute on one core, 2 seeds):
+
+| Scenario | CEP50 [m] | CEP95 [m] | Converged [s] | Jitter p95 [m] | Jumps/min | Through walls/min | Floor ok, flips | µs/update |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| airport_hall_sparse | 1.01 → 1.00 | 3.76 → 3.76 | 34.5 → 34.5 | 0.20 → 0.20 | 0.2 → 0.2 | 0.05 → 0.05 | - | 348 → 48 |
+| baro_drift_long | 0.54 → 0.54 | 1.42 → 1.42 | 1.0 → 1.0 | 0.28 → 0.28 | 0.6 → 0.6 | 0.17 → 0.17 | 99.2% → 99.2%, 4.2 → 4.2 | 246 → 33 |
+| kit_tour | 0.66 → 0.64 | 2.67 → 2.67 | 0.7 → 0.7 | 0.26 → 0.26 | 0.9 → 0.9 | 1.19 → 1.16 | 99.0% → 99.0%, 3.0 → 3.0 | 1931 → 81 |
+| office_device_offset | 0.49 → 0.49 | 1.15 → 1.15 | 5.2 → 5.2 | 0.31 → 0.31 | 0.1 → 0.1 | 0.73 → 0.73 | - | 110 → 34 |
+| office_elevator | 0.54 → 0.54 | 1.28 → 1.28 | 2.5 → 2.5 | 0.22 → 0.22 | 0.9 → 0.9 | 0.12 → 0.12 | 99.0% → 99.0%, 2.0 → 2.0 | 221 → 31 |
+| office_field_issue | 0.56 → 0.56 | 1.68 → 1.67 | 5.7 → 5.7 | 0.30 → 0.30 | 0.1 → 0.0 | 0.49 → 0.39 | - | 114 → 35 |
+| office_floor_bleed | 0.68 → 0.68 | 1.50 → 1.53 | 1.8 → 1.7 | 0.32 → 0.31 | 1.0 → 1.0 | 0.52 → 0.52 | 97.9% → 98.0%, 2.9 → 2.8 | 253 → 42 |
+| office_mag_disturbance | 0.94 → 0.94 | 2.65 → 2.65 | 6.1 → 6.1 | 0.37 → 0.37 | 0.3 → 0.3 | 2.60 → 2.60 | - | 117 → 35 |
+| office_nlos_heavy | 0.57 → 0.57 | 1.28 → 1.28 | 3.8 → 3.8 | 0.28 → 0.28 | 0.0 → 0.0 | 0.34 → 0.34 | - | 112 → 34 |
+| office_nominal | 0.55 → 0.55 | 1.14 → 1.14 | 2.2 → 2.2 | 0.29 → 0.29 | 0.0 → 0.0 | 0.39 → 0.39 | - | 118 → 33 |
+| office_stairs_up_down | 0.58 → 0.58 | 1.62 → 1.62 | 1.2 → 1.2 | 0.30 → 0.30 | 0.8 → 0.8 | 0.08 → 0.08 | 99.1% → 99.1%, 2.0 → 2.0 | 248 → 36 |
+| office_step_scale | 0.78 → 0.78 | 1.77 → 1.77 | 3.3 → 3.3 | 0.28 → 0.28 | 0.0 → 0.0 | 0.78 → 0.78 | - | 119 → 33 |
+
+Real walks, tune sets, all walks pooled (off → 1e-12 → 1e-9 → 1e-6):
+
+| | Mean [m] | CEP50 [m] | CEP95 [m] | Converged [s] | Jitter p95 [m] |
+|---|---:|---:|---:|---:|---:|
+| 109 mall walks, `msil_wifi.json` | 11.16 → 11.08 → 11.05 → 11.07 | 10.62 → 10.58 → 10.58 → 10.59 | 16.24 → 16.25 → 16.21 → 16.06 | 44.4 → 43.8 → 44.4 → 46.0 | 0.35 → 0.35 → 0.35 → 0.34 |
+| 27 IPIN walks, `fingerprint.json` | 4.55 → 4.45 → 4.35 → 4.25 | 3.56 → 3.50 → 3.57 → 3.41 | 10.61 → 10.15 → 9.59 → 9.36 | 79.9 → 74.2 → 89.0 → 90.6 | 0.67 → 0.63 → 0.64 → 0.65 |
+
+Held out, replayed once at 1e-9 (off → 1e-9, all walks pooled):
+
+| | Mean [m] | CEP50 [m] | CEP95 [m] | Converged [s] | Jitter p95 [m] |
+|---|---:|---:|---:|---:|---:|
+| 109 mall walks, `msil_wifi.json` | 10.75 → 10.71 | 10.79 → 10.73 | 14.40 → 14.34 | 24.4 → 26.0 | 0.32 → 0.31 |
+| 6 IPIN scoring walks, `fingerprint.json` | 5.15 → 5.17 | 4.15 → 4.00 | 11.85 → 13.24 | 78.2 → 120.5 | 0.53 → 0.54 |
+
+Two demo walks on one core, off → 1e-12 → 1e-9 → 1e-6: the mall floor site1_F2 (160 s, 136,491 cells)
+replays in 49.6 → 3.4 → 2.4 → 2.3 s, the Nuremberg walk in 17.5 → 6.4 → 2.7 → 1.6 s.
+
+- **What got worse at 1e-9:** convergence on IPIN. The tune walks converge 9 s later in the mean and the
+  scoring walks 42 s later (Nuremberg 100 → 163 s), and the scoring walks' pooled CEP95 is 11.85 → 13.24 m
+  (UMinho 14.5 → 18.8 m). Nuremberg's CEP50 on the 4 tune walks is 2.85 → 2.99 m, with coverage95 at 18%
+  instead of 22%. At 1e-12 the tune walks converge no later and Nuremberg's CEP50 is 2.89 m, at 2.4 times
+  the compute on its demo walk; the scoring walks were not replayed at 1e-12. Real Wi-Fi is where the tail
+  matters: the truth is often outside the heaviest cells. Two mall floors with one held-out walk each
+  are 0.6–0.9 m worse in the mean (site2_F2, site2_F4) and one is 1.1 m better (site2_F7).
+- **Tried first:** background blocks that keep the prior device offset and a constant barometer
+  likelihood. Simpler, and the mall walks were 0.5 m *better* in the mean with it than without a floor
+  (10.65 against 11.16 m at 1e-9). Such a background responds less, and recovery mass costs on real Wi-Fi
+  (experiment 14). That is a change to recovery, not to compute, so the blocks got offsets of their own,
+  which follow the exact filter more closely.
+- **Not done:** the default. It stays 0 until the floor has been tried on a phone and on the Kaggle walks.
+  The first seconds of a walk still cost a full update per cell; there, `log10`, `exp` and `log` per
+  (cell, reading) are what is left to cut.
+
 ## Open questions
 
-- **Compute on large floors.** The filter touches every cell at every update. Coarser cells away from the
-  mass, or a hierarchy, are untried.
+- **Compute before convergence.** With `active_floor` the cost follows the mass, but until the first
+  scans have concentrated it every cell is updated, at the cost of experiment 14.
 - **Uncertainty.** Coverage95 is 53–92% on the simulated walks and under a quarter on real Wi-Fi. Tempering
   a scan made the spread honest and cost accuracy at every setting tried.
 - **Stairs taken away from the estimate.** Mass changes level only inside a connector.

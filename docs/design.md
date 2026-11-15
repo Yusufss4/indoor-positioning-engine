@@ -35,6 +35,7 @@ WebAssembly demo all use it, so they see identical inputs.
 | Barometer, floor changes | `core/src/filter/pressure.cpp`, `core/src/baro.cpp` |
 | A position given from outside (a tap, a tag) | `core/src/filter/position_fix.cpp` |
 | Recovery | `core/src/filter/recovery.cpp` |
+| Which cells an update visits (`active_floor`) | `core/src/filter/active_set.cpp` |
 | Reported estimate: level, position on the map | `core/src/filter/estimate.cpp`, `core/src/level_selector.cpp`, `core/src/map_estimate.cpp` |
 | Drawn position between updates | `core/src/track_smoother.cpp` |
 | Room events | `core/src/rooms.cpp` |
@@ -88,6 +89,9 @@ Built once per venue and shared read-only by every engine on it.
   beacon). The result is exactly `Venue::count_wall_crossings`.
 - **Floors and rooms.** Cells inside a connector (stairwell, lift, escalator) link to the cell at the same
   place on the levels next to it. Each cell lists the rooms its centre is in.
+- **Blocks.** The lattice is also cut into squares of `background_block_m` (4 m, 8 by 8 cells), per level,
+  each with its neighbours: the blocks a step or a level change from its cells can end in. They are what
+  the active set below is made of.
 
 ### The state
 
@@ -146,6 +150,36 @@ bin exactly; only the 3° per step process noise moves mass between bins.
   second): a way back from a wrong lock that a misbehaving beacon cannot exploit. If all mass dies, the
   filter starts again from the uniform prior.
 
+### The active set
+
+`active_floor`, off by default. After the first seconds nearly all of the mass sits in a few hundred cells,
+and the rest of the venue holds recovery mass: about 1e-8 of the probability, spread over every other
+cell. With an active floor the filter does its full work only where the mass is.
+
+- **Active blocks.** A block is active when one of its cells holds at least `active_floor` of the heaviest
+  cell's mass, or when it is next to such a block. Its cells are updated exactly as above. The ring of
+  neighbours means that mass above the floor never steps, or changes level, into a block that is not
+  active.
+- **Background blocks.** Every other block is one coarse cell: one mass, taken as spread evenly over its
+  cells, and one device offset and one barometer offset. It has no heading and steps do not move it. A
+  radio update scores it once, at the block's centre, through the walls of the cell nearest to that
+  centre; a barometer update scores it against its level; the magnetometer gives it the mean of the
+  heading likelihood; recovery mass is added to it as to cells. It shares the normalisation with the
+  cells, so a region the radio starts to favour grows as recovery mass would.
+- **Changing sides.** A background block whose mass per cell reaches 16 times the floor becomes active:
+  its cells get that mass at their centres with any heading and the block's offsets. An active block with
+  nothing above the floor in it or next to it is folded: its mass is summed and its offsets are those of
+  its cells' mass. The gap between the two thresholds keeps a block from changing sides at every update.
+- **What is approximate.** Mass under the floor loses its place within the block, its heading and its
+  motion. A position fix is scored on every cell (every block is made active first), because a fix can
+  be narrower than a block.
+- Cells in a background block read as mass 0 (`GridFilter::mass()`); `active_cells()` lists the others and
+  `background_mass()` is what the blocks hold. The filter stays deterministic: the active cells are kept
+  in index order, the order every sum is taken in with the floor off.
+
+With `active_floor` 0 every block is active at every update, and the results are those of a filter
+without blocks, bit for bit.
+
 ### The estimate
 
 - **Level.** The mass per level is averaged over 0.5 s (`level_smoothing_s`), and the reported level moves
@@ -188,6 +222,13 @@ Replay on one desktop core (Ryzen 7 5800H): the simulated scenarios take 0.1–2
 largest floors with many access points. In WebAssembly the mall recordings take 0.5–1.2 of their duration,
 so the demo's playback can wait for the engine. About half of that is the step loop; most of the rest is
 `log10`, `exp` and `log` for every (cell, reading).
+
+With an [active set](#the-active-set) the cost follows the mass, not the venue: O(active cells) per update
+plus O(blocks) for the background. At `active_floor` 1e-9, on the same core, the simulated scenarios take
+0.03–0.08 ms per sensor update (3 to 24 times less; `kit_tour` 1.93 → 0.08 ms) and a 160 s mall walk on
+136,491 cells replays in 2.4 s instead of 50 s. The first seconds, until the posterior has concentrated,
+cost what they cost without it. The accuracy is in [history.md](history.md) (experiment 20): unchanged
+on the simulated walks and the mall walks, a later convergence on the IPIN buildings.
 
 ## Floors
 
@@ -251,7 +292,9 @@ the generator.
   ride, slowly.
 - **Floors are flat slabs.** Atriums and ramps between half-levels are not modelled.
 - **Step length** has no per-user scale state; a wider along-track noise stands in for it.
-- **Compute.** The filter touches every cell at every update. A sparse active set is the open route.
+- **Compute.** By default the filter touches every cell at every update. `active_floor` restricts it to
+  where the mass is; it is off until it has been tried on more than the walks of experiment 20, and on a
+  phone.
 - **Room events are only as good as the position.** In the malls (5–7 m typical error) rooms smaller than
   the error are not detectable; the malls' room events are a demo of the plumbing, not a result.
 - **Offline use.** Competitions scored offline reward whole-walk optimisation. The two-pass replay in

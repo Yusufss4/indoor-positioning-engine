@@ -77,12 +77,20 @@ A measurement is a log-likelihood per cell. The radio update (`GridFilter::updat
 `core/src/filter/radio.cpp`) shows the pattern:
 
 ```cpp
-std::fill(loglik_.begin(), loglik_.end(), 0.0);
+for (const std::uint32_t c : active_) loglik_[c] = 0.0;
+if (sparse_) std::fill(block_loglik_.begin(), block_loglik_.end(), 0.0);
 add_radio_model_loglik(readings);                     // each term adds to loglik_[cell]
 if (neighbour_count_ > 0) add_fingerprint_loglik();
 if (floor_prior_active_) add_floor_vote_loglik();
 apply_cell_loglik(t);                                 // multiply the masses, normalise, update the estimate
 ```
+
+The cells to visit are `active_`: every cell, or with `filter.active_floor` those of the blocks near the
+mass ([design.md](design.md#the-active-set)). Never loop over `0..map_->size()` in an update. With an
+active floor (`sparse_`) each term also adds to `block_loglik_[block]` for every background block with
+mass (`bg_mass_[block] > 0`), evaluated at `map_->block_centre(block)` on `map_->block_level(block)`;
+`apply_cell_loglik` applies both with one normalisation. A term that is too narrow to score once per 4 m
+block calls `activate_all()` first, as the position fix does.
 
 **Another reading of the same scan** (say, a learned fingerprint model): add an `add_*_loglik()` next to
 these, with its weight as a config field that is 0 by default.
@@ -91,8 +99,8 @@ these, with its weight as a config field that is 0 by default.
 (`core/src/filter/position_fix.cpp`, added for taps, tags and GNSS at an entrance) went through exactly
 these steps and is the shortest complete example:
 
-1. `GridFilter::on_x(t, ...)` in a new file under `core/src/filter/`: fill `loglik_` for every cell with
-   mass, then `apply_cell_loglik(t)`. `pressure.cpp` is the shortest example, including a per-cell nuisance
+1. `GridFilter::on_x(t, ...)` in a new file under `core/src/filter/`: fill `loglik_` for every active cell
+   with mass (and `block_loglik_`, see above), then `apply_cell_loglik(t)`. `pressure.cpp` is the shortest example, including a per-cell nuisance
    state (the barometer offset). Per cell you have the centroid (`cx_`, `cy_`), the level
    (`map_->cell(c).level`) and the mass. Keep it O(cells): no allocation, no per-cell wall tests that are
    not cached in `GridMap`.
