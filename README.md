@@ -96,9 +96,10 @@ target_link_libraries(app PRIVATE ipe::core)
 ([docs/formats.md](docs/formats.md)). `ipe-import` converts GeoJSON exports of indoor-mapping platforms,
 and `datasets/osm/convert.py` converts OpenStreetMap indoor data.
 
-**Settings** are chosen from the venue: one with training scans runs with Wi-Fi fingerprints, one with
-surveyed beacons with the defaults. To change them, patch them with JSON: `--set '{...}'`, `--config FILE`
-or `ipe::apply_config_patch`. `ipe-replay --print-config` lists every setting. Unknown keys are rejected.
+**Settings.** There are 15, and the venue chooses their values: one with training scans runs with Wi-Fi
+fingerprints, one with surveyed beacons with the defaults. To change one, patch it with JSON:
+`--set '{"filter": {"cell_m": 0.25}}'` or `ipe::apply_config_patch`. `ipe-replay --print-config` lists
+them ([docs/formats.md](docs/formats.md#settings)). Unknown keys are rejected.
 
 **Web demo** (needs the [Emscripten SDK](https://emscripten.org/docs/getting_started/downloads.html)):
 

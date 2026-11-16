@@ -12,7 +12,7 @@ For each of the test walks:
    the first fix: the competition is scored offline, so looking ahead is within its rules. `--two-pass`
    and `--snap` are further offline steps (datasets/common/offline.py).
 
-    python3 datasets/kaggle/submit.py --converted datasets/kaggle/out_fp --config data/configs/msil_wifi.json \\
+    python3 datasets/kaggle/submit.py --converted datasets/kaggle/out_fp \\
         --out datasets/kaggle/out_fp/submission.csv
 
 `--check-floors` instead predicts the floor of the converted held-out training walks, whose floor is

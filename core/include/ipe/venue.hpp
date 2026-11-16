@@ -158,6 +158,11 @@ class Venue {
   [[nodiscard]] const FloorFingerprints& floor_fingerprints() const { return floor_fingerprints_; }
   void set_floor_fingerprints(FloorFingerprints fp) { floor_fingerprints_ = std::move(fp); }
 
+  /// True when the beacons' positions and powers were fitted from recorded walks (venue JSON
+  /// `"radio_map": "fitted"`), false when they were surveyed. recommended_config reads it.
+  [[nodiscard]] bool radio_map_fitted() const { return radio_map_fitted_; }
+  void set_radio_map_fitted(bool fitted) { radio_map_fitted_ = fitted; }
+
   [[nodiscard]] std::optional<std::size_t> beacon_index(std::string_view id) const;
 
   /// True if moving in a straight line from a to b on `level` crosses any wall.
@@ -203,6 +208,7 @@ class Venue {
   std::vector<RoomGrid> room_grids_;
   bool has_level_footprints_ = false;
   FloorFingerprints floor_fingerprints_;
+  bool radio_map_fitted_ = false;
 };
 
 /// Parses the venue JSON format documented in docs/formats.md.

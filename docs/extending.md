@@ -39,10 +39,9 @@ const ipe::Estimate fix = engine.estimate();   // position, level, covariance, v
 - Events must arrive in time order. `engine.estimate()` is what to draw; `raw_estimate()` is the filter's
   own, unsmoothed.
 - `recommended_config(venue)` picks the settings from what the venue contains: the defaults for surveyed
-  beacons, the Wi-Fi settings with the floor vote for a venue with training scans, and the fingerprint
-  likelihood on top when those scans carry positions (the three files in `data/configs/`, see
-  [formats.md](formats.md#config-patches-dataconfigsjson)). A Wi-Fi venue without training scans cannot be
-  told from a beacon venue: give it `data/configs/msil_wifi.json`.
+  beacons, a wider RSSI spread for a radio map fitted from walks (`"radio_map": "fitted"`), the floor vote
+  for a venue with training scans, and the fingerprint likelihood on top when those scans carry positions
+  ([formats.md](formats.md#settings)).
 - From CMake, as part of your build: `add_subdirectory(indoor-positioning-engine)` or `FetchContent`, then
   `target_link_libraries(app PRIVATE ipe::core)`. Inside another project only the library is built, with
   that project's own compiler flags.
@@ -59,17 +58,26 @@ const ipe::Estimate fix = engine.estimate();   // position, level, covariance, v
   see how browser sensor data becomes the engine's frame; `web/check_live.py` tests the page without a
   phone. A native app does the same against `PositioningEngine` directly.
 
-## A config field
+## A setting, or a parameter
 
-1. Add the field with its default and a `///<` comment to the struct (`GridFilterConfig` in
-   `core/include/ipe/grid_filter.hpp`, or `PdrConfig`, `RssiModelConfig`, `BaroConfig`,
-   `TrackSmootherConfig`, `RoomEventConfig`).
-2. Add its name to that struct's `IPE_CONFIG_JSON(...)` line in `core/src/config.cpp`. The build fails
-   until you do: a field that is not listed there could never be reached by a patch.
+Most numbers of the pipeline are not settings. A component's parameter is a field of its struct
+(`GridFilterConfig` in `core/include/ipe/grid_filter.hpp`, `PdrConfig`, `RssiModelConfig`,
+`TrackSmootherConfig`, `RoomEventConfig`) when a test of that component needs to change it, and a named
+constant next to its use otherwise. Changing one is a code change, measured like any other.
 
-It is then available as `--set '{"filter": {"my_field": 1.5}}'`, in `data/configs/*.json` and in
-`--print-config`. Keep a new behaviour off by default until it has earned its place on the scenarios and
-the real walks.
+A setting is what a deployment changes, or the switch of a behaviour that is still being decided:
+
+1. Add the parameter to the component's struct, with its default and a comment.
+2. Add the setting to the matching section of `EngineConfig` (`core/include/ipe/engine.hpp`), defaulting
+   to the component's value, and copy it across in `core/src/engine.cpp`.
+3. Add its name to that section's `IPE_CONFIG_JSON(...)` line in `core/src/config.cpp`. The build fails
+   until you do: a setting that is not listed there could never be reached by a patch.
+4. Add it to the table in [formats.md](formats.md#settings).
+
+It is then available as `--set '{"filter": {"my_setting": 1.5}}'` and in `--print-config`. Keep a new
+behaviour off by default until it has earned its place on the scenarios and the real walks. Once it is
+decided, a value every venue of a kind needs goes into `recommended_config`, and a switch nobody turns
+stops being a setting.
 
 ## A measurement
 
@@ -161,7 +169,7 @@ A converter turns recordings into the three things every tool reads:
 `datasets/msil/convert.py` for a per-floor one with vector plans. Then:
 
 ```bash
-.venv/bin/python datasets/evaluate.py datasets/mine/out/manifest_tune.json --config data/configs/fingerprint.json
+.venv/bin/python datasets/evaluate.py datasets/mine/out/manifest_tune.json
 ./build/tools/ipe-regress --traces datasets/mine/out/manifest_holdout.json --no-baseline
 ```
 

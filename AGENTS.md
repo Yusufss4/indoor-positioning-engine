@@ -26,18 +26,18 @@ accuracy. [docs/design.md](docs/design.md) explains the engine and maps each con
   `viz/` - figures and the README GIF.
 - `data/venues`, `data/scenarios` - inputs. `data/geojson` is generated from `data/venues` by `ipe-import`;
   a unit test fails when it is stale.
-- `data/configs` - config patches for `--config`: `msil_wifi.json` (Wi-Fi), `ipin.json` (plus the floor
-  vote) and `fingerprint.json` (plus the fingerprint likelihood, for venues with fingerprint positions).
-  Without `--config`, the tools and `PositioningEngine(venue)` use `recommended_config(venue)`
-  (`core/src/engine.cpp`), which picks among these from the venue's training scans; a unit test keeps the
-  two in step.
+- Settings: `EngineConfig` (`core/include/ipe/engine.hpp`) has 15, listed in
+  [docs/formats.md](docs/formats.md#settings). There are no config files: the tools and
+  `PositioningEngine(venue)` use `recommended_config(venue)` (`core/src/engine.cpp`), which picks the
+  values from what the venue contains, and `--set` or `--config FILE` patch them. Everything else is a
+  component's parameter or a constant, not a setting.
 - `data/demo/{msil,ipin}` - recordings for the web demo, written by `datasets/*/export_demo.py`; a unit
   test checks them. `data/demo/kaggle` is the same for the Kaggle set, git-ignored (see below).
 - `datasets/` - download and conversion scripts for the real datasets ([docs/datasets.md](docs/datasets.md)):
   - `msil` - the Microsoft Indoor Location sample (two malls); also converts the full Kaggle set
     (`--kaggle`). `tests/regression/msil_baseline.json` gates the held-out walks of `out_scans/`.
   - `ipin` - IPIN competition Track 3 (two multi-floor buildings); venues in `data/ipin/`.
-    `tests/regression/ipin_baseline.json` gates the scoring walks of `out_fp/` with `fingerprint.json`.
+    `tests/regression/ipin_baseline.json` gates the scoring walks of `out_fp/`.
   - `kaggle` - fetch, submission and demo export for the full Kaggle set.
   - `osm` - OpenStreetMap indoor data to a venue, and a walk planner that writes scenarios.
   - `common` - what the converters share; `offline.py` holds the offline steps (two-pass replay, gap
@@ -90,9 +90,11 @@ Sanitizers: `-DIPE_SANITIZE=address,undefined` with `CMAKE_BUILD_TYPE=Debug`.
    quoted as what the engine does live.
 9. **Nothing converted from the Kaggle data is committed.** Its competition rules forbid redistribution:
    only code and aggregate numbers. `data/demo/kaggle/` must stay git-ignored.
-10. **New behaviour is off by default** behind a config field, until it has earned its place on the
-    scenarios and the real walks. A config field must be listed in `core/src/config.cpp` (the build fails
-    otherwise). A setting that has earned it for a kind of venue goes into `recommended_config`, not into
+10. **New behaviour is off by default** behind a setting, until it has earned its place on the
+    scenarios and the real walks ([docs/extending.md](docs/extending.md#a-setting-or-a-parameter)). A
+    setting must be listed in `core/src/config.cpp` (the build fails otherwise). Do not add a setting for
+    a number no deployment changes: that is a component's parameter or a constant.
+    A setting that has earned it for a kind of venue goes into `recommended_config`, not into
     the field's default.
 11. Format with `clang-format-18` (CI enforces it).
 
@@ -103,10 +105,10 @@ Sanitizers: `-DIPE_SANITIZE=address,undefined` with `CMAKE_BUILD_TYPE=Debug`.
 ./build/tools/ipe-regress --scenarios data/scenarios --no-baseline --seeds 10 \
     --set '{"filter":{"beacon_integrity":false}}'                                               # A/B test
 ./build/tools/ipe-replay --print-config                                                         # every setting
-.venv/bin/python datasets/evaluate.py datasets/ipin/out_fp/manifest_tune.json \
-    --config data/configs/fingerprint.json                                                      # real walks
+./build/tools/ipe-replay --venue data/ipin/nuremberg.json --print-config                        # a venue's values
+.venv/bin/python datasets/evaluate.py datasets/ipin/out_fp/manifest_tune.json                   # real walks
 .venv/bin/python datasets/fidelity.py datasets/ipin/out_fp/manifest_tune.json \
-    --config data/configs/fingerprint.json --b '{"rssi": {"sigma_db": 8.01}}'                   # their noise
+    --b '{"rssi": {"sigma_db": 8.01}}'                                                          # their noise
 ```
 
 The companion repo `positioning-agent-tools` wraps these tools as an MCP server. It still calls the removed

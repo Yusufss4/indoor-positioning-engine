@@ -314,33 +314,25 @@ TEST(Eval, ConfigJsonRoundTrip) {
   EXPECT_THROW(apply_config_patch(copy, R"({"ekf": {"rssi_min_dbm": -80}})"), std::invalid_argument);
 }
 
-TEST(Eval, ShippedConfigPatchesApply) {
-  for (const char* name : {"msil_wifi.json", "ipin.json", "fingerprint.json"}) {
-    std::ifstream in(test::data_path(std::string("configs/") + name));
-    ASSERT_TRUE(in) << name;
-    std::stringstream text;
-    text << in.rdbuf();
-    EngineConfig cfg;
-    EXPECT_NO_THROW(apply_config_patch(cfg, text.str())) << name;
-  }
-}
-
-TEST(Eval, RecommendedConfigIsTheShippedPatchThatFitsTheVenue) {
-  const auto shipped = [](const char* name) {
-    std::ifstream in(test::data_path(std::string("configs/") + name));
-    std::stringstream text;
-    text << in.rdbuf();
-    return config_to_json(config_from_json(text.str()));
-  };
-  const auto recommended = [](const char* venue) {
-    return config_to_json(recommended_config(load_venue_file(test::data_path(venue))));
-  };
-  // Surveyed beacons, no training scans: the engine as shipped.
-  EXPECT_EQ(recommended("venues/office_floor.json"), config_to_json(EngineConfig{}));
-  EXPECT_EQ(recommended("venues/office_two_floor.json"), config_to_json(EngineConfig{}));
+TEST(Eval, RecommendedConfigFollowsWhatTheVenueContains) {
+  const auto recommended = [](const Venue& venue) { return config_to_json(recommended_config(venue)); };
+  const auto patched = [](const char* patch) { return config_to_json(config_from_json(patch)); };
+  // Surveyed beacons, no training scans: the engine's defaults.
+  Venue office = load_venue_file(test::data_path("venues/office_floor.json"));
+  EXPECT_EQ(recommended(office), config_to_json(EngineConfig{}));
+  EXPECT_EQ(recommended(load_venue_file(test::data_path("venues/office_two_floor.json"))),
+            config_to_json(EngineConfig{}));
+  // A radio map fitted from walks, without the walks' scans.
+  const char* fitted = R"({"rssi": {"sigma_db": 8.0}, "smoothing": {"max_correction_mps": 1.5}})";
+  office.set_radio_map_fitted(true);
+  EXPECT_EQ(recommended(office), patched(fitted));
   // Training scans with a floor only, then with positions.
-  EXPECT_EQ(recommended("ipin/nuremberg.json"), shipped("ipin.json"));
-  EXPECT_EQ(recommended("demo/msil/site1_F2/venue.json"), shipped("fingerprint.json"));
+  EXPECT_EQ(recommended(load_venue_file(test::data_path("ipin/nuremberg.json"))),
+            patched(R"({"rssi": {"sigma_db": 8.0}, "smoothing": {"max_correction_mps": 1.5},
+                        "filter": {"floor_prior_weight": 3.0}})"));
+  EXPECT_EQ(recommended(load_venue_file(test::data_path("demo/msil/site1_F2/venue.json"))),
+            patched(R"({"rssi": {"sigma_db": 8.0}, "smoothing": {"max_correction_mps": 1.5},
+                        "filter": {"floor_prior_weight": 3.0, "fingerprint_weight": 3.0}})"));
 }
 
 TEST(Eval, EngineWithoutAConfigUsesTheRecommendedOne) {

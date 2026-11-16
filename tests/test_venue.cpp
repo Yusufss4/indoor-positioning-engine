@@ -306,6 +306,11 @@ TEST(Venue, ParsesFloorFingerprints) {
   EXPECT_EQ(fp.beacon, (std::vector<std::uint32_t>{1, 0, 0}));
   EXPECT_EQ(fp.rssi, (std::vector<float>{-50.0F, -80.0F, -40.0F}));
   EXPECT_TRUE(parse_venue(R"({"bounds": [0, 0, 1, 1], "beacons": []})").floor_fingerprints().empty());
+  // Whether the radio map was surveyed (the default) or fitted from walks.
+  EXPECT_FALSE(parse_venue(R"({"bounds": [0, 0, 1, 1], "beacons": []})").radio_map_fitted());
+  EXPECT_FALSE(parse_venue(R"({"bounds": [0, 0, 1, 1], "beacons": [], "radio_map": "surveyed"})").radio_map_fitted());
+  EXPECT_TRUE(parse_venue(R"({"bounds": [0, 0, 1, 1], "beacons": [], "radio_map": "fitted"})").radio_map_fitted());
+  EXPECT_THROW(parse_venue(R"({"bounds": [0, 0, 1, 1], "beacons": [], "radio_map": "guessed"})"), std::runtime_error);
   EXPECT_THROW(parse_venue(R"({"bounds": [0, 0, 1, 1], "beacons": [],
                                "floor_fingerprints": {"ids": [], "scans": [[0, 1]]}})"),
                std::exception);

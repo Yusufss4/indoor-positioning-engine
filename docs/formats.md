@@ -20,6 +20,9 @@
 - A beacon with `"model": false` has no usable position or path loss. The RSSI model skips it; its
   readings only count as a dimension of the radio fingerprints (below). The real-data converters write
   access points this way when the transmitter fit rejects them.
+- `"radio_map": "fitted"` (optional, default `"surveyed"`) says the beacons' positions and powers were
+  fitted from recorded walks. The engine then expects a wider RSSI spread ([settings](#settings)). The
+  real-data converters write it.
 
 ### Several floors
 
@@ -96,7 +99,6 @@ Instead of top-level `walls`, a multi-floor venue has `levels`, and may add `con
 |---|---|---|
 | top | `venue` | Venue file, relative to the scenario file |
 | top | `seed` | Default simulation seed |
-| top | `demo_config` | Optional engine config patch the web demo applies, relative to the scenario file. `ipe-regress` ignores it and uses the default config |
 | `walk` | `waypoints` | Polyline followed by a pure-pursuit walker: `[x, y]` or `[x, y, level_ordinal]` |
 | `walk` | `step_frequency_hz`, `step_length_m`, `step_length_sigma`, `turn_rate_deg_s` | Gait |
 | `walk` | `stairs_speed_factor` | Horizontal speed on stairs relative to walking (0.6) |
@@ -157,37 +159,42 @@ gt,t,x,y,heading,level,z
   `datasets/msil/convert.py` is a worked example for an Android logger: it rotates the sensor data into
   the expected frame (see [datasets.md](datasets.md#conversion-datasetsmsilconvertpy)).
 
-## Config patches (`data/configs/*.json`)
+## Settings
 
-JSON merge patches over the engine's default config, the same shape as `--print-config` output.
-`ipe-replay` and `ipe-regress` take `--config FILE`. It is applied before any `--set`, and unknown keys
-are rejected.
+The engine has 15 settings. Each venue runs with the values it calls for
+(`ipe::recommended_config(venue)`), and `ipe-replay --venue VENUE.json --print-config` shows them:
 
-Without `--config`, the tools run each venue with `ipe::recommended_config(venue)`: the default config
-for a venue without `floor_fingerprints`, `ipin.json` for one with them, and `fingerprint.json` when they
-carry positions. `--set` then applies on top of that, and
-`ipe-replay --venue VENUE.json --print-config` shows the result. A Wi-Fi venue without training scans
-needs `--config data/configs/msil_wifi.json`.
+| The venue has | Settings that differ from the defaults |
+|---|---|
+| surveyed beacons | none |
+| a radio map fitted from recorded walks (`"radio_map": "fitted"`, or training scans) | `rssi.sigma_db` 8, `smoothing.max_correction_mps` 1.5 |
+| training scans (`floor_fingerprints`) | the same, and `filter.floor_prior_weight` 3 |
+| training scans with positions | the same, and `filter.fingerprint_weight` 3 |
 
-The sections are `pdr`, `rssi`, `baro`, `filter` (the grid filter: lattice, motion noise, recovery, floor
-prior, fingerprints), `rooms` and `smoothing`. The shipped patches:
+To change a setting, give a JSON merge patch: `--set '{"filter": {"cell_m": 0.25}}'`, `--config FILE` for
+one in a file, or `ipe::apply_config_patch` in code. A patch always applies on top of what the venue calls
+for, `--config` before `--set`. Unknown keys are rejected.
 
-| File | What it sets | For |
-|---|---|---|
-| `msil_wifi.json` | RSSI sigma 8 dB, drawn corrections capped at 1.5 m/s | Wi-Fi with a log-distance radio map |
-| `ipin.json` | the same, plus `filter.floor_prior_weight` 3 | venues with floor fingerprints |
-| `fingerprint.json` | the same, plus `filter.fingerprint_weight` 3 | venues whose fingerprints carry positions |
+| Setting | Default | What it is |
+|---|---:|---|
+| `pdr.weinberg_k` | 0.48 | Scale of the step length. A walker whose steps are shorter than estimated needs less |
+| `rssi.sigma_db` | 5 | Spread of RSSI around the path-loss curve [dB] |
+| `rssi.wall_aware` | true | Subtract the venue's loss per wall between beacon and phone |
+| `filter.cell_m` | 0.5 | Side of a cell of the lattice [m] |
+| `filter.active_floor` | 1e-9 | Update only where the mass is ([design.md](design.md#the-active-set)). 0: every cell at every update |
+| `filter.estimate_rssi_offset` | true | Estimate the phone's RSSI offset against the radio map |
+| `filter.beacon_integrity` | true | Stop using beacons that keep disagreeing with the estimate (moved or dead) |
+| `filter.floor_prior_weight` | 0 | Weight of the floor vote of the venue's training scans |
+| `filter.fingerprint_weight` | 0 | Weight of the venue's training scans as position fingerprints |
+| `smoothing.enabled` | true | False: the drawn estimate is the filter's own, bit for bit |
+| `smoothing.tau_s` | 0.5 | Time constant of the glide towards a correction [s] |
+| `smoothing.max_correction_mps` | 0 | Cap on the speed of that glide [m/s]. 0: no cap |
+| `smoothing.snap_m` | 10 | The drawn point jumps when the estimate is further away than this [m] |
+| `rooms.enter_prob` | 0.6 | Room probability that starts the enter dwell ([design.md](design.md#room-enter-and-exit-events)) |
+| `rooms.exit_prob` | 0.3 | Room probability that starts the exit dwell |
 
-Each file equals the one before it on a venue that lacks what it adds: the floor vote needs several floors
-and floor fingerprints, the fingerprint likelihood needs positions.
-
-The `rooms` section tunes the room event detector (defaults shown; see
-[design.md](design.md#room-enter-and-exit-events)):
-
-```json
-{"rooms": {"enter_prob": 0.6, "exit_prob": 0.3, "enter_dwell_s": 1.5, "exit_dwell_s": 1.5,
-           "update_period_s": 0.25}}
-```
+Everything else about the pipeline is not a setting: the components' own parameters and constants
+(`GridFilterConfig` and its neighbours in `core/include/ipe/`), which the engine leaves at their values.
 
 ## Trace manifest (`ipe-regress --traces`)
 

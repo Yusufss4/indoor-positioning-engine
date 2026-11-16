@@ -74,11 +74,11 @@ struct EngineConfig {
 [[nodiscard]] GridFilterConfig filter_params(const EngineConfig& cfg);
 
 /// The config to run `venue` with, chosen from what the venue contains:
-///  - surveyed beacons only: `EngineConfig{}`;
-///  - training scans (`floor_fingerprints`): the settings for a radio map fitted from scans, with the floor
-///    vote (data/configs/ipin.json);
-///  - training scans with positions: the same plus the fingerprint likelihood (data/configs/fingerprint.json).
-/// A Wi-Fi venue without training scans is not recognisable from the venue: use data/configs/msil_wifi.json.
+///  - surveyed beacons: `EngineConfig{}`;
+///  - a radio map fitted from recorded walks (`"radio_map": "fitted"`, or training scans): RSSI sigma 8 dB
+///    and drawn corrections capped at 1.5 m/s;
+///  - training scans (`floor_fingerprints`): the same, with the floor vote;
+///  - training scans with positions: the same, with the fingerprint likelihood.
 [[nodiscard]] EngineConfig recommended_config(const Venue& venue);
 
 /// Platform-independent entry point: feed raw IMU samples, BLE advertisements, Wi-Fi scans and

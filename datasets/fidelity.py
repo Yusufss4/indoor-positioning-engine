@@ -7,15 +7,16 @@ levels, and which walks' convergence time moved.
 
 Two uses:
 
-* An approximation of the filter (`filter.active_floor`) against the exact filter: A is `{}`.
+* An approximation of the filter (`filter.active_floor`, on by default) against the exact filter: A is
+  `{"filter": {"active_floor": 0}}`.
 * The noise of a comparison. The replay is deterministic, but on real Wi-Fi walks the filter amplifies
   small differences: with B a setting changed in its third digit (`{"rssi": {"sigma_db": 8.01}}`), the
   output is what "no real change" looks like. A difference between two configurations that is no larger
   than that is not a result. Ground truth that exists only at waypoints makes this worse: convergence is
   then the first waypoint under 3 m, and one waypoint moves a walk by the gap to the next.
 
-    python3 datasets/fidelity.py datasets/ipin/out_fp/manifest_tune.json --config data/configs/fingerprint.json \
-        --a '{}' --b '{"filter": {"active_floor": 1e-9}}' [--cache DIR] [--json out.json]
+    python3 datasets/fidelity.py datasets/ipin/out_fp/manifest_tune.json \
+        --a '{"filter": {"active_floor": 0}}' --b '{}' [--cache DIR] [--json out.json]
 """
 
 from __future__ import annotations
@@ -79,7 +80,7 @@ def main():
     ap.add_argument("--b", required=True, help="JSON merge patch of the run compared with it")
     ap.add_argument("--build", type=Path, default=ROOT / "build", help="build directory of both runs")
     ap.add_argument("--build-b", type=Path, help="another build directory for run B (to compare two versions)")
-    ap.add_argument("--config", type=Path, help="config file both runs start from")
+    ap.add_argument("--config", type=Path, help="JSON patch file both runs apply before their own patch")
     ap.add_argument("--warmup", type=float, default=5.0)
     ap.add_argument("--cache", type=Path,
                     help="keep the tracks here; a replay with the same binary, config, patch and trace is reused")

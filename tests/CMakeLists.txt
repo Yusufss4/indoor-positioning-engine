@@ -69,8 +69,8 @@ if(IPE_BUILD_TOOLS)
   # convert.py --wifi --scans --out datasets/msil/out_scans have run.
   set(IPE_MSIL_MANIFEST ${PROJECT_SOURCE_DIR}/datasets/msil/out_scans/manifest_holdout.json)
   add_test(NAME real_data_regression
-           COMMAND sh -c "test -f \"$1\" || exit 77; exec \"$0\" --traces \"$1\" --config \"$2\" --baseline \"$3\""
-                   $<TARGET_FILE:ipe-regress> ${IPE_MSIL_MANIFEST} ${PROJECT_SOURCE_DIR}/data/configs/msil_wifi.json
+           COMMAND sh -c "test -f \"$1\" || exit 77; exec \"$0\" --traces \"$1\" --baseline \"$2\""
+                   $<TARGET_FILE:ipe-regress> ${IPE_MSIL_MANIFEST}
                    ${PROJECT_SOURCE_DIR}/tests/regression/msil_baseline.json)
   set_tests_properties(real_data_regression PROPERTIES LABELS "regression;realdata" SKIP_RETURN_CODE 77 TIMEOUT 1800)
 
@@ -79,8 +79,8 @@ if(IPE_BUILD_TOOLS)
   # --out datasets/ipin/out_fp have run.
   set(IPE_IPIN_MANIFEST ${PROJECT_SOURCE_DIR}/datasets/ipin/out_fp/manifest_holdout.json)
   add_test(NAME ipin_regression
-           COMMAND sh -c "test -f \"$1\" || exit 77; exec \"$0\" --traces \"$1\" --config \"$2\" --baseline \"$3\""
-                   $<TARGET_FILE:ipe-regress> ${IPE_IPIN_MANIFEST} ${PROJECT_SOURCE_DIR}/data/configs/fingerprint.json
+           COMMAND sh -c "test -f \"$1\" || exit 77; exec \"$0\" --traces \"$1\" --baseline \"$2\""
+                   $<TARGET_FILE:ipe-regress> ${IPE_IPIN_MANIFEST}
                    ${PROJECT_SOURCE_DIR}/tests/regression/ipin_baseline.json)
   set_tests_properties(ipin_regression PROPERTIES LABELS "regression;realdata" SKIP_RETURN_CODE 77 TIMEOUT 1800)
 endif()

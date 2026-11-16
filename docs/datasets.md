@@ -22,11 +22,15 @@ gates are skipped until the data is converted.
   3–40 scored points; medians over walks are the headline numbers.
 - **Tune and held-out.** Every dataset's converter writes `manifest_tune.json` and `manifest_holdout.json`.
   Settings are chosen on the tune walks only; the held-out walks are replayed once to report.
+- **Settings.** Every walk runs with the settings its venue calls for ([formats.md](formats.md#settings)):
+  a venue with training scans gets the floor vote, and the fingerprint likelihood when the scans carry
+  positions. A table that compares against less is made on a venue converted without the scans, or with
+  `--set '{"filter": {"fingerprint_weight": 0}}'`.
 - **The active floor.** The engine updates only where the mass is (`filter.active_floor` 1e-9, the
   default since [experiment 22](history.md#22-the-active-floor-becomes-the-default)). The simulated
-  scenarios, the malls' held-out results and the IPIN `fingerprint.json` results below are measured with
-  it. The demo-walk table, the IPIN `ipin.json` column and everything about Kaggle were measured with the
-  exact filter (`active_floor` 0) and not repeated.
+  scenarios, the malls' held-out results and the IPIN results with position fingerprints below are
+  measured with it. The demo-walk table, the IPIN column without position fingerprints and everything
+  about Kaggle were measured with the exact filter (`active_floor` 0) and not repeated.
 - **Smoothness** is reported with accuracy: `jitter_p95_m`, `jumps_per_min`, `level_flips` and
   `wall_crossings_per_min` ([formats.md](formats.md#replay-outputs)).
 - **Competition metrics** (`datasets/evaluate.py`): IPIN's 75th percentile of the error plus 15 m per
@@ -90,10 +94,10 @@ tune half and a held-out half (111 each, 109 longer than the warm-up).
 
 ### Results (109 held-out walks)
 
-| Config | Median CEP50 / CEP95 [m] | Mean CEP50 / CEP95 [m] |
+| Venues | Median CEP50 / CEP95 [m] | Mean CEP50 / CEP95 [m] |
 |---|---|---|
-| [`msil_wifi.json`](../data/configs/msil_wifi.json): log-distance radio model | 6.8 / 9.4 | 10.8 / 14.4 |
-| [`fingerprint.json`](../data/configs/fingerprint.json): plus the training scans as position fingerprints | **5.2 / 8.9** | 7.3 / 10.6 |
+| `--wifi --scans`: the log-distance radio model | 6.8 / 9.4 | 10.8 / 14.4 |
+| `--wifi --scans --fingerprints`: plus the training scans as position fingerprints | **5.2 / 8.9** | 7.3 / 10.6 |
 
 - Real errors are about ten times the simulated office's.
 - `tests/regression/msil_baseline.json` gates the first row (venues from `--wifi --scans`).
@@ -106,9 +110,9 @@ tune half and a held-out half (111 each, 109 longer than the warm-up).
 
 The demo plays the longest held-out walk on each floor where that walk lasts at least 60 s (10 of 14
 floors), exported by `datasets/msil/export_demo.py` to `data/demo/msil/`. Its venues come from
-`--walls doors --fingerprints` and run `fingerprint.json`. One replay each, CEP50 / CEP95 [m]:
+`--walls doors --fingerprints`. One replay each, CEP50 / CEP95 [m]:
 
-| Walk | Shop walls, `msil_wifi.json` | Shop walls, `fingerprint.json` (the demo) | Floor outline, `fingerprint.json` |
+| Walk | Shop walls, radio model only | Shop walls, with fingerprints (the demo) | Floor outline, with fingerprints |
 |---|---:|---:|---:|
 | site1 B1, 231 s | 10.1 / 16.7 | 8.2 / 15.8 | 7.5 / 14.6 |
 | site1 F1, 98 s | 9.1 / 32.9 | 10.0 / 11.4 | 9.5 / 12.2 |
@@ -156,7 +160,7 @@ competition's scoring walks the held-out set (two of UMinho's three: the third p
 Competition metric per scoring trial [m], with the share of landmarks on the right floor. One replay each,
 with settings chosen on the validation walks.
 
-| Trial | Phone | `ipin.json`: radio model and floor vote | `fingerprint.json`: plus position fingerprints |
+| Trial | Phone | Radio model and floor vote | Plus position fingerprints |
 |---|---|---:|---:|
 | Nuremberg 2024 #1 | Galaxy A5 2017 | 35.4 / 70% | **6.8 / 97%** |
 | Nuremberg 2024 #2 | Galaxy S7 | 12.2 / 87% | **5.2 / 96%** |
@@ -165,7 +169,7 @@ with settings chosen on the validation walks.
 | UMinho 2022 #12 | Galaxy A31, no barometer | 24.4 / 82% | **7.6 / 95%** |
 | UMinho 2022 #13 | Galaxy A5 2017 | 25.7 / 85% | **6.6 / 97%** |
 
-| Building, `fingerprint.json` | Median CEP50 / CEP95 [m] | Floor right | Jitter p95, jumps a minute | Floor flips per walk (6 real changes) |
+| Building, with position fingerprints | Median CEP50 / CEP95 [m] | Floor right | Jitter p95, jumps a minute | Floor flips per walk (6 real changes) |
 |---|---|---|---|---|
 | Nuremberg, 4 trials | 3.7 / 14.0 | 96% | 0.48 m, 1.1 | 11.5 |
 | UMinho, 2 trials | 4.4 / 15.5 | 96% | 0.84 m, 4.3 | 21.5 |
@@ -175,7 +179,7 @@ with settings chosen on the validation walks.
   changed in its third digit does was not measured on these walks ([history.md](history.md), experiment 22).
 - The validation walks say the same with more data: 27 walks, competition metric 5.2 m (Nuremberg, floor
   right 100%) and 8.3 m (UMinho, 94%).
-- `tests/regression/ipin_baseline.json` gates the six scoring walks with `fingerprint.json`.
+- `tests/regression/ipin_baseline.json` gates the six scoring walks, with position fingerprints.
 - The reported floor changes far more often than the walker does, and the 95% ellipse holds the truth for
   16–21% of the fixes.
 
@@ -192,7 +196,7 @@ redistributed, so nothing converted from it is in the repository; `datasets/kagg
    fingerprints, as for the sample: 139 floors, 10,877 walks, split 80% / 10% tune / 10% held-out.
 2. The floor of a test walk is a k-NN vote of its Wi-Fi scans over the building's training scans: right
    for 99.1% of 2,186 held-out walks.
-3. The walk is replayed through that floor's venue with `fingerprint.json`.
+3. The walk is replayed through that floor's venue, whose training scans are position fingerprints.
 4. Offline steps (`datasets/common/offline.py`), since the competition is scored offline. They live in the
    Python scripts only; the engine stays causal.
    - **Two passes.** The walk is replayed again backwards, and the two estimates at each waypoint are
@@ -204,8 +208,8 @@ redistributed, so nothing converted from it is in the repository; `datasets/kagg
 
 | Pipeline | Score |
 |---|---:|
-| `msil_wifi.json`, causal, gaps filled | 11.92 |
-| `fingerprint.json`, causal, gaps filled | 8.33 |
+| Radio model only (`fingerprint_weight` 0), causal, gaps filled | 11.92 |
+| With position fingerprints, causal, gaps filled | 8.33 |
 | + two passes | 6.09 |
 | + snapping within 6 m | **5.70** |
 
@@ -213,7 +217,7 @@ redistributed, so nothing converted from it is in the repository; `datasets/kagg
 
 | Submission | Public (15% of the test set) | Private (85%) |
 |---|---:|---:|
-| `fingerprint.json`, two passes, snapping within 6 m | 5.05 | **5.30** |
+| With position fingerprints, two passes, snapping within 6 m | 5.05 | **5.30** |
 | Winner / 2nd / 3rd | 0.89 / 1.39 / 2.04 | 1.50 / 2.20 / 2.49 |
 | 18th / 500th of 1,170 teams | 2.75 / – | 3.74 / 5.7 |
 
@@ -266,18 +270,15 @@ python3 -m venv .venv && .venv/bin/pip install -r datasets/msil/requirements.txt
 datasets/msil/fetch.sh
 .venv/bin/python datasets/msil/convert.py --wifi --scans --out datasets/msil/out_scans
 .venv/bin/python datasets/msil/convert.py --wifi --scans --fingerprints --out datasets/msil/out_fp
-./build/tools/ipe-regress --traces datasets/msil/out_fp/manifest_holdout.json --no-baseline \
-    --config data/configs/fingerprint.json
+./build/tools/ipe-regress --traces datasets/msil/out_fp/manifest_holdout.json --no-baseline
 ctest --test-dir build -R real_data_regression --output-on-failure
 
 # IPIN (640 MB from Zenodo)
 datasets/ipin/fetch.sh
 .venv/bin/python datasets/ipin/convert.py --wifi --scans --fingerprints --positions --unmodelled \
     --out datasets/ipin/out_fp
-.venv/bin/python datasets/evaluate.py datasets/ipin/out_fp/manifest_tune.json \
-    --config data/configs/fingerprint.json                            # validation walks: choose settings here
-.venv/bin/python datasets/evaluate.py datasets/ipin/out_fp/manifest_holdout.json \
-    --config data/configs/fingerprint.json                            # scoring walks
+.venv/bin/python datasets/evaluate.py datasets/ipin/out_fp/manifest_tune.json     # validation walks: choose settings here
+.venv/bin/python datasets/evaluate.py datasets/ipin/out_fp/manifest_holdout.json  # scoring walks
 ctest --test-dir build -R ipin_regression --output-on-failure
 
 # Full Kaggle set (69 GB unpacked; needs a Kaggle token and the competition rules accepted)
@@ -286,9 +287,9 @@ datasets/kaggle/fetch.sh
 .venv/bin/python datasets/msil/convert.py --kaggle datasets/kaggle/raw --test-sites --wifi --scans \
     --fingerprints --jobs 8 --out datasets/kaggle/out_fp
 .venv/bin/python datasets/evaluate.py datasets/kaggle/out_fp/manifest_holdout.json --warmup 0 \
-    --config data/configs/fingerprint.json --two-pass --fill --snap 6
+    --two-pass --fill --snap 6
 .venv/bin/python datasets/kaggle/submit.py --converted datasets/kaggle/out_fp \
-    --config data/configs/fingerprint.json --two-pass --snap 6 --out datasets/kaggle/out_fp/submission.csv
+    --two-pass --snap 6 --out datasets/kaggle/out_fp/submission.csv
 
 # Recordings for the web demo
 .venv/bin/python datasets/msil/convert.py --wifi --scans --walls doors --fingerprints \

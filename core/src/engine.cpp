@@ -14,12 +14,15 @@ double Estimate::sigma_radius() const {
 EngineConfig recommended_config(const Venue& venue) {
   EngineConfig cfg;
   const FloorFingerprints& scans = venue.floor_fingerprints();
-  if (scans.empty()) return cfg;
-  // A radio map fitted from training scans: a wider RSSI spread than surveyed beacons have, and corrections
-  // drawn no faster than a walk. The floor vote only acts on venues with several levels.
-  cfg.rssi.sigma_db = 8.0;
-  cfg.smoothing.max_correction_mps = 1.5;
-  cfg.filter.floor_prior_weight = 3.0;
+  // A radio map fitted from recorded walks (the venue says so, or carries the scans): a wider RSSI spread
+  // than surveyed beacons have, and corrections drawn no faster than a walk.
+  if (venue.radio_map_fitted() || !scans.empty()) {
+    cfg.rssi.sigma_db = 8.0;
+    cfg.smoothing.max_correction_mps = 1.5;
+  }
+  // Training scans vote on the floor (it only acts on venues with several levels); with positions they
+  // are fingerprints too.
+  if (!scans.empty()) cfg.filter.floor_prior_weight = 3.0;
   if (scans.has_positions()) cfg.filter.fingerprint_weight = 3.0;
   return cfg;
 }

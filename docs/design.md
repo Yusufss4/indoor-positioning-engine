@@ -61,8 +61,9 @@ A motion model of your own can replace this stage: `PositioningEngine::on_step` 
 
 The engine holds the posterior as probability mass on a lattice of the venue's walkable cells (0.5 m by
 default), with a distribution over heading in every cell. There are no particles and no random numbers:
-the same inputs give the same estimate, on every platform. Its settings are `GridFilterConfig`
-(`core/include/ipe/grid_filter.hpp`), the `filter` section of the config.
+the same inputs give the same estimate, on every platform. Its parameters are `GridFilterConfig`
+(`core/include/ipe/grid_filter.hpp`); the few a deployment changes are the `filter` section of the
+[settings](formats.md#settings), and the names in backticks below are the parameters' names.
 
 ![the posterior converging on a simulated office walk](img/convergence.gif)
 
@@ -126,15 +127,15 @@ bin exactly; only the 3° per step process noise moves mass between bins.
   - *Beacon integrity.* Once converged, the monitor averages each beacon's residual at the estimate and
     stops using beacons whose bias exceeds 10 dB (re-admitted below 5 dB, never more than a third of the
     beacons). It catches beacons that were moved or died.
-  - *Fingerprints* (`fingerprint_weight`, off by default; 3 in `fingerprint.json`). On venues whose
-    training scans carry positions, `FingerprintMap` returns a scan's 10 nearest training scans, compared
+  - *Fingerprints* (`fingerprint_weight`, 0 by default; 3 on a venue whose training scans carry
+    positions). `FingerprintMap` returns a scan's 10 nearest training scans, compared
     over its 40 strongest readings (missing ones at -100 dBm), with weights 1 / (RMS difference + 1 dB).
     They form a kernel density over position and level: 4 m Gaussians around the neighbours plus 5% of the
     uniform prior. Every cell gets `fingerprint_weight` times its logarithm, and the log-distance term of
     that scan is scaled by `fingerprint_model_weight` (0.3), since both read the same scan. Beacons with
     `"model": false` are fingerprint dimensions only.
-  - *Floor vote* (`floor_prior_weight`, off by default; 3 in `ipin.json` and `fingerprint.json`). A k-NN
-    vote of the scan over the training scans gives p(level), applied as `weight · log p(level)` on every
+  - *Floor vote* (`floor_prior_weight`, 0 by default; 3 on a venue with training scans). A k-NN vote
+    of the scan over the training scans gives p(level), applied as `weight · log p(level)` on every
     cell. The radio model's 2–4 dB per slab barely separates floors on real Wi-Fi.
 - **Barometer** (`pressure.cpp`). Every 0.5 s: the altitude against the cell's level and offset, scored
   with a Gaussian plus a 5% uniform part over 20 m, then an update of the cell's offset. The first sample
@@ -217,7 +218,7 @@ filter learned:
   step comes for 1.2 s, the walker has stopped.
 - **Corrections.** Every other change of the estimate is glided towards: after `dt`, the gap left is
   `exp(-dt / tau_s)` of what it was (`tau_s` 0.5 s). `max_correction_mps` caps the glide's speed; it is off
-  by default and 1.5 m/s in the Wi-Fi configs, where one scan can move the estimate several metres.
+  by default and 1.5 m/s on a fitted radio map, where one scan can move the estimate several metres.
 - **Jumps.** The dot jumps when the estimate is more than 10 m away (`snap_m`) and when the level changes.
   An estimate behind a wall is glided towards only as far as the wall; the dot never slides through one.
 

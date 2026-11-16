@@ -114,7 +114,6 @@ def main():
             "geojson": f"{site}/venue.geojson",
             "images": images,
             "trace": f"{site}/{src.name}",
-            "config": "../../configs/ipin.json",
             "view": view_box(venue["bounds"], pts, VIEW_PAD_M),
             "duration_s": round(duration, 1),
             "waypoints": len(pts) - (1 if interpolated else 0),
@@ -128,8 +127,7 @@ def main():
                 "the only ground truth; the floor menu follows the walker. Walls were extracted from the "
                 "competition's floor plans and the Wi-Fi access points (purple) located from the training walks. "
                 "This walk is from the set the settings were chosen on; the held-out scoring walks are in "
-                "docs/datasets.md. The engine uses data/configs/ipin.json: the Wi-Fi settings plus the Wi-Fi "
-                "fingerprint floor prior."),
+                "docs/datasets.md. The engine uses the training scans to vote on the floor."),
         })
         print(f"{site}: {src.name} ({duration:.0f} s from {start:.0f} s, {len(pts)} landmarks, {t['phone']})")
 
