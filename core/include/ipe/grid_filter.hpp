@@ -39,10 +39,10 @@ struct GridFilterConfig {
 
   /// Update only where the mass is. A block of cells is updated cell by cell when one of its cells holds at
   /// least this share of the heaviest cell's mass, or when it is next to such a block. Every other block is
-  /// background: one mass and one pair of offsets for all of its cells, scored once per radio and barometer
-  /// update at the block's centre, without a heading and not moved by steps. A background block whose share
-  /// per cell grows to 16 times the floor is updated cell by cell again. 0: every cell at every update
-  /// (exact).
+  /// background: one mass with its centroid, one heading row and one pair of offsets for all of its cells.
+  /// A radio or barometer update scores it once, at the centroid; a step moves its mass as a whole. A
+  /// background block whose share per cell grows to 16 times the floor is updated cell by cell again.
+  /// 0: every cell at every update (exact).
   double active_floor = 0.0;
 
   int heading_bins = 36;  ///< Bins of the heading offset from the gyro-integrated yaw.
@@ -229,7 +229,8 @@ class GridMap {
 /// except the wall counts of a beacon the first time it is heard (in the shared GridMap).
 ///
 /// With GridFilterConfig::active_floor the cells are those of the active blocks, plus one evaluation per
-/// background block in a radio or barometer update (docs/design.md).
+/// background block in a radio or barometer update and one heading row per background block in a step or
+/// magnetometer update (docs/design.md).
 class GridFilter {
  public:
   GridFilter(std::shared_ptr<const GridMap> map, GridFilterConfig cfg, RssiModelConfig rssi_cfg,
@@ -298,6 +299,10 @@ class GridFilter {
   void add_radio_model_loglik(std::span<const RssiReading> readings);
   void add_fingerprint_loglik();
   void add_floor_vote_loglik();
+  /// A step for the background blocks: each one's mass moves as a whole, then every block takes what moved
+  /// into it.
+  void move_background();
+  void settle_background();
   /// Mixes uniform mass in if the teleport period has passed.
   void maybe_teleport(double t);
   /// Replaces the share `rho` of the distribution by the uniform prior.
@@ -317,6 +322,8 @@ class GridFilter {
   /// the beacon's height difference and slab loss per level (set_beacon_levels).
   [[nodiscard]] double expected_rssi(const Beacon& beacon, int level, Vec2 pos) const;
   void set_beacon_levels(const Beacon& beacon);
+  /// Where a background block's mass is scored.
+  [[nodiscard]] Vec2 bg_pos(std::size_t block) const { return {bg_x_[block], bg_y_[block]}; }
   [[nodiscard]] double elevation(int level) const { return map_->venue().level(level).elevation_m; }
 
   std::shared_ptr<const GridMap> map_;
@@ -368,6 +375,8 @@ class GridFilter {
   std::vector<double> bg_dev_mu_, bg_dev_var_;    ///< Per background block: device RSSI offset.
   std::vector<double> bg_baro_mu_, bg_baro_var_;  ///< Per background block: barometer offset.
   std::vector<double> block_loglik_;              ///< Per block: the log-likelihood of the update being applied.
+  std::vector<double> bg_x_, bg_y_;               ///< Per background block: centroid of its mass.
+  std::vector<float> bg_h_;                       ///< Per (background block, heading): its mass's heading row.
 
   BeaconIntegrityMonitor integrity_;
   FloorClassifier floor_classifier_;

@@ -701,6 +701,80 @@ TEST(GridFilter, TheBackgroundBringsAWrongLockBack) {
   EXPECT_LE(rounds[1], 2 * rounds[0] + 5) << rounds[0] << " rounds per cell, " << rounds[1] << " per block";
 }
 
+TEST(GridFilter, TheCompassWeighsBackgroundMassAsItWeighsCells) {
+  // A walk east with a compass and no radio. Recovery mass far from the walker learns the heading at its
+  // first compass update and agrees with every later one, so it keeps its share. Background blocks have a
+  // heading row for that: mass without a heading would lose most of its share at every update.
+  const Venue v = open_venue();
+  double far_mass[2] = {0.0, 0.0};
+  for (int mode = 0; mode < 2; ++mode) {
+    GridFilterConfig cfg;
+    cfg.active_floor = mode == 0 ? 0.0 : 1e-9;
+    cfg.teleport_rate_per_s = 1e-6;
+    auto map = std::make_shared<const GridMap>(v, cfg);
+    GridFilter f(map, cfg, {});
+    f.set_point({5.0, 12.0}, 0, 0);
+    for (int i = 0; i < 20; ++i) {
+      const double t = 0.6 * (i + 1);
+      f.on_step(step(t, 0.7));
+      f.on_heading(t, 0.0, deg2rad(12.0));
+    }
+    if (mode == 1) {
+      ASSERT_LT(f.active_cells().size(), map->size() / 2);
+    }
+    const Vec2 walker = f.estimate().pos;
+    EXPECT_NEAR(walker.x, 19.0, 0.5);
+    for (std::size_t c = 0; c < map->size(); ++c) {
+      if (distance(map->centre(c), walker) > 10.0) far_mass[mode] += f.mass()[c];
+    }
+    far_mass[mode] += f.background_mass();
+  }
+  EXPECT_GT(far_mass[0], 0.0);
+  EXPECT_GT(far_mass[1], 0.5 * far_mass[0]) << far_mass[0] << " per cell, " << far_mass[1] << " with blocks";
+  EXPECT_LT(far_mass[1], 2.0 * far_mass[0]) << far_mass[0] << " per cell, " << far_mass[1] << " with blocks";
+}
+
+TEST(GridFilter, MassThatComesBackFromTheBackgroundKnowsItsHeading) {
+  // The walker is taken for 12 m south of where they are. Radio then moves the estimate to mass that was
+  // in the background; walking on without compass or radio, that mass must go east as the walker does.
+  const Venue v = open_venue();
+  const RssiModel model(v);
+  Vec2 end[2];
+  for (int mode = 0; mode < 2; ++mode) {
+    GridFilterConfig cfg;
+    cfg.active_floor = mode == 0 ? 0.0 : 1e-9;
+    cfg.teleport_rate_per_s = 1e-6;
+    cfg.beacon_integrity = false;
+    cfg.estimate_rssi_offset = false;  // four beacons 30 m apart place the walker to a few metres only without it
+    auto map = std::make_shared<const GridMap>(v, cfg);
+    GridFilter f(map, cfg, {});
+    f.set_point({5.0, 6.0}, 0, 0);
+    double t = 0.0;
+    for (int i = 0; i < 20; ++i) {
+      t += 0.6;
+      f.on_step(step(t, 0.7));
+      f.on_heading(t, 0.0, deg2rad(12.0));
+    }
+    const Vec2 truth{19.0, 18.0};
+    for (int r = 0; r < 100 && distance(f.estimate().pos, truth) > 3.0; ++r) {
+      for (std::size_t b = 0; b < v.beacons().size(); ++b) {
+        t += 0.05;
+        f.on_rssi(t, b, model.expected_rssi(v.beacons()[b], truth));
+      }
+    }
+    const Vec2 start = f.estimate().pos;
+    ASSERT_LT(distance(start, truth), 3.0) << "active_floor " << cfg.active_floor;
+    for (int i = 0; i < 10; ++i) {
+      t += 0.6;
+      f.on_step(step(t, 0.7));
+    }
+    end[mode] = f.estimate().pos - start;
+  }
+  EXPECT_GT(end[0].x, 5.0);  // 7 m walked
+  EXPECT_LT(distance(end[0], end[1]), 1.0)
+      << end[0].x << "," << end[0].y << " per cell, " << end[1].x << "," << end[1].y << " with blocks";
+}
+
 TEST(Engine, AnActiveFloorFollowsTheWalksOfTheExactFilter) {
   for (const char* name : {"scenarios/office_nominal.json", "scenarios/office_stairs_up_down.json"}) {
     const auto sc = sim::load_scenario_file(test::data_path(name));

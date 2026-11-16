@@ -29,15 +29,17 @@ std::span<const std::uint32_t> GridFilter::active_on(int level) const {
 
 void GridFilter::activate_block(std::size_t block) {
   // No update has told the block's cells apart: its mass comes back evenly over them, at their centres,
-  // with any heading and the block's offsets.
+  // with the block's heading row and offsets.
   const auto cells = map_->block_cells(block);
   const double share = bg_mass_[block] / static_cast<double>(cells.size());
+  const auto row = static_cast<std::size_t>(bins_);
   for (const std::uint32_t c : cells) {
     reset_cell_to_prior(c, share);
     dev_mu_[c] = bg_dev_mu_[block];
     dev_var_[c] = bg_dev_var_[block];
     baro_mu_[c] = bg_baro_mu_[block];
     baro_var_[c] = bg_baro_var_[block];
+    if (sparse_) std::copy_n(&bg_h_[block * row], row, &h_[c * row]);
     cell_active_[c] = 1;
   }
   bg_mass_[block] = 0.0;
@@ -45,8 +47,11 @@ void GridFilter::activate_block(std::size_t block) {
 }
 
 void GridFilter::fold_block(std::size_t block) {
-  // The block's offsets are those of its cells' mass (moment matching, as a step does for a cell).
-  double sum = 0.0, d1 = 0.0, d2 = 0.0, b1 = 0.0, b2 = 0.0;
+  // The block's offsets and heading row are those of its cells' mass (moment matching, as a step does for
+  // a cell).
+  const auto row = static_cast<std::size_t>(bins_);
+  double sum = 0.0, d1 = 0.0, d2 = 0.0, b1 = 0.0, b2 = 0.0, sx = 0.0, sy = 0.0;
+  std::fill(row_.begin(), row_.end(), 0.0);
   for (const std::uint32_t c : map_->block_cells(block)) {
     const double m = std::max(mass_[c], 0.0);
     sum += m;
@@ -54,21 +59,38 @@ void GridFilter::fold_block(std::size_t block) {
     d2 += m * (dev_var_[c] + dev_mu_[c] * dev_mu_[c]);
     b1 += m * baro_mu_[c];
     b2 += m * (baro_var_[c] + baro_mu_[c] * baro_mu_[c]);
+    sx += m * cx_[c];
+    sy += m * cy_[c];
+    if (m > 0.0) {
+      const float* hc = &h_[c * row];
+      for (std::size_t k = 0; k < row; ++k) row_[k] += m * hc[k];
+    }
     mass_[c] = 0.0;
     cell_active_[c] = 0;
   }
   bg_mass_[block] = sum;
+  float* const hb = &bg_h_[block * row];
   if (sum > 0.0) {
     bg_dev_mu_[block] = d1 / sum;
     bg_dev_var_[block] =
         cfg_.estimate_rssi_offset ? std::max(d2 / sum - bg_dev_mu_[block] * bg_dev_mu_[block], kMinVar) : 0.0;
     bg_baro_mu_[block] = b1 / sum;
     bg_baro_var_[block] = std::max(b2 / sum - bg_baro_mu_[block] * bg_baro_mu_[block], kMinVar);
+    bg_x_[block] = sx / sum;
+    bg_y_[block] = sy / sum;
+    double hsum = 0.0;
+    for (std::size_t k = 0; k < row; ++k) hsum += row_[k];
+    for (std::size_t k = 0; k < row; ++k) {
+      hb[k] = hsum > 0.0 ? static_cast<float>(row_[k] / hsum) : static_cast<float>(1.0 / bins_);
+    }
   } else {
     bg_dev_mu_[block] = 0.0;
     bg_dev_var_[block] = prior_rssi_offset_var();
     bg_baro_mu_[block] = prior_baro_offset(map_->block_level(block));
     bg_baro_var_[block] = prior_baro_offset_var();
+    bg_x_[block] = map_->block_centre(block).x;
+    bg_y_[block] = map_->block_centre(block).y;
+    std::fill_n(hb, row, static_cast<float>(1.0 / bins_));
   }
   block_active_[block] = 0;
 }
