@@ -29,8 +29,9 @@ Numbers are means over seeds on the simulated scenarios unless a dataset is name
 | 17 | What can go? | The planner, IMDF, the UJI study, three unused filter options | A smaller repository, identical results |
 | 18 | Why must a user know which config file to pass? | The three files are one patch, limited by what the venue has | `recommended_config(venue)`; an installable package |
 | 19 | Can the engine run live in a phone's browser? | Yes on motion sensors; a web page gets no radio | `on_position_fix`, `web/live.html`, recordings as traces |
-| 20 | Must every update touch every cell? | No: 300 cells hold the mass; the rest can be coarse blocks | `filter.active_floor`, off by default |
+| 20 | Must every update touch every cell? | No: 300 cells hold the mass; the rest can be coarse blocks | `filter.active_floor`, on by default since 22 |
 | 21 | Does the active floor delay convergence on real Wi-Fi? | The delay was inside the metric's noise; the background was too light under the compass | Background blocks with a heading row that move with the steps; `datasets/fidelity.py` |
+| 22 | Should the active floor be the default? | Decided on the numbers of 21; the gates pass unchanged | `filter.active_floor` 1e-9 by default |
 
 ## 2. A moved beacon hijacking the estimate (`office_field_issue`)
 
@@ -215,7 +216,7 @@ desktop core. Half of the work scaled with cells × heading bins, the rest with 
   other block is one coarse cell that radio and barometer updates score once. Dropping the far cells
   instead would have removed the way back from a wrong lock; a unit test locks the filter in the wrong
   corner of a hall, and with and without the floor it comes back after the same 16 packets.
-- **Off (the default):** results identical to before on the 12 scenarios (10 seeds), the 109 mall tune
+- **Off (the default at the time):** results identical to before on the 12 scenarios (10 seeds), the 109 mall tune
   walks and the 27 IPIN tune walks, and 1–2% faster.
 
 At 1e-9, 10 seeds, before → after (compute on one core, 2 seeds):
@@ -346,7 +347,7 @@ Held out, replayed once with the final code at 1e-9 (all walks pooled):
 | 6 IPIN scoring walks: mean / CEP50 / CEP95 [m] | 5.15 / 4.15 / 11.85 | 5.17 / 4.00 / 13.24 | 5.13 / 3.94 / 12.11 |
 | ... converged [s] | 78.2 | 120.5 | 120.5 |
 
-- **Off (the default):** results identical to before on the 12 scenarios (10 seeds), the 109 mall tune
+- **Off (the default at the time):** results identical to before on the 12 scenarios (10 seeds), the 109 mall tune
   walks and the 27 IPIN tune walks.
 - **What it follows now.** The exact filter, not a better number: experiment 20's lower CEP95 on the IPIN
   tune walks (9.59 m) was a difference from the exact filter, and is gone with it.
@@ -361,6 +362,41 @@ Held out, replayed once with the final code at 1e-9 (all walks pooled):
   → 2,676) and the extra time is the work on the blocks themselves, which was not profiled further.
 - **For the next comparison on real walks:** run a change in a setting's third digit through
   `datasets/fidelity.py` first. A difference that is no larger is not a result.
+
+## 22. The active floor becomes the default
+
+`filter.active_floor` is 1e-9 by default, on every venue. This is a decision on the numbers of experiment
+21, not the outcome of a new experiment. What the default was checked against:
+
+- **The gates.** The three baselines in `tests/regression/` pass unchanged.
+- **Simulated scenarios** (10 seeds, one core): mean CEP50 0.657 → 0.654 m, CEP95 1.827 → 1.827 m, and
+  107–1,935 → 31–74 µs per sensor update. Three scenarios' CEP50 moved by 0.01 to 0.02 m; right floor,
+  convergence and jitter are the same.
+- **Held-out walks**, replayed with the exact filter and with the default to report; nothing was chosen on
+  them:
+
+| Held-out walks | Exact | Default |
+|---|---:|---:|
+| 109 mall walks, `msil_wifi.json`: median CEP50 / CEP95 [m] | 6.76 / 9.41 | 6.75 / 9.41 |
+| ... mean CEP50 / CEP95 [m] | 10.79 / 14.40 | 10.80 / 14.44 |
+| 109 mall walks, `fingerprint.json`: median CEP50 / CEP95 [m] | 5.18 / 8.94 | 5.18 / 8.94 |
+| ... mean CEP50 / CEP95 [m] | 7.35 / 10.63 | 7.29 / 10.63 |
+| 6 IPIN scoring trials, `fingerprint.json`: competition metric [m] | 6.58, 5.14, 8.63, 4.97, 7.71, 6.82 | 6.79, 5.24, 9.23, 5.48, 7.57, 6.57 |
+| ... median CEP50 / CEP95 [m] | 4.01 / 14.68 | 4.02 / 14.79 |
+| ... right floor | 96% | 96% |
+
+- **A claim that changed.** The best 2023 trial in Nuremberg scores 5.5 m, not 5.0 m: behind that year's
+  winner (5.3 m), where the exact filter is ahead of it. [datasets.md](datasets.md) now quotes the
+  default's numbers for the scoring trials. Whether 0.5 m on one trial is more than noise was not
+  measured: the six trials were not replayed with a setting changed in its third digit.
+- **Where the localisation is poor, the two filters part further.** With `ipin.json` (no position
+  fingerprints, errors of 10 to 25 m) the six trials score 11.9, 8.1, 16.5, 19.0, 14.8 and 27.4 m exact
+  and 11.2, 11.1, 17.5, 13.2, 19.5 and 25.9 m with the default: single trials move by up to 6 m in both
+  directions, the median from 15.6 to 15.3 m. (Neither is the `ipin.json` column of datasets.md, which
+  is from an earlier conversion and was not reproduced.)
+- **Not repeated with the default:** the Kaggle held-out table and the submission (made with the exact
+  filter), the demo-walk table in datasets.md, the timing in WebAssembly, and a phone.
+- `active_floor` 0 is the exact filter, as before.
 
 ## Open questions
 

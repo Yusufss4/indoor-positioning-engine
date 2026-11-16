@@ -39,9 +39,9 @@ green one the engine's estimate, and the lines are their paths.
 
 | Dataset | What it is | Result |
 |---|---|---|
-| Simulated scenarios | 12 walks with injected faults (moved beacons, magnetic anomalies, weather drift, stairs and lifts), 10 seeds each | mean CEP50 0.66 m, CEP95 1.83 m; right floor 98–99% |
+| Simulated scenarios | 12 walks with injected faults (moved beacons, magnetic anomalies, weather drift, stairs and lifts), 10 seeds each | mean CEP50 0.65 m, CEP95 1.83 m; right floor 98–99% |
 | [Microsoft Indoor Location](https://github.com/location-competition/indoor-location-competition-20) sample | 2 shopping malls, 14 floors, phone IMU + Wi-Fi; 109 held-out walks | median CEP50 5.2 m, CEP95 8.9 m |
-| [IPIN competition](https://evaal.isti.cnr.it/) Track 3 | 2 buildings with stairs and barometer data; the competition's 6 scoring walks and its metric | 5.0–8.6 m per walk, right floor 94–97% |
+| [IPIN competition](https://evaal.isti.cnr.it/) Track 3 | 2 buildings with stairs and barometer data; the competition's 6 scoring walks and its metric | 5.2–9.2 m per walk, right floor 94–97% |
 | [Kaggle Indoor Location & Navigation](https://www.kaggle.com/competitions/indoor-location-navigation) | 626 test walks in 24 buildings, scored by Kaggle | 5.30 m, with offline post-processing |
 
 - CEP50 and CEP95 are the median and the 95th percentile of the horizontal error.

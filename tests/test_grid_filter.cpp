@@ -596,7 +596,8 @@ TEST(GridMap, BlocksHoldEveryCellOnceAndEveryMoveStaysNextDoor) {
 
 TEST(GridFilter, WithoutAnActiveFloorEveryCellIsActive) {
   const Venue v = open_venue();
-  const GridFilterConfig cfg;
+  GridFilterConfig cfg;
+  cfg.active_floor = 0.0;
   auto map = std::make_shared<const GridMap>(v, cfg);
   GridFilter f(map, cfg, {});
   const RssiModel model(v);
@@ -781,6 +782,7 @@ TEST(Engine, AnActiveFloorFollowsTheWalksOfTheExactFilter) {
     const Venue venue = load_venue_file(sc.venue_path);
     const Trace trace = sim::simulate(sc, venue);
     EngineConfig exact_cfg, floor_cfg;
+    exact_cfg.filter.active_floor = 0.0;
     floor_cfg.filter.active_floor = 1e-9;
     auto map = std::make_shared<const GridMap>(venue, exact_cfg.filter);
     PositioningEngine exact(venue, exact_cfg, map), with_floor(venue, floor_cfg, map);

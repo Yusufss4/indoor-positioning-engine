@@ -43,7 +43,7 @@ struct GridFilterConfig {
   /// A radio or barometer update scores it once, at the centroid; a step moves its mass as a whole. A
   /// background block whose share per cell grows to 16 times the floor is updated cell by cell again.
   /// 0: every cell at every update (exact).
-  double active_floor = 0.0;
+  double active_floor = 1e-9;
 
   int heading_bins = 36;  ///< Bins of the heading offset from the gyro-integrated yaw.
   double heading_sigma_deg = 3.0;

@@ -3,14 +3,14 @@
     "airport_hall_sparse": {
       "grid": {
         "availability": 1.0,
-        "cep50_m": 1.006,
+        "cep50_m": 1.0,
         "cep95_m": 3.761,
         "convergence_s": 34.46,
-        "coverage95": 0.676,
+        "coverage95": 0.675,
         "jitter_p50_m": 0.02,
         "jitter_p95_m": 0.197,
         "jumps_per_min": 0.23,
-        "mean_m": 1.487,
+        "mean_m": 1.488,
         "path_ratio": 1.01,
         "unconverged_runs": 0,
         "wall_crossings_per_min": 0.051
@@ -39,21 +39,21 @@
     "kit_tour": {
       "grid": {
         "availability": 1.0,
-        "cep50_m": 0.655,
-        "cep95_m": 2.667,
+        "cep50_m": 0.641,
+        "cep95_m": 2.67,
         "convergence_s": 0.68,
-        "coverage95": 0.648,
+        "coverage95": 0.662,
         "floor_accuracy": 0.99,
         "floor_switch_latency_s": 0.74,
         "jitter_p50_m": 0.024,
-        "jitter_p95_m": 0.262,
+        "jitter_p95_m": 0.258,
         "jumps_per_min": 0.881,
         "level_changes": 3.0,
         "level_flips": 3.0,
-        "mean_m": 0.852,
-        "path_ratio": 1.063,
+        "mean_m": 0.848,
+        "path_ratio": 1.062,
         "unconverged_runs": 0,
-        "wall_crossings_per_min": 1.191
+        "wall_crossings_per_min": 1.134
       }
     },
     "office_device_offset": {
@@ -78,7 +78,7 @@
         "cep50_m": 0.535,
         "cep95_m": 1.278,
         "convergence_s": 2.54,
-        "coverage95": 0.764,
+        "coverage95": 0.763,
         "floor_accuracy": 0.99,
         "floor_switch_latency_s": 0.76,
         "jitter_p50_m": 0.02,
@@ -96,36 +96,36 @@
       "grid": {
         "availability": 1.0,
         "cep50_m": 0.559,
-        "cep95_m": 1.682,
+        "cep95_m": 1.68,
         "convergence_s": 5.7,
         "coverage95": 0.83,
         "jitter_p50_m": 0.023,
-        "jitter_p95_m": 0.302,
-        "jumps_per_min": 0.098,
-        "mean_m": 0.665,
-        "path_ratio": 1.017,
+        "jitter_p95_m": 0.3,
+        "jumps_per_min": 0.049,
+        "mean_m": 0.661,
+        "path_ratio": 1.011,
         "unconverged_runs": 0,
-        "wall_crossings_per_min": 0.491
+        "wall_crossings_per_min": 0.393
       }
     },
     "office_floor_bleed": {
       "grid": {
         "availability": 1.0,
-        "cep50_m": 0.677,
-        "cep95_m": 1.501,
-        "convergence_s": 1.78,
-        "coverage95": 0.66,
+        "cep50_m": 0.661,
+        "cep95_m": 1.503,
+        "convergence_s": 1.76,
+        "coverage95": 0.665,
         "floor_accuracy": 0.979,
-        "floor_switch_latency_s": 1.58,
+        "floor_switch_latency_s": 1.59,
         "jitter_p50_m": 0.031,
-        "jitter_p95_m": 0.322,
-        "jumps_per_min": 1.048,
+        "jitter_p95_m": 0.321,
+        "jumps_per_min": 1.083,
         "level_changes": 2.0,
         "level_flips": 2.9,
-        "mean_m": 0.754,
-        "path_ratio": 1.11,
+        "mean_m": 0.746,
+        "path_ratio": 1.109,
         "unconverged_runs": 0,
-        "wall_crossings_per_min": 0.523
+        "wall_crossings_per_min": 0.558
       }
     },
     "office_mag_disturbance": {
