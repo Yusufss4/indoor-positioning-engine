@@ -274,21 +274,41 @@ TEST(Eval, OnlyTheGridFilter) {
 
 TEST(Eval, ConfigOverridesMergeAndRejectTypos) {
   EngineConfig cfg;
-  apply_config_patch(cfg, R"({"filter": {"heading_bins": 72}, "rssi": {"sigma_db": 7.5}})");
-  EXPECT_EQ(cfg.filter.heading_bins, 72);
+  apply_config_patch(cfg, R"({"filter": {"cell_m": 0.25}, "rssi": {"sigma_db": 7.5}})");
+  EXPECT_DOUBLE_EQ(cfg.filter.cell_m, 0.25);
   EXPECT_DOUBLE_EQ(cfg.rssi.sigma_db, 7.5);
-  EXPECT_TRUE(cfg.filter.map_consistent_estimate);  // untouched keys keep their values
-  EXPECT_THROW(apply_config_patch(cfg, R"({"filter": {"heading_binz": 10}})"), std::invalid_argument);
+  EXPECT_TRUE(cfg.filter.beacon_integrity);  // untouched keys keep their values
+  const std::string before = config_to_json(cfg);
+  apply_config_patch(cfg, "");  // an empty patch changes nothing
+  EXPECT_EQ(config_to_json(cfg), before);
+  EXPECT_THROW(apply_config_patch(cfg, R"({"filter": {"cell_n": 1.0}})"), std::invalid_argument);
   EXPECT_THROW(apply_config_patch(cfg, R"({"filter": "nope"})"), std::invalid_argument);
+}
+
+TEST(Eval, OnlyTheSettingsAreConfig) {
+  // The components' own parameters are not settings: a patch cannot reach them.
+  for (const char* gone : {R"({"filter": {"heading_bins": 72}})", R"({"filter": {"teleport_rate_per_s": 0.0}})",
+                           R"({"baro": {"lowpass_tau_s": 2.0}})", R"({"mag_heading_sigma_deg": 20.0})",
+                           R"({"pdr": {"peak_threshold": 1.5}})", R"({"rooms": {"enter_dwell_s": 3.0}})"}) {
+    EngineConfig cfg;
+    EXPECT_THROW(apply_config_patch(cfg, gone), std::invalid_argument) << gone;
+  }
+  // The defaults of the settings are the components' defaults.
+  EXPECT_TRUE(filter_params(EngineConfig{}) == GridFilterConfig{});
+  EngineConfig cfg;
+  cfg.filter.cell_m = 1.0;
+  cfg.filter.fingerprint_weight = 3.0;
+  EXPECT_DOUBLE_EQ(filter_params(cfg).cell_m, 1.0);
+  EXPECT_DOUBLE_EQ(filter_params(cfg).fingerprint_weight, 3.0);
 }
 
 TEST(Eval, ConfigJsonRoundTrip) {
   EngineConfig cfg;
-  cfg.filter.heading_bins = 48;
+  cfg.filter.cell_m = 1.0;
   cfg.rssi.wall_aware = false;
   EngineConfig copy;
   apply_config_patch(copy, config_to_json(cfg));
-  EXPECT_EQ(copy.filter.heading_bins, 48);
+  EXPECT_DOUBLE_EQ(copy.filter.cell_m, 1.0);
   EXPECT_FALSE(copy.rssi.wall_aware);
   // Keys of the removed filters are rejected like any typo.
   EXPECT_THROW(apply_config_patch(copy, R"({"ekf": {"rssi_min_dbm": -80}})"), std::invalid_argument);

@@ -26,18 +26,65 @@ EngineConfig recommended_config(const Venue& venue) {
 
 PositioningEngine::PositioningEngine(const Venue& venue) : PositioningEngine(venue, recommended_config(venue)) {}
 
+namespace {
+
+/// Spread of a step's magnetometer heading [deg]: indoors the field is bent by steel and wiring.
+constexpr double kMagHeadingSigmaDeg = 12.0;
+
+PdrConfig pdr_params(const EngineConfig& cfg) {
+  PdrConfig p;
+  p.weinberg_k = cfg.pdr.weinberg_k;
+  return p;
+}
+
+RssiModelConfig rssi_params(const EngineConfig& cfg) {
+  RssiModelConfig p;
+  p.sigma_db = cfg.rssi.sigma_db;
+  p.wall_aware = cfg.rssi.wall_aware;
+  return p;
+}
+
+TrackSmootherConfig smoother_params(const EngineConfig& cfg) {
+  TrackSmootherConfig p;
+  p.enabled = cfg.smoothing.enabled;
+  p.tau_s = cfg.smoothing.tau_s;
+  p.max_correction_mps = cfg.smoothing.max_correction_mps;
+  p.snap_m = cfg.smoothing.snap_m;
+  return p;
+}
+
+RoomEventConfig room_params(const EngineConfig& cfg) {
+  RoomEventConfig p;
+  p.enter_prob = cfg.rooms.enter_prob;
+  p.exit_prob = cfg.rooms.exit_prob;
+  return p;
+}
+
+}  // namespace
+
+GridFilterConfig filter_params(const EngineConfig& cfg) {
+  GridFilterConfig p;
+  p.cell_m = cfg.filter.cell_m;
+  p.active_floor = cfg.filter.active_floor;
+  p.estimate_rssi_offset = cfg.filter.estimate_rssi_offset;
+  p.beacon_integrity = cfg.filter.beacon_integrity;
+  p.floor_prior_weight = cfg.filter.floor_prior_weight;
+  p.fingerprint_weight = cfg.filter.fingerprint_weight;
+  return p;
+}
+
 PositioningEngine::PositioningEngine(const Venue& venue, EngineConfig cfg)
-    : PositioningEngine(venue, cfg, std::make_shared<const GridMap>(venue, cfg.filter)) {}
+    : PositioningEngine(venue, cfg, std::make_shared<const GridMap>(venue, filter_params(cfg))) {}
 
 PositioningEngine::PositioningEngine(const Venue& venue, EngineConfig cfg, std::shared_ptr<const GridMap> map)
     : venue_(&venue),
       cfg_(cfg),
-      pdr_(cfg.pdr),
-      filter_(std::move(map), cfg.filter, cfg.rssi, cfg.baro),
-      smoother_(venue, cfg.smoothing) {
+      pdr_(pdr_params(cfg)),
+      filter_(std::move(map), filter_params(cfg), rssi_params(cfg), BaroConfig{}),
+      smoother_(venue, smoother_params(cfg)) {
   if (&filter_.map().venue() != &venue) throw std::invalid_argument("PositioningEngine: the map is of another venue");
   if (!venue.rooms().empty()) {
-    rooms_.emplace(venue, cfg.rooms);
+    rooms_.emplace(venue, room_params(cfg));
     room_prob_.assign(venue.rooms().size(), 0.0);
   }
 }
@@ -65,7 +112,7 @@ void PositioningEngine::apply_step(const StepEvent& step) {
   filter_.on_step(step);
   smoother_.on_step(step.t, before, filter_.estimate(), filter_.step_motion());
   if (step.mag_valid) {
-    filter_.on_heading(step.t, step.mag_heading, deg2rad(cfg_.mag_heading_sigma_deg));
+    filter_.on_heading(step.t, step.mag_heading, deg2rad(kMagHeadingSigmaDeg));
     smoother_.on_update(step.t, filter_.estimate());
   }
 }

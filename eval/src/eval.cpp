@@ -219,7 +219,7 @@ void score_room_events(Metrics& m, const std::vector<RoomEvent>& estimated, cons
 
 ReplayResult replay(const Venue& venue, const Trace& trace, const EngineConfig& cfg, const ReplayOptions& opts,
                     std::shared_ptr<const GridMap> map) {
-  if (!map) map = std::make_shared<const GridMap>(venue, cfg.filter);
+  if (!map) map = std::make_shared<const GridMap>(venue, filter_params(cfg));
   PositioningEngine engine(venue, cfg, std::move(map));
   return replay_with(engine, venue, trace, opts);
 }

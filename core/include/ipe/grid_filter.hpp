@@ -22,8 +22,9 @@
 
 namespace ipe {
 
-/// Settings of the grid filter, the engine's filter (docs/design.md): the posterior on a lattice of the
-/// venue's walkable cells.
+/// Parameters of the grid filter, the engine's filter (docs/design.md): the posterior on a lattice of the
+/// venue's walkable cells. The engine sets the few that are settings (EngineConfig::Filter) and leaves the
+/// rest at these values; a test of the filter on its own changes what it needs to.
 struct GridFilterConfig {
   // The lattice (GridMap). Changing these builds another map.
   double cell_m = 0.5;        ///< Cell size [m]; coarser when the walkable area needs more than max_cells.
@@ -104,6 +105,8 @@ struct GridFilterConfig {
   double fingerprint_sigma_m = 4.0;
   double fingerprint_eps = 0.05;
   double fingerprint_model_weight = 0.3;
+
+  friend bool operator==(const GridFilterConfig&, const GridFilterConfig&) = default;
 };
 
 /// The venue as a lattice of cells, built once and shared read-only by every GridFilter on that venue.

@@ -23,9 +23,9 @@ namespace ipe::eval {
 namespace fs = std::filesystem;
 
 namespace {
-/// The config a venue's runs use: the one recommended for the venue or the engine's default, patched.
+/// The config a venue's runs use: the one the venue calls for, patched.
 EngineConfig engine_config(const BenchmarkOptions& opts, const Venue& venue) {
-  EngineConfig cfg = opts.venue_config ? recommended_config(venue) : EngineConfig{};
+  EngineConfig cfg = recommended_config(venue);
   for (const auto& patch : opts.config_patches) apply_config_patch(cfg, patch);
   return cfg;
 }
@@ -84,7 +84,7 @@ class MapCache {
 /// Metrics of one trace through the engine.
 Metrics replay_metrics(const Venue& venue, const Trace& trace, const BenchmarkOptions& opts, MapCache& maps) {
   const EngineConfig cfg = engine_config(opts, venue);
-  return replay(venue, trace, cfg, opts.replay, maps.get(venue, cfg.filter)).metrics;
+  return replay(venue, trace, cfg, opts.replay, maps.get(venue, filter_params(cfg))).metrics;
 }
 
 double mean_or(const std::vector<double>& values, double fallback) {
