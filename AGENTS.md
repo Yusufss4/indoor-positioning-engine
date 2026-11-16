@@ -41,7 +41,8 @@ accuracy. [docs/design.md](docs/design.md) explains the engine and maps each con
   - `kaggle` - fetch, submission and demo export for the full Kaggle set.
   - `osm` - OpenStreetMap indoor data to a venue, and a walk planner that writes scenarios.
   - `common` - what the converters share; `offline.py` holds the offline steps (two-pass replay, gap
-    filling, waypoint snapping). `evaluate.py` scores a manifest with the competitions' metrics.
+    filling, waypoint snapping). `evaluate.py` scores a manifest with the competitions' metrics;
+    `fidelity.py` compares the tracks of two configurations on a manifest.
   - Raw data and converter output (`raw/`, `out*/`) are git-ignored.
 
 ## Build and test
@@ -81,7 +82,10 @@ Sanitizers: `-DIPE_SANITIZE=address,undefined` with `CMAKE_BUILD_TYPE=Debug`.
    O(cells) and a step O(cells x heading bins); keep them that way, and quote `--serial` timings for any
    change to those loops (compute is this filter's cost, see [docs/design.md](docs/design.md#cost)).
 7. **Real data: tune and held-out stay apart.** Settings are chosen on `manifest_tune.json` only;
-   `manifest_holdout.json` is replayed once to report.
+   `manifest_holdout.json` is replayed once to report. Real walks have no seeds: before calling a
+   difference between two configurations a result, compare it with what a setting changed in its third
+   digit does (`datasets/fidelity.py`, [docs/history.md](docs/history.md), experiment 21). On IPIN the
+   ground truth is waypoints about 30 s apart, so `convergence_s` is the first waypoint under 3 m.
 8. **Offline steps are not the engine.** Numbers from `--two-pass`, `--fill` or `--snap` must never be
    quoted as what the engine does live.
 9. **Nothing converted from the Kaggle data is committed.** Its competition rules forbid redistribution:
@@ -101,6 +105,8 @@ Sanitizers: `-DIPE_SANITIZE=address,undefined` with `CMAKE_BUILD_TYPE=Debug`.
 ./build/tools/ipe-replay --print-config                                                         # every setting
 .venv/bin/python datasets/evaluate.py datasets/ipin/out_fp/manifest_tune.json \
     --config data/configs/fingerprint.json                                                      # real walks
+.venv/bin/python datasets/fidelity.py datasets/ipin/out_fp/manifest_tune.json \
+    --config data/configs/fingerprint.json --b '{"rssi": {"sigma_db": 8.01}}'                   # their noise
 ```
 
 The companion repo `positioning-agent-tools` wraps these tools as an MCP server. It still calls the removed

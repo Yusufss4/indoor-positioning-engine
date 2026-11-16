@@ -292,4 +292,7 @@ datasets/kaggle/fetch.sh
 
 `datasets/evaluate.py` prints, per walk and per group, CEP50/CEP95, the floor hit rate, the IPIN metric and
 the Kaggle metric. `--two-pass`, `--fill` and `--snap` are the offline steps; without them every number is
-causal. To add a dataset of your own, see [extending.md](extending.md#a-dataset).
+causal. `datasets/fidelity.py` replays a manifest with two patches and prints how far apart the two tracks
+are: how closely an approximation follows the exact filter, or, with a setting changed in its third
+digit, how much of a difference between two configurations is noise ([history.md](history.md),
+experiment 21). To add a dataset of your own, see [extending.md](extending.md#a-dataset).
