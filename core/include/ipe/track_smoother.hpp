@@ -10,8 +10,8 @@ struct TrackSmootherConfig {
   /// Radio corrections are absorbed with this time constant instead of drawn at once [s].
   double tau_s = 0.5;
   /// Cap on how fast a correction moves the dot, on top of the walking [m/s]; 0 is no cap. Off by default:
-  /// it holds the dot back while BLE moves the estimate to new evidence. The Wi-Fi configs set 1.5, where
-  /// one scan can move the estimate several metres (experiment 11).
+  /// it holds the dot back while BLE moves the estimate to new evidence. A fitted radio map gets 1.5
+  /// (recommended_config), where one scan can move the estimate several metres (experiment 11).
   double max_correction_mps = 0.0;
   /// Further than this from the filter's estimate the dot jumps there instead of gliding [m].
   double snap_m = 10.0;
@@ -19,9 +19,6 @@ struct TrackSmootherConfig {
   /// intervals, centred on the filter's estimate, instead of waiting for the next step event. 0 draws one
   /// jump per step.
   double extrapolate_steps = 1.0;
-  /// Steps further apart than this mean the walker had stopped: no pace is taken from them, and an
-  /// extrapolated offset older than this is taken back with time constant `tau_s` [s].
-  double max_step_interval_s = 1.2;
 };
 
 /// The position a client draws, made from the filter's estimate without lagging behind it:

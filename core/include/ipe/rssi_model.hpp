@@ -8,12 +8,13 @@
 namespace ipe {
 
 struct RssiModelConfig {
-  double sigma_db = 5.0;           ///< Gaussian spread of RSSI around the path-loss curve.
-  double outlier_prob = 0.05;      ///< Mixture weight of the uniform outlier component.
-  double outlier_range_db = 60.0;  ///< Support of the uniform outlier component.
-  double min_distance = 0.5;       ///< Distances are clamped to avoid log(0) near beacons.
-  bool wall_aware = true;          ///< Subtract per-wall attenuation (needs the map).
+  double sigma_db = 5.0;   ///< Gaussian spread of RSSI around the path-loss curve.
+  bool wall_aware = true;  ///< Subtract per-wall attenuation (needs the map).
 };
+
+inline constexpr double kRssiOutlierProb = 0.05;     ///< Mixture weight of the uniform outlier component.
+inline constexpr double kRssiOutlierRangeDb = 60.0;  ///< Support of the uniform outlier component.
+inline constexpr double kRssiMinDistance = 0.5;      ///< Distances are clamped to avoid log(0) near beacons [m].
 
 /// Log-distance path-loss model with an optional per-wall attenuation term
 /// and a robust (Gaussian + uniform) measurement likelihood. Across levels the
@@ -30,7 +31,7 @@ class RssiModel {
   /// As above with the per-wall and per-slab losses given instead of the venue's (estimated online).
   [[nodiscard]] double expected_rssi(const Beacon& b, Vec2 p, int level, double wall_db, double floor_db) const;
   [[nodiscard]] double expected_rssi_free_space(const Beacon& b, double d) const {
-    return b.tx_power_dbm - 10.0 * b.path_loss_exp * std::log10(std::max(d, cfg_.min_distance));
+    return b.tx_power_dbm - 10.0 * b.path_loss_exp * std::log10(std::max(d, kRssiMinDistance));
   }
   [[nodiscard]] double log_likelihood(double residual_db) const;
 

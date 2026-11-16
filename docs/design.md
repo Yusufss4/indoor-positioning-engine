@@ -77,20 +77,20 @@ room probability is simply the mass of a room's cells.
 Built once per venue and shared read-only by every engine on it.
 
 - **Cells.** One lattice over the venue bounds, 0.5 m cells (`cell_m`), coarser when the walkable area
-  would need more than `max_cells` (200,000). A cell exists on a level when its centre is inside the venue's
+  would need more than 200,000 cells. A cell exists on a level when its centre is inside the venue's
   bounds, its `footprint` polygon if it has one, and the level's own footprint, and outside closed regions.
-- **Closed regions** (`closed_region_fraction` 0.1, `closed_region_min_m2` 10). The walls split each level
+- **Closed regions** (`closed_region_fraction` 0.1). The walls split each level
   into connected regions. A region of at least 10 m^2, smaller than a tenth of its level's largest and
   without a stairwell or lift is closed: a room without a door, an island drawn as an outline. Its cells do
   not exist, so no Wi-Fi scan can pull the estimate in.
-- **Moves.** Each cell has one bit per lattice offset within `max_reach_m` (2 m): set when the segment
+- **Moves.** Each cell has one bit per lattice offset within 2 m: set when the segment
   between the two centres crosses no wall and the target cell exists. A step's wall test is one bit.
 - **Radio.** The walls between each cell's centre and each beacon are counted the first time the beacon is
   heard, by filling each wall's shadow as seen from the beacon lattice row by lattice row (1–10 ms per
   beacon). The result is exactly `Venue::count_wall_crossings`.
 - **Floors and rooms.** Cells inside a connector (stairwell, lift, escalator) link to the cell at the same
   place on the levels next to it. Each cell lists the rooms its centre is in.
-- **Blocks.** The lattice is also cut into squares of `background_block_m` (4 m, 8 by 8 cells), per level,
+- **Blocks.** The lattice is also cut into squares of 4 m (8 by 8 cells), per level,
   each with its neighbours: the blocks a step or a level change from its cells can end in. They are what
   the active set below is made of.
 
@@ -200,7 +200,7 @@ without blocks, bit for bit.
   to another one only when that one leads by 0.1 (`level_hysteresis`), or at once when no mass is left on
   the reported level. A posterior split between floors then does not flicker with every packet.
 - **Position.** Mean and covariance of the centroids on the reported level, plus the spread within a cell.
-- **On the map** (`map_consistent_estimate`, on). The mean of a posterior split across a wall can fall on
+- **On the map.** The mean of a posterior split across a wall can fall on
   the wall or in an empty room. If the mean is outside the walkable area or a wall separates it from its
   nearest cell, the reported position is the mean of the dominant group instead: the heaviest 3x3 block of
   a 2 m weight histogram, keeping the block's cells on the same side of the walls.

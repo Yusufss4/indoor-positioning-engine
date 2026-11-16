@@ -80,9 +80,9 @@ void GridFilter::update_rssi(double t, std::span<const RssiReading> readings) {
 void GridFilter::add_radio_model_loglik(std::span<const RssiReading> readings) {
   const RssiModelConfig& rc = rssi_model_.config();
   const double noise_var = rc.sigma_db * rc.sigma_db;
-  const double outlier_density = 1.0 / rc.outlier_range_db;
+  const double outlier_density = 1.0 / kRssiOutlierRangeDb;
   const double wall_db = map_->venue().wall_attenuation_db();
-  const double walk2 = cfg_.rssi_offset_walk * cfg_.rssi_offset_walk;
+  const double walk2 = kRssiOffsetWalk * kRssiOffsetWalk;
   const std::size_t blocks = sparse_ ? map_->block_count() : 0;
   for (const auto& r : readings) {
     const Beacon& beacon = map_->venue().beacons()[r.beacon_index];
@@ -95,7 +95,7 @@ void GridFilter::add_radio_model_loglik(std::span<const RssiReading> readings) {
       if (!walls.empty()) pred -= wall_db * walls[c];
       const double res = r.rssi - pred;
       double resp = 0.0;
-      const double lik = mixture(res, noise_var + dev_var_[c], rc.outlier_prob, outlier_density, resp);
+      const double lik = mixture(res, noise_var + dev_var_[c], kRssiOutlierProb, outlier_density, resp);
       loglik_[c] += std::log(lik);
       if (cfg_.estimate_rssi_offset) adf_update(dev_mu_[c], dev_var_[c], res, noise_var, resp);
     }
@@ -105,7 +105,7 @@ void GridFilter::add_radio_model_loglik(std::span<const RssiReading> readings) {
       if (!walls.empty()) pred -= wall_db * walls[map_->block_cell(b)];
       const double res = r.rssi - pred;
       double resp = 0.0;
-      const double lik = mixture(res, noise_var + bg_dev_var_[b], rc.outlier_prob, outlier_density, resp);
+      const double lik = mixture(res, noise_var + bg_dev_var_[b], kRssiOutlierProb, outlier_density, resp);
       block_loglik_[b] += std::log(lik);
       if (cfg_.estimate_rssi_offset) adf_update(bg_dev_mu_[b], bg_dev_var_[b], res, noise_var, resp);
     }

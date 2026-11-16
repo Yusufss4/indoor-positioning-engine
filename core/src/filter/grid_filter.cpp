@@ -20,19 +20,17 @@ namespace ipe {
 
 using namespace filter_detail;
 
-GridFilter::GridFilter(std::shared_ptr<const GridMap> map, GridFilterConfig cfg, RssiModelConfig rssi_cfg,
-                       BaroConfig baro_cfg)
+GridFilter::GridFilter(std::shared_ptr<const GridMap> map, GridFilterConfig cfg, RssiModelConfig rssi_cfg)
     : map_(std::move(map)),
       cfg_(cfg),
       rssi_model_(map_->venue(), rssi_cfg),
       bins_(std::max(cfg.heading_bins, 4)),
       multi_level_(map_->venue().multi_level()),
-      integrity_(map_->venue().beacons().size(), {cfg.integrity_threshold_db, cfg.integrity_alpha,
-                                                  cfg.integrity_min_samples, cfg.integrity_max_sigma_m}),
-      floor_classifier_(map_->venue(), {cfg.floor_prior_k, cfg.floor_prior_eps}),
+      integrity_(map_->venue().beacons().size(),
+                 {kIntegrityThresholdDb, kIntegrityAlpha, kIntegrityMinSamples, kIntegrityMaxSigmaM}),
+      floor_classifier_(map_->venue(), {kFloorPriorK, kFloorPriorEps}),
       fingerprint_map_(map_->venue(), {cfg.fingerprint_k, cfg.fingerprint_strongest}),
-      level_selector_(cfg.level_smoothing_s, cfg.level_hysteresis),
-      altimeter_(baro_cfg) {
+      level_selector_(cfg.level_smoothing_s, cfg.level_hysteresis) {
   const std::size_t n = map_->size();
   const std::size_t states = n * static_cast<std::size_t>(bins_);
 
@@ -90,7 +88,7 @@ GridFilter::GridFilter(std::shared_ptr<const GridMap> map, GridFilterConfig cfg,
   const std::size_t conns = map_->connector_cells().size();
   for (auto* v : {&conn_mass_, &conn_x_, &conn_y_, &conn_d1_, &conn_d2_, &conn_b1_, &conn_b2_}) v->assign(conns, 0.0);
   conn_h_.assign(conns * static_cast<std::size_t>(bins_), 0.0F);
-  if (cfg_.map_consistent_estimate) map_estimate_.emplace(map_->venue(), n);
+  map_estimate_.emplace(map_->venue(), n);
   initialize_uniform();
   update_estimate(0.0);
 }

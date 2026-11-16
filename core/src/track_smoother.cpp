@@ -5,6 +5,12 @@
 
 namespace ipe {
 
+namespace {
+/// Steps further apart than this mean the walker had stopped: no pace is taken from them, and an
+/// extrapolated offset older than this is taken back with time constant `tau_s` [s].
+constexpr double kMaxStepIntervalS = 1.2;
+}  // namespace
+
 bool TrackSmoother::walkable_move(Vec2 from, Vec2 to) const {
   return venue_->inside(to, level_) && !venue_->crosses_wall(from, to, level_);
 }
@@ -48,7 +54,7 @@ Vec2 TrackSmoother::extrapolation(double t) const {
   const double span = cfg_.extrapolate_steps * step_dt_;
   Vec2 off = pace_ * (std::min(since, span) - 0.5 * span);
   // No step for a while: the walker has stopped, so the dot goes back to where the filter has it.
-  const double late = since - cfg_.max_step_interval_s;
+  const double late = since - kMaxStepIntervalS;
   if (late > 0.0) off = off * (cfg_.tau_s > 0.0 ? std::exp(-late / cfg_.tau_s) : 0.0);
   return off;
 }
@@ -87,7 +93,7 @@ void TrackSmoother::on_step(double t, const Estimate& before, const Estimate& af
   // The step's motion replaces what extrapolation drew since the previous step.
   const Vec2 here = glide(t);
   const double interval = t - t_step_;
-  pace_valid_ = interval > 0.0 && interval <= cfg_.max_step_interval_s;
+  pace_valid_ = interval > 0.0 && interval <= kMaxStepIntervalS;
   if (pace_valid_) {
     step_dt_ = interval;
     pace_ = motion * (1.0 / interval);

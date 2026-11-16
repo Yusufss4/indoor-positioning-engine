@@ -18,7 +18,7 @@ double altitude_to_pressure(double altitude_m, double sea_level_hpa) {
 }
 
 double BaroAltimeter::process(double t, double hpa) {
-  const double h = pressure_to_altitude(hpa, cfg_.sea_level_hpa);
+  const double h = pressure_to_altitude(hpa);
   if (!initialized_) {
     initialized_ = true;
     reference_m_ = h;
@@ -28,7 +28,7 @@ double BaroAltimeter::process(double t, double hpa) {
   }
   const double dt = std::max(0.0, t - last_t_);
   last_t_ = t;
-  const double alpha = cfg_.lowpass_tau_s > 0.0 ? dt / (cfg_.lowpass_tau_s + dt) : 1.0;
+  const double alpha = lowpass_tau_s_ > 0.0 ? dt / (lowpass_tau_s_ + dt) : 1.0;
   filtered_ += alpha * ((h - reference_m_) - filtered_);
   return filtered_;
 }

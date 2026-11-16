@@ -29,14 +29,7 @@ struct StepEvent {
 };
 
 struct PdrConfig {
-  double gravity = 9.80665;
-  double lowpass_alpha = 0.25;      ///< EMA factor applied to |a| - g.
-  double peak_threshold = 1.0;      ///< Peak must exceed this [m/s^2].
-  double valley_threshold = 0.0;    ///< Signal must fall below this to confirm the peak.
-  double min_step_interval = 0.25;  ///< Reject peaks closer than this [s].
-  double weinberg_k = 0.48;
-  double min_step_length = 0.25;
-  double max_step_length = 1.2;
+  double weinberg_k = 0.48;  ///< K of the Weinberg step length: the scale of every step.
 };
 
 /// Detects steps from accelerometer magnitude peaks, estimates step length

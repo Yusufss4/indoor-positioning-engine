@@ -179,7 +179,7 @@ TEST(TrackSmoother, ExtrapolatesAtTheLastStepsPace) {
   EXPECT_NEAR(s.estimate(1.6, filtered).pos.x, 3.4 - 0.21, 1e-9);
   EXPECT_NEAR(s.estimate(2.0, filtered).pos.x, 3.4 + 0.35, 1e-9);
   EXPECT_NEAR(s.estimate(2.2, filtered).pos.x, 3.4 + 0.35, 1e-9);  // at most one step interval
-  // No step for longer than max_step_interval_s: the walker stopped, and the dot goes back.
+  // No step for longer than 1.2 s: the walker stopped, and the dot goes back.
   EXPECT_NEAR(s.estimate(1.5 + 1.2 + 1.0, filtered).pos.x, 3.4 + 0.35 * std::exp(-1.0), 1e-9);
   EXPECT_NEAR(s.estimate(30.0, filtered).pos.x, 3.4, 1e-9);
   // The pace of a step 2 s after the previous one is not used.

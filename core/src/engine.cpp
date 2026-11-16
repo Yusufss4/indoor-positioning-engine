@@ -83,7 +83,7 @@ PositioningEngine::PositioningEngine(const Venue& venue, EngineConfig cfg, std::
     : venue_(&venue),
       cfg_(cfg),
       pdr_(pdr_params(cfg)),
-      filter_(std::move(map), filter_params(cfg), rssi_params(cfg), BaroConfig{}),
+      filter_(std::move(map), filter_params(cfg), rssi_params(cfg)),
       smoother_(venue, smoother_params(cfg)) {
   if (&filter_.map().venue() != &venue) throw std::invalid_argument("PositioningEngine: the map is of another venue");
   if (!venue.rooms().empty()) {

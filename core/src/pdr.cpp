@@ -7,6 +7,16 @@
 
 namespace ipe {
 
+namespace {
+constexpr double kGravity = 9.80665;
+constexpr double kLowpassAlpha = 0.25;     ///< EMA factor applied to |a| - g.
+constexpr double kPeakThreshold = 1.0;     ///< A peak must exceed this [m/s^2].
+constexpr double kValleyThreshold = 0.0;   ///< The signal must fall below this to confirm the peak.
+constexpr double kMinStepInterval = 0.25;  ///< Peaks closer than this are rejected [s].
+constexpr double kMinStepLength = 0.25;    ///< [m]
+constexpr double kMaxStepLength = 1.2;     ///< [m]
+}  // namespace
+
 double PdrProcessor::heading_from_mag(const Vec3& mag) {
   // Phone x axis along the walking direction; the horizontal field points
   // north (+y). In the phone frame the field reads (B sin psi, B cos psi).
@@ -15,7 +25,7 @@ double PdrProcessor::heading_from_mag(const Vec3& mag) {
 
 std::optional<StepEvent> PdrProcessor::process(const ImuSample& s) {
   const double a_norm = std::sqrt(s.accel.x * s.accel.x + s.accel.y * s.accel.y + s.accel.z * s.accel.z);
-  const double a_dyn = a_norm - cfg_.gravity;
+  const double a_dyn = a_norm - kGravity;
 
   if (!initialized_) {
     initialized_ = true;
@@ -27,7 +37,7 @@ std::optional<StepEvent> PdrProcessor::process(const ImuSample& s) {
   const double dt = std::clamp(s.t - last_t_, 0.0, 0.2);
   last_t_ = s.t;
   yaw_ += s.gyro.z * dt;
-  filtered_ += cfg_.lowpass_alpha * (a_dyn - filtered_);
+  filtered_ += kLowpassAlpha * (a_dyn - filtered_);
 
   // A field of exactly zero in the horizontal plane is a phone without a magnetometer reading, not a heading.
   if (s.mag.x != 0.0 || s.mag.y != 0.0) {
@@ -39,7 +49,7 @@ std::optional<StepEvent> PdrProcessor::process(const ImuSample& s) {
 
   if (!in_peak_) {
     valley_min_ = std::min(valley_min_, filtered_);
-    if (filtered_ > cfg_.peak_threshold) {
+    if (filtered_ > kPeakThreshold) {
       in_peak_ = true;
       peak_max_ = filtered_;
     }
@@ -47,17 +57,16 @@ std::optional<StepEvent> PdrProcessor::process(const ImuSample& s) {
   }
 
   peak_max_ = std::max(peak_max_, filtered_);
-  if (filtered_ >= cfg_.valley_threshold) return std::nullopt;
+  if (filtered_ >= kValleyThreshold) return std::nullopt;
 
   in_peak_ = false;
   const double amplitude = peak_max_ - valley_min_;
   valley_min_ = filtered_;
-  if (s.t - last_step_t_ < cfg_.min_step_interval) return std::nullopt;
+  if (s.t - last_step_t_ < kMinStepInterval) return std::nullopt;
 
   StepEvent ev;
   ev.t = s.t;
-  ev.length = std::clamp(cfg_.weinberg_k * std::pow(std::max(amplitude, 0.0), 0.25), cfg_.min_step_length,
-                         cfg_.max_step_length);
+  ev.length = std::clamp(cfg_.weinberg_k * std::pow(std::max(amplitude, 0.0), 0.25), kMinStepLength, kMaxStepLength);
   ev.heading_delta = wrap_angle(yaw_ - yaw_at_last_step_);
   if (mag_count_ > 0) {
     ev.mag_heading = std::atan2(mag_sin_sum_, mag_cos_sum_);
