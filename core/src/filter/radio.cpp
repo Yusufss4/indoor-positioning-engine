@@ -76,7 +76,7 @@ void GridFilter::update_rssi(double t, std::span<const RssiReading> readings) {
 
 /// The log-distance model: each reading against the RSSI expected at the cell, through its walls, with the
 /// cell's device offset, which the reading also updates. A background block is scored the same way, once,
-/// at its centre.
+/// at the centroid of its mass.
 void GridFilter::add_radio_model_loglik(std::span<const RssiReading> readings) {
   const RssiModelConfig& rc = rssi_model_.config();
   const double noise_var = rc.sigma_db * rc.sigma_db;
@@ -101,7 +101,7 @@ void GridFilter::add_radio_model_loglik(std::span<const RssiReading> readings) {
     }
     for (std::size_t b = 0; b < blocks; ++b) {
       if (!(bg_mass_[b] > 0.0)) continue;
-      double pred = expected_rssi(beacon, map_->block_level(b), map_->block_centre(b)) + bg_dev_mu_[b];
+      double pred = expected_rssi(beacon, map_->block_level(b), bg_pos(b)) + bg_dev_mu_[b];
       if (!walls.empty()) pred -= wall_db * walls[map_->block_cell(b)];
       const double res = r.rssi - pred;
       double resp = 0.0;

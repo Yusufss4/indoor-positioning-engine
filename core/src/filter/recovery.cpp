@@ -41,6 +41,12 @@ void GridFilter::mix_uniform(double rho) {
     if (!cfg_.estimate_rssi_offset) bg_dev_var_[b] = 0.0;
     mix_gaussian(bg_baro_mu_[b], bg_baro_var_[b], prior_baro_offset(map_->block_level(b)), baro_var0, f);
     bg_mass_[b] = m;
+    const Vec2 centre = map_->block_centre(b);
+    bg_x_[b] = (1.0 - f) * bg_x_[b] + f * centre.x;
+    bg_y_[b] = (1.0 - f) * bg_y_[b] + f * centre.y;
+    if (f < 1e-9) continue;  // the heading row would not change in float
+    float* hb = &bg_h_[b * row];
+    for (std::size_t k = 0; k < row; ++k) hb[k] = static_cast<float>((1.0 - f) * hb[k] + f * prior);
   }
   for (const std::uint32_t c : active_) {
     const double kept = (1.0 - rho) * mass_[c];

@@ -45,9 +45,14 @@ GridFilter::GridFilter(std::shared_ptr<const GridMap> map, GridFilterConfig cfg,
   baro_var_.assign(n, 0.0);
   loglik_.assign(n, 0.0);
   h_.assign(states, 0.0F);
-  h_next_.assign(states, 0.0F);
-  touched_.assign(n, 0);
-  acc_.assign(n, StepAcc{});
+  sparse_ = cfg_.active_floor > 0.0;
+  // With an active floor a step also moves mass into background blocks: block b is the cell n + b of the
+  // step's scratch.
+  const std::size_t blocks = map_->block_count();
+  const std::size_t targets = n + (sparse_ ? blocks : 0);
+  h_next_.assign(targets * static_cast<std::size_t>(bins_), 0.0F);
+  touched_.assign(targets, 0);
+  acc_.assign(targets, StepAcc{});
   move_x_.assign(static_cast<std::size_t>(bins_) * 3, 0.0);
   move_y_.assign(move_x_.size(), 0.0);
   move_offset_.assign(move_x_.size(), -1);
@@ -61,9 +66,7 @@ GridFilter::GridFilter(std::shared_ptr<const GridMap> map, GridFilterConfig cfg,
   level_weight_.assign(static_cast<std::size_t>(std::max(map_->venue().level_count(), 1)), 0.0);
   level_dz_.assign(level_weight_.size(), 0.0);
   level_loss_.assign(level_weight_.size(), 0.0);
-  sparse_ = cfg_.active_floor > 0.0;
   active_floor_ = std::min(cfg_.active_floor, kMaxActiveFloor);
-  const std::size_t blocks = map_->block_count();
   active_.reserve(n);
   cell_active_.assign(n, 1);
   block_active_.assign(blocks, 1);
@@ -72,6 +75,15 @@ GridFilter::GridFilter(std::shared_ptr<const GridMap> map, GridFilterConfig cfg,
   bg_mass_.assign(blocks, 0.0);
   for (auto* v : {&bg_dev_mu_, &bg_dev_var_, &bg_baro_mu_, &bg_baro_var_}) v->assign(blocks, 0.0);
   block_loglik_.assign(blocks, 0.0);
+  if (sparse_) {
+    bg_h_.assign(blocks * static_cast<std::size_t>(bins_), static_cast<float>(1.0 / bins_));
+    bg_x_.assign(blocks, 0.0);
+    bg_y_.assign(blocks, 0.0);
+    for (std::size_t b = 0; b < blocks; ++b) {
+      bg_x_[b] = map_->block_centre(b).x;
+      bg_y_[b] = map_->block_centre(b).y;
+    }
+  }
   floor_p_.assign(level_weight_.size(), 0.0);
   points_.reserve(n);
   scan_.reserve(map_->venue().beacons().size());

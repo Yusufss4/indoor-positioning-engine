@@ -29,7 +29,9 @@ Numbers are means over seeds on the simulated scenarios unless a dataset is name
 | 17 | What can go? | The planner, IMDF, the UJI study, three unused filter options | A smaller repository, identical results |
 | 18 | Why must a user know which config file to pass? | The three files are one patch, limited by what the venue has | `recommended_config(venue)`; an installable package |
 | 19 | Can the engine run live in a phone's browser? | Yes on motion sensors; a web page gets no radio | `on_position_fix`, `web/live.html`, recordings as traces |
-| 20 | Must every update touch every cell? | No: 300 cells hold the mass; the rest can be coarse blocks | `filter.active_floor`, off by default |
+| 20 | Must every update touch every cell? | No: 300 cells hold the mass; the rest can be coarse blocks | `filter.active_floor`, on by default since 22 |
+| 21 | Does the active floor delay convergence on real Wi-Fi? | The delay was inside the metric's noise; the background was too light under the compass | Background blocks with a heading row that move with the steps; `datasets/fidelity.py` |
+| 22 | Should the active floor be the default? | Decided on the numbers of 21; the gates pass unchanged | `filter.active_floor` 1e-9 by default |
 
 ## 2. A moved beacon hijacking the estimate (`office_field_issue`)
 
@@ -214,7 +216,7 @@ desktop core. Half of the work scaled with cells × heading bins, the rest with 
   other block is one coarse cell that radio and barometer updates score once. Dropping the far cells
   instead would have removed the way back from a wrong lock; a unit test locks the filter in the wrong
   corner of a hall, and with and without the floor it comes back after the same 16 packets.
-- **Off (the default):** results identical to before on the 12 scenarios (10 seeds), the 109 mall tune
+- **Off (the default at the time):** results identical to before on the 12 scenarios (10 seeds), the 109 mall tune
   walks and the 27 IPIN tune walks, and 1–2% faster.
 
 At 1e-9, 10 seeds, before → after (compute on one core, 2 seeds):
@@ -251,13 +253,15 @@ Held out, replayed once at 1e-9 (off → 1e-9, all walks pooled):
 Two demo walks on one core, off → 1e-12 → 1e-9 → 1e-6: the mall floor site1_F2 (160 s, 136,491 cells)
 replays in 49.6 → 3.4 → 2.4 → 2.3 s, the Nuremberg walk in 17.5 → 6.4 → 2.7 → 1.6 s.
 
-- **What got worse at 1e-9:** convergence on IPIN. The tune walks converge 9 s later in the mean and the
+- **What differed at 1e-9:** convergence on IPIN. The tune walks converge 9 s later in the mean and the
   scoring walks 42 s later (Nuremberg 100 → 163 s), and the scoring walks' pooled CEP95 is 11.85 → 13.24 m
   (UMinho 14.5 → 18.8 m). Nuremberg's CEP50 on the 4 tune walks is 2.85 → 2.99 m, with coverage95 at 18%
   instead of 22%. At 1e-12 the tune walks converge no later and Nuremberg's CEP50 is 2.89 m, at 2.4 times
-  the compute on its demo walk; the scoring walks were not replayed at 1e-12. Real Wi-Fi is where the tail
-  matters: the truth is often outside the heaviest cells. Two mall floors with one held-out walk each
-  are 0.6–0.9 m worse in the mean (site2_F2, site2_F4) and one is 1.1 m better (site2_F7).
+  the compute on its demo walk; the scoring walks were not replayed at 1e-12. Two mall floors with one
+  held-out walk each are 0.6–0.9 m worse in the mean (site2_F2, site2_F4) and one is 1.1 m better
+  (site2_F7). This entry first called the convergence "what got worse". Experiment 21 measured the noise
+  of these numbers: the 9 s on the tune walks is inside it. What was wrong with the background is there
+  too.
 - **Tried first:** background blocks that keep the prior device offset and a constant barometer
   likelihood. Simpler, and the mall walks were 0.5 m *better* in the mean with it than without a floor
   (10.65 against 11.16 m at 1e-9). Such a background responds less, and recovery mass costs on real Wi-Fi
@@ -266,6 +270,133 @@ replays in 49.6 → 3.4 → 2.4 → 2.3 s, the Nuremberg walk in 17.5 → 6.4 �
 - **Not done:** the default. It stays 0 until the floor has been tried on a phone and on the Kaggle walks.
   The first seconds of a walk still cost a full update per cell; there, `log10`, `exp` and `log` per
   (cell, reading) are what is left to cut.
+
+## 21. Does the active floor delay convergence on real Wi-Fi?
+
+Experiment 20 reported a later convergence on the IPIN buildings with `active_floor` 1e-9. Looked at on
+the 27 tune walks only.
+
+- **What the number is.** IPIN's ground truth is waypoints about 30 s apart, 10 to 28 per walk. Converged
+  (the error stays under 3 m for 10 s) is then the first waypoint under 3 m. The 9 s came from 2 of 27
+  walks: one waypoint at 2.90 → 3.05 m (+28 s), and one at 2.17 → 3.40 m before a gap of 164 s (+217 s).
+- **The noise of a comparison.** A replay is deterministic, but on these walks the filter amplifies small
+  differences. `datasets/fidelity.py` replays a manifest with two patches and compares the tracks (the
+  estimate every 0.2 s). Against the exact filter:
+
+| Run | Track apart, p50 / p95 [m] | Over 3 m apart | Converged [s] | Mean / CEP95 [m] |
+|---|---:|---:|---:|---:|
+| exact | - | - | 79.9 | 4.55 / 10.61 |
+| `rssi.sigma_db` 8 → 8.01 | 0.22 / 1.61 | 1.9% | 79.9 | 4.51 / 10.33 |
+| `teleport_rate_per_s` 1e-8 → 2e-8 | 0.22 / 1.63 | 2.2% | 86.6 (one walk +180 s) | 4.49 / 10.56 |
+| `step_length_rel_sigma` 0.2 → 0.201 | 0.21 / 1.64 | 2.1% | 71.8 (one walk -293 s) | 4.49 / 10.65 |
+| `heading_sigma_deg` 3 → 3.01 | 0.22 / 1.61 | 2.1% | 79.9 | 4.52 / 10.68 |
+| `active_floor` 1e-12, experiment 20 | 0.22 / 1.86 | 2.5% | 74.2 | 4.45 / 10.15 |
+| `active_floor` 1e-9, experiment 20 | 0.30 / 3.18 | 5.4% | 89.0 | 4.35 / 9.59 |
+
+  Mean convergence moves by -8 to +7 s when nothing has changed, so the floor's +9 s was not a result.
+  The 111 mall tune walks are steadier: the same change of the step noise puts the track 0.47 m apart at
+  p95 and over 3 m apart 0.3% of the time.
+- **What was real.** At 1e-9 the track was over 3 m from the exact filter's 5.4% of the time, against 2%
+  for a change in a setting's third digit: 848 s in 398 episodes, 18 of them of 10 s or more, where the
+  noise has 279 s in 254 episodes and one that long. For those episodes the filter was following another
+  hypothesis than the exact one.
+- **Where it came from.** With parts switched off in both filters (8 walks), the device offsets, the
+  recovery mass and the estimate on the map each left the gap as it was. The width of the ring of active
+  blocks did not: 3.0–3.2 m at p95 with a 4 m ring, 2.1–2.3 m with an 8 m ring, whatever the block size.
+  So it was mass just under the floor, and what the background did to it:
+  - It had no heading. A cell learns the heading at its first magnetometer update and agrees with the
+    later ones; the background took the mean over all headings at every step. In a unit test of 20
+    steps with a compass it held a sixth of the mass the same cells hold in the exact filter. Mass that
+    became active again started with any heading.
+  - It did not move. A hypothesis folded into a block stayed where it was folded while the walker went on.
+- **Change:** a background block has a heading row and the centroid of its mass
+  ([design.md](design.md#the-active-set)). The magnetometer updates the row as a cell's; a step moves the
+  mass as a whole by the row's mean move, into the next block or into the cell it lands in; cells of a
+  block that becomes active get the row. A radio update scores the block at the centroid.
+- **Tried and removed**, each on the 27 walks at 1e-9 (p95 apart, share over 3 m; before: 3.18 m, 5.4%):
+  - Moves from active cells into the background added to the block instead of dropped: 3.19 m, 5.4%.
+  - A block made active before the scan that lifts it is applied, so that its cells read that scan
+    themselves: 3.13 m, 5.3% at the activation threshold, 3.04 m, 5.1% at the floor itself.
+  - On top of the change, the spread of a block's mass, to bring it back around its centroid and not
+    evenly: 2.20–2.22 m and 3.1%, against 2.25–2.32 m and 3.3–3.5% without. No more than the options
+    above moved it when switched on and off next to the change (2.27–2.36 m).
+  - Background mass that walks through walls, or stays in front of them: 2.31 and 2.42 m against 2.32 m.
+    The wall test stayed, because cells have it.
+
+At 1e-9, exact → experiment 20 → now:
+
+| | Exact | Experiment 20 | Now |
+|---|---:|---:|---:|
+| 27 IPIN tune walks: track apart from exact, p50 / p95 [m] | - | 0.30 / 3.18 | 0.27 / 2.32 |
+| ... over 3 m apart; seconds in episodes; episodes of 10 s or more | - | 5.4%; 848; 18 | 3.4%; 523; 4 |
+| ... mean / CEP50 / CEP95 [m] | 4.55 / 3.56 / 10.61 | 4.35 / 3.57 / 9.59 | 4.57 / 3.59 / 10.62 |
+| ... converged [s] | 79.9 | 89.0 | 83.2 |
+| 111 mall tune walks: track apart, p95 [m]; over 3 m apart | - | 1.01; 2.1% | 0.90; 1.0% |
+| 109 mall tune walks, pooled: mean / CEP50 / CEP95 [m] | 11.16 / 10.62 / 16.24 | 11.05 / 10.58 / 16.21 | 11.25 / 10.69 / 16.30 |
+| 12 scenarios, 10 seeds: mean CEP50 / CEP95 [m] | 0.656 / 1.827 | 0.654 / 1.828 | 0.653 / 1.827 |
+| 12 scenarios, one core [µs/update] | 108–1897 | 30–80 | 30–84 |
+| Mall floor site1_F2, 160 s walk, replay [s] | 48.5 | 2.29 | 2.75 |
+| Nuremberg demo walk, replay [s] | 17.4 | 2.52 | 3.36 |
+
+Held out, replayed once with the final code at 1e-9 (all walks pooled):
+
+| | Exact | Experiment 20 | Now |
+|---|---:|---:|---:|
+| 109 mall walks: mean / CEP50 / CEP95 [m] | 10.75 / 10.79 / 14.40 | 10.71 / 10.73 / 14.34 | 10.77 / 10.80 / 14.44 |
+| ... converged [s] | 24.4 | 26.0 | 24.4 |
+| 6 IPIN scoring walks: mean / CEP50 / CEP95 [m] | 5.15 / 4.15 / 11.85 | 5.17 / 4.00 / 13.24 | 5.13 / 3.94 / 12.11 |
+| ... converged [s] | 78.2 | 120.5 | 120.5 |
+
+- **Off (the default at the time):** results identical to before on the 12 scenarios (10 seeds), the 109 mall tune
+  walks and the 27 IPIN tune walks.
+- **What it follows now.** The exact filter, not a better number: experiment 20's lower CEP95 on the IPIN
+  tune walks (9.59 m) was a difference from the exact filter, and is gone with it.
+- **What is left.** The track is still over 3 m apart 3.4% of the time where the noise is at 2%, and 1.0%
+  against 0.3% on the mall walks. At 1e-12 the IPIN tune walks are at the noise (1.85 m at p95, 2.5%), for
+  6.7 s on the Nuremberg walk. The scoring walks' convergence did not move (Nuremberg 100 → 163 s over 4
+  walks, a sum of 252 s). On the tune walks single walks move by 180 to 293 s without a real change, but
+  the scoring walks' own noise was not measured: they are replayed once. One mall floor where nothing
+  localises (site2_F7, 3 walks, 34 m mean error) went the other way: 34.3 → 31.4 → 37.4 m.
+- **Cost.** On the Nuremberg walk the active set is larger (3,817 → 5,138 cells in the mean): the
+  background weighs more, so more blocks pass the threshold. On the mall floor it is the same size (2,638
+  → 2,676) and the extra time is the work on the blocks themselves, which was not profiled further.
+- **For the next comparison on real walks:** run a change in a setting's third digit through
+  `datasets/fidelity.py` first. A difference that is no larger is not a result.
+
+## 22. The active floor becomes the default
+
+`filter.active_floor` is 1e-9 by default, on every venue. This is a decision on the numbers of experiment
+21, not the outcome of a new experiment. What the default was checked against:
+
+- **The gates.** The three baselines in `tests/regression/` pass unchanged.
+- **Simulated scenarios** (10 seeds, one core): mean CEP50 0.657 → 0.654 m, CEP95 1.827 → 1.827 m, and
+  107–1,935 → 31–74 µs per sensor update. Three scenarios' CEP50 moved by 0.01 to 0.02 m; right floor,
+  convergence and jitter are the same.
+- **Held-out walks**, replayed with the exact filter and with the default to report; nothing was chosen on
+  them:
+
+| Held-out walks | Exact | Default |
+|---|---:|---:|
+| 109 mall walks, `msil_wifi.json`: median CEP50 / CEP95 [m] | 6.76 / 9.41 | 6.75 / 9.41 |
+| ... mean CEP50 / CEP95 [m] | 10.79 / 14.40 | 10.80 / 14.44 |
+| 109 mall walks, `fingerprint.json`: median CEP50 / CEP95 [m] | 5.18 / 8.94 | 5.18 / 8.94 |
+| ... mean CEP50 / CEP95 [m] | 7.35 / 10.63 | 7.29 / 10.63 |
+| 6 IPIN scoring trials, `fingerprint.json`: competition metric [m] | 6.58, 5.14, 8.63, 4.97, 7.71, 6.82 | 6.79, 5.24, 9.23, 5.48, 7.57, 6.57 |
+| ... median CEP50 / CEP95 [m] | 4.01 / 14.68 | 4.02 / 14.79 |
+| ... right floor | 96% | 96% |
+
+- **A claim that changed.** The best 2023 trial in Nuremberg scores 5.5 m, not 5.0 m: behind that year's
+  winner (5.3 m), where the exact filter is ahead of it. [datasets.md](datasets.md) now quotes the
+  default's numbers for the scoring trials. Whether 0.5 m on one trial is more than noise was not
+  measured: the six trials were not replayed with a setting changed in its third digit.
+- **Where the localisation is poor, the two filters part further.** With `ipin.json` (no position
+  fingerprints, errors of 10 to 25 m) the six trials score 11.9, 8.1, 16.5, 19.0, 14.8 and 27.4 m exact
+  and 11.2, 11.1, 17.5, 13.2, 19.5 and 25.9 m with the default: single trials move by up to 6 m in both
+  directions, the median from 15.6 to 15.3 m. (Neither is the `ipin.json` column of datasets.md, which
+  is from an earlier conversion and was not reproduced.)
+- **Not repeated with the default:** the Kaggle held-out table and the submission (made with the exact
+  filter), the demo-walk table in datasets.md, the timing in WebAssembly, and a phone.
+- `active_floor` 0 is the exact filter, as before.
 
 ## Open questions
 

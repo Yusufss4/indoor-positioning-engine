@@ -4,9 +4,9 @@ What the engine is measured on, how each dataset becomes venues and traces, and 
 
 | Dataset | What it is | Result | Gate in CTest |
 |---|---|---|---|
-| [Simulated scenarios](#simulated-scenarios) | 12 walks through three hand-drawn venues and one OpenStreetMap building, 10 seeds each | mean CEP50 0.66 m, CEP95 1.83 m | `accuracy_regression` |
+| [Simulated scenarios](#simulated-scenarios) | 12 walks through three hand-drawn venues and one OpenStreetMap building, 10 seeds each | mean CEP50 0.65 m, CEP95 1.83 m | `accuracy_regression` |
 | [Microsoft Indoor Location sample](#microsoft-indoor-location-sample) | 2 malls, 14 floors, phone IMU + Wi-Fi, 109 held-out walks | median CEP50 5.2 m, CEP95 8.9 m | `real_data_regression` |
-| [IPIN Track 3](#ipin-track-3) | 2 buildings, 3 floors each, stairs, barometer, 6 competition scoring walks | 5.0–8.6 m competition metric (winners: 5.3, 7.9, 30.1 m) | `ipin_regression` |
+| [IPIN Track 3](#ipin-track-3) | 2 buildings, 3 floors each, stairs, barometer, 6 competition scoring walks | 5.2–9.2 m competition metric (winners: 5.3, 7.9, 30.1 m) | `ipin_regression` |
 | [Kaggle Indoor Location & Navigation](#kaggle-indoor-location--navigation) | 24 test buildings of 204, 626 test walks scored by Kaggle | 5.30 m private score (winner: 1.50 m) | none: the data may not be redistributed |
 
 The real datasets are downloaded by `datasets/*/fetch.sh` and are not in the repository. The two real-data
@@ -22,6 +22,11 @@ gates are skipped until the data is converted.
   3–40 scored points; medians over walks are the headline numbers.
 - **Tune and held-out.** Every dataset's converter writes `manifest_tune.json` and `manifest_holdout.json`.
   Settings are chosen on the tune walks only; the held-out walks are replayed once to report.
+- **The active floor.** The engine updates only where the mass is (`filter.active_floor` 1e-9, the
+  default since [experiment 22](history.md#22-the-active-floor-becomes-the-default)). The simulated
+  scenarios, the malls' held-out results and the IPIN `fingerprint.json` results below are measured with
+  it. The demo-walk table, the IPIN `ipin.json` column and everything about Kaggle were measured with the
+  exact filter (`active_floor` 0) and not repeated.
 - **Smoothness** is reported with accuracy: `jitter_p95_m`, `jumps_per_min`, `level_flips` and
   `wall_crossings_per_min` ([formats.md](formats.md#replay-outputs)).
 - **Competition metrics** (`datasets/evaluate.py`): IPIN's 75th percentile of the error plus 15 m per
@@ -42,12 +47,12 @@ compute is [results.md](results.md).
 | office_mag_disturbance | magnetic anomalies, gyro bias | 0.94 / 2.65 | |
 | office_field_issue | 2 dead beacons, 1 installed 16 m off | 0.56 / 1.68 | |
 | office_step_scale | walker's step 17% shorter than modelled | 0.78 / 1.77 | |
-| airport_hall_sparse | 80 x 40 m hall, beacons 20 m apart, 35% packet loss | 1.01 / 3.76 | |
+| airport_hall_sparse | 80 x 40 m hall, beacons 20 m apart, 35% packet loss | 1.00 / 3.76 | |
 | office_stairs_up_down | stairs up, tour, stairs down | 0.58 / 1.63 | 99.1% |
 | office_elevator | lift rides: no steps, only pressure changes | 0.54 / 1.28 | 99.0% |
-| office_floor_bleed | slab loses 4 dB (the map says 15): beacons below look close | 0.68 / 1.50 | 97.9% |
+| office_floor_bleed | slab loses 4 dB (the map says 15): beacons below look close | 0.66 / 1.50 | 97.9% |
 | baro_drift_long | weather trend -6 hPa/h, phone barometer 2.5 hPa off | 0.54 / 1.42 | 99.2% |
-| kit_tour | 7-floor university building from OpenStreetMap, 5 stairwells, 3 lifts | 0.65 / 2.67 | 99.0% |
+| kit_tour | 7-floor university building from OpenStreetMap, 5 stairwells, 3 lifts | 0.64 / 2.67 | 99.0% |
 
 ![CEP95 per scenario](img/benchmark_cep95.png)
 
@@ -88,7 +93,7 @@ tune half and a held-out half (111 each, 109 longer than the warm-up).
 | Config | Median CEP50 / CEP95 [m] | Mean CEP50 / CEP95 [m] |
 |---|---|---|
 | [`msil_wifi.json`](../data/configs/msil_wifi.json): log-distance radio model | 6.8 / 9.4 | 10.8 / 14.4 |
-| [`fingerprint.json`](../data/configs/fingerprint.json): plus the training scans as position fingerprints | **5.2 / 8.9** | 7.4 / 10.6 |
+| [`fingerprint.json`](../data/configs/fingerprint.json): plus the training scans as position fingerprints | **5.2 / 8.9** | 7.3 / 10.6 |
 
 - Real errors are about ten times the simulated office's.
 - `tests/regression/msil_baseline.json` gates the first row (venues from `--wifi --scans`).
@@ -153,20 +158,23 @@ with settings chosen on the validation walks.
 
 | Trial | Phone | `ipin.json`: radio model and floor vote | `fingerprint.json`: plus position fingerprints |
 |---|---|---:|---:|
-| Nuremberg 2024 #1 | Galaxy A5 2017 | 35.4 / 70% | **6.6 / 97%** |
-| Nuremberg 2024 #2 | Galaxy S7 | 12.2 / 87% | **5.1 / 96%** |
-| Nuremberg 2023 #1 | Galaxy A5 2017 | 13.7 / 84% | **8.6 / 94%** |
-| Nuremberg 2023 #2 | Galaxy S7 | 22.3 / 81% | **5.0 / 96%** |
-| UMinho 2022 #12 | Galaxy A31, no barometer | 24.4 / 82% | **7.7 / 95%** |
-| UMinho 2022 #13 | Galaxy A5 2017 | 25.7 / 85% | **6.8 / 97%** |
+| Nuremberg 2024 #1 | Galaxy A5 2017 | 35.4 / 70% | **6.8 / 97%** |
+| Nuremberg 2024 #2 | Galaxy S7 | 12.2 / 87% | **5.2 / 96%** |
+| Nuremberg 2023 #1 | Galaxy A5 2017 | 13.7 / 84% | **9.2 / 94%** |
+| Nuremberg 2023 #2 | Galaxy S7 | 22.3 / 81% | **5.5 / 96%** |
+| UMinho 2022 #12 | Galaxy A31, no barometer | 24.4 / 82% | **7.6 / 95%** |
+| UMinho 2022 #13 | Galaxy A5 2017 | 25.7 / 85% | **6.6 / 97%** |
 
 | Building, `fingerprint.json` | Median CEP50 / CEP95 [m] | Floor right | Jitter p95, jumps a minute | Floor flips per walk (6 real changes) |
 |---|---|---|---|---|
-| Nuremberg, 4 trials | 3.6 / 12.8 | 96% | 0.48 m, 1.2 | 11.5 |
-| UMinho, 2 trials | 4.7 / 15.6 | 96% | 0.84 m, 4.1 | 22.5 |
+| Nuremberg, 4 trials | 3.7 / 14.0 | 96% | 0.48 m, 1.1 | 11.5 |
+| UMinho, 2 trials | 4.4 / 15.5 | 96% | 0.84 m, 4.3 | 21.5 |
 
-- The validation walks say the same with more data: 27 walks, competition metric 5.3 m (Nuremberg, floor
-  right 100%) and 7.7 m (UMinho, 94%).
+- With the exact filter (`active_floor` 0) the six trials score 6.6, 5.1, 8.6, 5.0, 7.7 and 6.8 m: four
+  are 0.1 to 0.6 m worse with the default and two 0.1 to 0.3 m better. Whether that is more than a setting
+  changed in its third digit does was not measured on these walks ([history.md](history.md), experiment 22).
+- The validation walks say the same with more data: 27 walks, competition metric 5.2 m (Nuremberg, floor
+  right 100%) and 8.3 m (UMinho, 94%).
 - `tests/regression/ipin_baseline.json` gates the six scoring walks with `fingerprint.json`.
 - The reported floor changes far more often than the walker does, and the 95% ellipse holds the truth for
   16–21% of the fixes.
@@ -219,9 +227,9 @@ which adds 24 building groups to the menu of a locally built demo.
 
 | Competition | Winner | Podium | Engine |
 |---|---:|---|---:|
-| IPIN 2024 Track 3, Nuremberg | 7.9 m | 10.1, 29.7 m | **5.1 m** |
-| IPIN 2023 Track 3, Nuremberg | 5.3 m | 6.3, 7.7 m | **5.0 m** |
-| IPIN 2022 Track 3, UMinho | 30.1 m | 39.8 m, then over 45 m | **6.8 m** |
+| IPIN 2024 Track 3, Nuremberg | 7.9 m | 10.1, 29.7 m | **5.2 m** |
+| IPIN 2023 Track 3, Nuremberg | 5.3 m | 6.3, 7.7 m | 5.5 m |
+| IPIN 2022 Track 3, UMinho | 30.1 m | 39.8 m, then over 45 m | **6.6 m** |
 | Kaggle 2021, private leaderboard | 1.50 m | 2.20, 2.49 m | 5.30 m |
 
 Sources: the IPIN results pages of [2022](https://evaal.isti.cnr.it/2022/results),
@@ -292,4 +300,7 @@ datasets/kaggle/fetch.sh
 
 `datasets/evaluate.py` prints, per walk and per group, CEP50/CEP95, the floor hit rate, the IPIN metric and
 the Kaggle metric. `--two-pass`, `--fill` and `--snap` are the offline steps; without them every number is
-causal. To add a dataset of your own, see [extending.md](extending.md#a-dataset).
+causal. `datasets/fidelity.py` replays a manifest with two patches and prints how far apart the two tracks
+are: how closely an approximation follows the exact filter, or, with a setting changed in its third
+digit, how much of a difference between two configurations is noise ([history.md](history.md),
+experiment 21). To add a dataset of your own, see [extending.md](extending.md#a-dataset).

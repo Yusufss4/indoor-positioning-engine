@@ -152,7 +152,7 @@ bin exactly; only the 3° per step process noise moves mass between bins.
 
 ### The active set
 
-`active_floor`, off by default. After the first seconds nearly all of the mass sits in a few hundred cells,
+`active_floor`, 1e-9 by default. After the first seconds nearly all of the mass sits in a few hundred cells,
 and the rest of the venue holds recovery mass: about 1e-8 of the probability, spread over every other
 cell. With an active floor the filter does its full work only where the mass is.
 
@@ -160,19 +160,32 @@ cell. With an active floor the filter does its full work only where the mass is.
   cell's mass, or when it is next to such a block. Its cells are updated exactly as above. The ring of
   neighbours means that mass above the floor never steps, or changes level, into a block that is not
   active.
-- **Background blocks.** Every other block is one coarse cell: one mass, taken as spread evenly over its
-  cells, and one device offset and one barometer offset. It has no heading and steps do not move it. A
-  radio update scores it once, at the block's centre, through the walls of the cell nearest to that
-  centre; a barometer update scores it against its level; the magnetometer gives it the mean of the
-  heading likelihood; recovery mass is added to it as to cells. It shares the normalisation with the
-  cells, so a region the radio starts to favour grows as recovery mass would.
+- **Background blocks.** Every other block is one coarse cell: one mass with its centroid, one heading
+  row, one device offset and one barometer offset. Each update treats it as it treats a cell:
+  - a radio update scores it once, at the centroid, through the walls of the cell nearest to the block's
+    centre, and a barometer update scores it against its level;
+  - the magnetometer reweights its heading row and its mass;
+  - a step moves its mass as a whole, by the mean move of its heading row. Within the block the centroid
+    moves. Across the edge the mass joins the next block, or the cell it lands in when that block is
+    active. A move through a wall or off the map ends it, as it ends a cell's;
+  - recovery mass is added to it as to cells.
+
+  It shares the normalisation with the cells, so a region the radio starts to favour grows as it would
+  cell by cell.
 - **Changing sides.** A background block whose mass per cell reaches 16 times the floor becomes active:
-  its cells get that mass at their centres with any heading and the block's offsets. An active block with
-  nothing above the floor in it or next to it is folded: its mass is summed and its offsets are those of
-  its cells' mass. The gap between the two thresholds keeps a block from changing sides at every update.
-- **What is approximate.** Mass under the floor loses its place within the block, its heading and its
-  motion. A position fix is scored on every cell (every block is made active first), because a fix can
-  be narrower than a block.
+  its cells get that mass evenly, at their centres, with the block's heading row and offsets. An active
+  block with nothing above the floor in it or next to it is folded: its mass is summed, and its centroid,
+  heading row and offsets are those of its cells' mass. The gap between the two thresholds keeps a block
+  from changing sides at every update.
+- **Why a block has a heading.** A cell learns the heading at its first magnetometer update and agrees
+  with every later one. Mass without a heading is cut again at every step: in a unit test of 20 steps with
+  a compass, such a background held a sixth of the mass the same cells hold in the exact filter
+  (experiment 21).
+- **What is approximate.** Mass under the floor is one point per block: it loses its shape within the
+  block, and what differs between its cells in heading and offsets. Moves from active cells into a
+  background block are dropped, as if a wall stood there, and background mass does not change level. A
+  position fix is scored on every cell (every block is made active first), because a fix can be narrower
+  than a block.
 - Cells in a background block read as mass 0 (`GridFilter::mass()`); `active_cells()` lists the others and
   `background_mass()` is what the blocks hold. The filter stays deterministic: the active cells are kept
   in index order, the order every sum is taken in with the floor off.
@@ -217,18 +230,20 @@ Per step and per magnetometer update: O(cells × heading bins). Per radio readin
 8 bytes per (cell, heading bin) plus about 120 bytes per cell. A 960 m² office has 3,840 cells; the KIT
 building 60,351 on 7 floors; a mall floor up to 200,000.
 
-Replay on one desktop core (Ryzen 7 5800H): the simulated scenarios take 0.1–2 ms per sensor update
-([results.md](results.md)); a mall walk takes a third to a half of its duration, more on the
-largest floors with many access points. In WebAssembly the mall recordings take 0.5–1.2 of their duration,
-so the demo's playback can wait for the engine. About half of that is the step loop; most of the rest is
-`log10`, `exp` and `log` for every (cell, reading).
+That is the exact filter (`active_floor` 0). Replayed on one desktop core (Ryzen 7 5800H) it takes 0.1–2 ms
+per sensor update on the simulated scenarios and a third to a half of a mall walk's duration, more on the
+largest floors with many access points; in WebAssembly 0.5–1.2 of a mall recording's duration. About half
+of that is the step loop; most of the rest is `log10`, `exp` and `log` for every (cell, reading).
 
-With an [active set](#the-active-set) the cost follows the mass, not the venue: O(active cells) per update
-plus O(blocks) for the background. At `active_floor` 1e-9, on the same core, the simulated scenarios take
-0.03–0.08 ms per sensor update (3 to 24 times less; `kit_tour` 1.93 → 0.08 ms) and a 160 s mall walk on
-136,491 cells replays in 2.4 s instead of 50 s. The first seconds, until the posterior has concentrated,
-cost what they cost without it. The accuracy is in [history.md](history.md) (experiment 20): unchanged
-on the simulated walks and the mall walks, a later convergence on the IPIN buildings.
+With the [active set](#the-active-set), the default, the cost follows the mass, not the venue: O(active
+cells) per update plus O(blocks x heading bins) for the background. On the same core the simulated
+scenarios take 0.03–0.08 ms per sensor update ([results.md](results.md); 3 to 23 times less, `kit_tour`
+1.90 → 0.08 ms) and a 160 s mall walk on 136,491 cells replays in 2.8 s instead of 48 s. The first
+seconds, until the posterior has concentrated, cost what the exact filter costs. In WebAssembly it has not
+been timed. The accuracy is in [history.md](history.md) (experiments 20 to 22): unchanged on the simulated
+walks, and on real Wi-Fi the mean, CEP50 and CEP95 of the exact filter to within 0.3 m, with the track
+itself more than 3 m away from the exact filter's 1.0% (malls) to 3.4% (IPIN) of the time, where a setting
+changed in its third digit gives 0.3% and 2%.
 
 ## Floors
 
@@ -292,9 +307,10 @@ the generator.
   ride, slowly.
 - **Floors are flat slabs.** Atriums and ramps between half-levels are not modelled.
 - **Step length** has no per-user scale state; a wider along-track noise stands in for it.
-- **Compute.** By default the filter touches every cell at every update. `active_floor` restricts it to
-  where the mass is; it is off until it has been tried on more than the walks of experiment 20, and on a
-  phone.
+- **The active set is an approximation.** By default the filter does its full work only where the mass is
+  (`active_floor` 1e-9). On real Wi-Fi the track differs from the exact filter's by more than a trivially
+  changed setting makes it differ (experiment 21), and it has not been tried on a phone. `active_floor` 0
+  is the exact filter, at 3 to 23 times the compute.
 - **Room events are only as good as the position.** In the malls (5–7 m typical error) rooms smaller than
   the error are not detectable; the malls' room events are a demo of the plumbing, not a result.
 - **Offline use.** Competitions scored offline reward whole-walk optimisation. The two-pass replay in

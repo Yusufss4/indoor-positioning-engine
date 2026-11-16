@@ -88,7 +88,7 @@ apply_cell_loglik(t);                                 // multiply the masses, no
 The cells to visit are `active_`: every cell, or with `filter.active_floor` those of the blocks near the
 mass ([design.md](design.md#the-active-set)). Never loop over `0..map_->size()` in an update. With an
 active floor (`sparse_`) each term also adds to `block_loglik_[block]` for every background block with
-mass (`bg_mass_[block] > 0`), evaluated at `map_->block_centre(block)` on `map_->block_level(block)`;
+mass (`bg_mass_[block] > 0`), evaluated at the block's centroid `bg_pos(block)` on `map_->block_level(block)`;
 `apply_cell_loglik` applies both with one normalisation. A term that is too narrow to score once per 4 m
 block calls `activate_all()` first, as the position fix does.
 

@@ -40,7 +40,7 @@ void GridFilter::add_fingerprint_loglik() {
   }
   for (std::size_t b = 0; b < blocks; ++b) {
     if (!(bg_mass_[b] > 0.0)) continue;
-    const Vec2 p = map_->block_centre(b);
+    const Vec2 p = bg_pos(b);
     block_loglik_[b] += term(p.x, p.y, map_->block_level(b));
   }
 }

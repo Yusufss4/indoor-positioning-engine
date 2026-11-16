@@ -32,6 +32,17 @@ void GridFilter::on_step(const StepEvent& step) {
     }
     for (std::size_t i = 0; i < row; ++i) hc[i] = static_cast<float>(row_[i]);
   }
+  const std::size_t n = map_->size();
+  const std::size_t blocks = sparse_ ? map_->block_count() : 0;
+  for (std::size_t b = 0; b < blocks; ++b) {
+    if (!(bg_mass_[b] > 0.0)) continue;
+    float* hb = &bg_h_[b * row];
+    for (int k = 0; k < bins_; ++k) {
+      const int lo = k == 0 ? bins_ - 1 : k - 1, hi = k + 1 == bins_ ? 0 : k + 1;
+      row_[static_cast<std::size_t>(k)] = (1.0 - 2.0 * a) * hb[k] + a * (hb[lo] + hb[hi]);
+    }
+    for (std::size_t i = 0; i < row; ++i) hb[i] = static_cast<float>(row_[i]);
+  }
 
   // Moves per (heading, node): along-track 3-point Gauss-Hermite nodes L +- sqrt(3) sigma, weighted
   // 1/6, 2/3, 1/6, which match the mean and variance of the length noise. In metres and in lattice units.
@@ -55,6 +66,10 @@ void GridFilter::on_step(const StepEvent& step) {
   for (const std::uint32_t c : active_) {
     acc_[c] = StepAcc{};
     touched_[c] = 0;
+  }
+  for (std::size_t b = 0; b < blocks; ++b) {
+    acc_[n + b] = StepAcc{};
+    touched_[n + b] = 0;
   }
   const int radius = map_->radius();
   const int side = 2 * radius + 1;
@@ -194,6 +209,7 @@ void GridFilter::on_step(const StepEvent& step) {
       }
     }
   }
+  if (sparse_) move_background();
   step_motion_ = w_level > 0.0 ? move_level * (1.0 / w_level) : w_all > 0.0 ? move_all * (1.0 / w_all) : Vec2{};
 
   for (const std::uint32_t c : active_) {
@@ -220,11 +236,101 @@ void GridFilter::on_step(const StepEvent& step) {
     float* hc = &h_[c * row];
     for (std::size_t i = 0; i < row; ++i) hc[i] = static_cast<float>(hn[i] * inv);
   }
+  if (sparse_) settle_background();
   if (multi_level_) change_levels(cfg_.level_change_prob_step);
   normalize();
   maybe_teleport(step.t);
   update_heading(cloud_.level);
   update_estimate(step.t);
+}
+
+/// The background's step. A block's mass moves as one, by the mean move of its heading row: within the block
+/// its centroid moves, into another background block it goes whole, into an active block it goes to the cell
+/// there. A move through a wall or off the map ends it, as it ends a cell's.
+void GridFilter::move_background() {
+  const std::size_t n = map_->size();
+  const auto row = static_cast<std::size_t>(bins_);
+  const int radius = map_->radius();
+  for (std::size_t b = 0; b < bg_mass_.size(); ++b) {
+    const double m = bg_mass_[b];
+    if (!(m > 0.0)) continue;
+    const float* hb = &bg_h_[b * row];
+    double mx = 0.0, my = 0.0;
+    for (std::size_t k = 0; k < row; ++k) {
+      mx += hb[k] * move_x_[k * 3 + 1];
+      my += hb[k] * move_y_[k * 3 + 1];
+    }
+    const int level = map_->block_level(b);
+    const Vec2 to{bg_x_[b] + mx, bg_y_[b] + my};
+    const std::int32_t cell_to = map_->locate(to, level);
+    bool open = cell_to >= 0;
+    const std::int32_t cell_from = map_->locate({bg_x_[b], bg_y_[b]}, level);
+    if (open && cell_from >= 0 && cell_from != cell_to) {
+      const GridMap::Cell& from = map_->cell(static_cast<std::size_t>(cell_from));
+      const GridMap::Cell& target = map_->cell(static_cast<std::size_t>(cell_to));
+      const int dx = target.ix - from.ix, dy = target.iy - from.iy;
+      open = std::abs(dx) <= radius && std::abs(dy) <= radius && GridMap::test(from, map_->bit(dx, dy));
+    }
+    if (!open) {
+      bg_mass_[b] = 0.0;
+      continue;
+    }
+    const auto ct = static_cast<std::size_t>(cell_to);
+    const std::size_t block_to = map_->block_of(ct);
+    if (block_to == b) {
+      bg_x_[b] = to.x;
+      bg_y_[b] = to.y;
+      continue;
+    }
+    const std::size_t t = cell_active_[ct] != 0 ? ct : n + block_to;
+    float* hn = &h_next_[t * row];
+    if (touched_[t] == 0) {
+      touched_[t] = 1;
+      std::fill_n(hn, row, 0.0F);
+    }
+    for (std::size_t k = 0; k < row; ++k) hn[k] += static_cast<float>(m * hb[k]);
+    StepAcc& in = acc_[t];
+    in.mass += m;
+    in.x += m * to.x;
+    in.y += m * to.y;
+    in.d1 += m * bg_dev_mu_[b];
+    in.d2 += m * (bg_dev_var_[b] + bg_dev_mu_[b] * bg_dev_mu_[b]);
+    in.b1 += m * bg_baro_mu_[b];
+    in.b2 += m * (bg_baro_var_[b] + bg_baro_mu_[b] * bg_baro_mu_[b]);
+    bg_mass_[b] = 0.0;
+  }
+}
+
+/// What moved into a background block joins the mass it holds, moment-matched.
+void GridFilter::settle_background() {
+  const std::size_t n = map_->size();
+  const auto row = static_cast<std::size_t>(bins_);
+  for (std::size_t b = 0; b < bg_mass_.size(); ++b) {
+    const StepAcc& in = acc_[n + b];
+    if (touched_[n + b] == 0 || !(in.mass > 0.0)) continue;
+    const double m0 = bg_mass_[b], m = m0 + in.mass;
+    bg_x_[b] = (m0 * bg_x_[b] + in.x) / m;
+    bg_y_[b] = (m0 * bg_y_[b] + in.y) / m;
+    const double d1 = m0 * bg_dev_mu_[b] + in.d1;
+    const double d2 = m0 * (bg_dev_var_[b] + bg_dev_mu_[b] * bg_dev_mu_[b]) + in.d2;
+    const double b1 = m0 * bg_baro_mu_[b] + in.b1;
+    const double b2 = m0 * (bg_baro_var_[b] + bg_baro_mu_[b] * bg_baro_mu_[b]) + in.b2;
+    bg_dev_mu_[b] = d1 / m;
+    bg_dev_var_[b] = cfg_.estimate_rssi_offset ? std::max(d2 / m - bg_dev_mu_[b] * bg_dev_mu_[b], kMinVar) : 0.0;
+    bg_baro_mu_[b] = b1 / m;
+    bg_baro_var_[b] = std::max(b2 / m - bg_baro_mu_[b] * bg_baro_mu_[b], kMinVar);
+    const float* hn = &h_next_[(n + b) * row];
+    float* hb = &bg_h_[b * row];
+    double sum = 0.0;
+    for (std::size_t i = 0; i < row; ++i) {
+      row_[i] = m0 * hb[i] + hn[i];
+      sum += row_[i];
+    }
+    for (std::size_t i = 0; i < row; ++i) {
+      hb[i] = sum > 0.0 ? static_cast<float>(row_[i] / sum) : static_cast<float>(1.0 / bins_);
+    }
+    bg_mass_[b] = m;
+  }
 }
 
 void GridFilter::on_heading(double t, double heading, double sigma) {
@@ -250,11 +356,20 @@ void GridFilter::on_heading(double t, double heading, double sigma) {
     mass_[c] *= sum;
   }
   if (sparse_) {
-    // The background has any heading: its mass gets the likelihood's mean over the bins.
-    double mean = 0.0;
-    for (std::size_t i = 0; i < row; ++i) mean += bin_lik_[i];
-    mean /= static_cast<double>(row);
-    for (double& bg : bg_mass_) bg *= mean;
+    // A background block's heading row is updated as a cell's.
+    for (std::size_t b = 0; b < bg_mass_.size(); ++b) {
+      if (!(bg_mass_[b] > 0.0)) continue;
+      float* hb = &bg_h_[b * row];
+      double sum = 0.0;
+      for (std::size_t i = 0; i < row; ++i) sum += hb[i] * bin_lik_[i];
+      if (sum <= 0.0) {
+        bg_mass_[b] = 0.0;
+        continue;
+      }
+      const double inv = 1.0 / sum;
+      for (std::size_t i = 0; i < row; ++i) hb[i] = static_cast<float>(hb[i] * bin_lik_[i] * inv);
+      bg_mass_[b] *= sum;
+    }
   }
   normalize();
   maybe_teleport(t);
