@@ -1,10 +1,13 @@
-"""Writing ipe traces (docs/formats.md) and trace manifests."""
+"""Writing and reading ipe traces (docs/formats.md), and trace manifests."""
 
 from __future__ import annotations
 
 import json
 import zlib
+from dataclasses import dataclass, field
 from pathlib import Path
+
+import numpy as np
 
 
 class TraceWriter:
@@ -54,3 +57,56 @@ def write_manifests(out: Path, entries: list[dict], tune: list[dict] | None = No
         tune, holdout = split_by_hash(entries)
     for name, subset in [("manifest", entries), ("manifest_tune", tune), ("manifest_holdout", holdout)]:
         (out / f"{name}.json").write_text(json.dumps({"traces": subset}, indent=1))
+
+
+@dataclass
+class RadioWalk:
+    """What a trace says about radio and truth: the part a radio map is fitted from."""
+    path: Path
+    readings: list = field(default_factory=list)  # (t, id, dBm, scan); scan 0 is a lone packet
+    gt: np.ndarray = field(default_factory=lambda: np.zeros((0, 4)))  # t, x, y, level index
+    imu_rows: int = 0
+
+
+def read_walk(path: Path) -> RadioWalk:
+    """The `ble` and `gt` rows of a trace. A `gt` row without a level (single-floor traces) is on
+    level index 0."""
+    walk = RadioWalk(Path(path))
+    gt = []
+    with open(path, encoding="utf-8") as f:
+        for n, line in enumerate(f, start=1):
+            line = line.strip()
+            if not line or line[0] == "#":
+                continue
+            c = line.split(",")
+            try:
+                if c[0] == "ble":
+                    walk.readings.append((float(c[1]), c[2], float(c[3]), int(c[4]) if len(c) > 4 else 0))
+                elif c[0] == "gt":
+                    gt.append((float(c[1]), float(c[2]), float(c[3]), int(c[5]) if len(c) > 5 else 0))
+                elif c[0] == "imu":
+                    walk.imu_rows += 1
+            except (ValueError, IndexError) as e:
+                raise ValueError(f"{path}:{n}: {line!r}") from e
+    walk.gt = np.array(sorted(gt)) if gt else np.zeros((0, 4))
+    return walk
+
+
+def interp_same_level(gt: np.ndarray, t: np.ndarray):
+    """Position at times t by linear interpolation between consecutive landmarks on the same floor;
+    mask is False elsewhere (before the first, after the last, or across a floor change).
+    `gt` rows are (t, x, y, level); returns (xy, level, mask)."""
+    xy = np.full((len(t), 2), np.nan)
+    lv = np.zeros(len(t), dtype=int)
+    if len(gt) < 2:
+        return xy, lv, np.zeros(len(t), dtype=bool)
+    k = np.searchsorted(gt[:, 0], t, side="right") - 1
+    ok = (k >= 0) & (k < len(gt) - 1)
+    k = np.clip(k, 0, len(gt) - 2)
+    ok &= gt[k, 3] == gt[k + 1, 3]
+    t0, t1 = gt[k, 0], gt[k + 1, 0]
+    u = np.clip((t - t0) / np.maximum(t1 - t0, 1e-9), 0, 1)
+    xy[:, 0] = gt[k, 1] + u * (gt[k + 1, 1] - gt[k, 1])
+    xy[:, 1] = gt[k, 2] + u * (gt[k + 1, 2] - gt[k, 2])
+    lv[:] = gt[k, 3]
+    return xy, lv, ok

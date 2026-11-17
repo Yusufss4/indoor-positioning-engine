@@ -113,3 +113,55 @@ def fit_samples(samples: dict[str, list], box, min_samples: int, min_spread: flo
         if tx:
             out.append(tx)
     return out
+
+
+def fit_levels(samples: dict[str, list], box, elev: dict[int, float], known: dict[str, tuple[float, float, int]],
+               min_samples: int, min_spread: float, max_rms: float, prefer: set[str] | None = None):
+    """Fits a venue with several floors from `samples` ({id: [(x, y, ordinal, rssi), ...]}).
+
+    Each transmitter is placed on the floor where it is heard strongest (median of its five
+    strongest readings) and fitted on that floor's samples; one in `known` ({id: (x, y, ordinal)})
+    keeps its surveyed place. The other floors' samples then give the loss per slab: median over
+    transmitters of the median excess loss divided by the slabs between. `elev` is the elevation [m]
+    per ordinal. The loss comes from the transmitters in `prefer` when any of them was fitted (fixed
+    infrastructure: BLE devices can move between floors).
+
+    Returns (transmitters, loss per slab [dB], transmitters the loss was taken from); the loss is
+    15 dB when no transmitter is heard on another floor."""
+    by_level: dict[int, dict[str, list]] = {}
+    for tid, rows in samples.items():
+        arr = np.array(rows)
+        if tid in known:
+            o = known[tid][2]
+        else:
+            best = {}
+            for o in np.unique(arr[:, 2]).astype(int):
+                r = np.sort(arr[arr[:, 2] == o, 3])[::-1][:5]
+                if len(r) >= 3:
+                    best[o] = float(np.median(r))
+            if not best:
+                continue
+            o = max(best, key=best.get)
+        o = int(o)
+        by_level.setdefault(o, {})[tid] = [(x, y, r) for x, y, lv, r in rows if int(lv) == o]
+    txs: list[Transmitter] = []
+    for o, smp in sorted(by_level.items()):
+        kn = {tid: known[tid][:2] for tid in smp if tid in known}
+        for tx in fit_samples(smp, box, min_samples, min_spread, max_rms, kn):
+            tx.level = o
+            txs.append(tx)
+    per_tx = []
+    ref = [t for t in txs if t.id in (prefer or ())] or txs
+    order = sorted(elev)
+    for tx in ref:
+        arr = np.array(samples[tx.id])
+        other = arr[arr[:, 2].astype(int) != tx.level]
+        if len(other) < 10:
+            continue
+        dz = np.array([elev[int(o)] - elev[tx.level] for o in other[:, 2]])
+        d = np.sqrt((other[:, 0] - tx.x) ** 2 + (other[:, 1] - tx.y) ** 2 + dz ** 2)
+        slabs = np.abs(np.array([order.index(int(o)) - order.index(tx.level) for o in other[:, 2]]))
+        excess = (path_loss(d, tx.tx_power, tx.path_loss_exp) - other[:, 3]) / np.maximum(slabs, 1)
+        per_tx.append(float(np.median(excess)))
+    floor_loss = float(np.median(per_tx)) if per_tx else 15.0
+    return txs, floor_loss, len(per_tx)

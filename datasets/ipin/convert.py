@@ -32,8 +32,8 @@ sys.path.append(str(HERE.parent / "osm"))
 import maps  # noqa: E402
 from common.geom import crossing_params, crossings, cut_gaps, fit_heading_offset, forward_heading_from_quat, point_in_rings, rotation_matrices, wrap  # noqa: E402
 from common.fingerprints import drop_rare, fingerprint_table, unmodelled_beacons  # noqa: E402
-from common.radiomap import Transmitter, fit_samples, path_loss  # noqa: E402
-from common.trace import TraceWriter, write_manifests  # noqa: E402
+from common.radiomap import fit_levels  # noqa: E402
+from common.trace import TraceWriter, interp_same_level, write_manifests  # noqa: E402
 from logfile import Walk, parse, read_gt_csv  # noqa: E402
 from plan_walk import Level as GridLevel  # noqa: E402
 
@@ -90,25 +90,6 @@ def same_level_runs(gt: np.ndarray) -> list[np.ndarray]:
                 runs.append(gt[start:i, :3])
             start = i
     return runs
-
-
-def interp_same_level(gt: np.ndarray, t: np.ndarray):
-    """Position at times t by linear interpolation between consecutive landmarks on the same floor;
-    mask is False elsewhere (before the first, after the last, or across a floor change)."""
-    xy = np.full((len(t), 2), np.nan)
-    lv = np.zeros(len(t), dtype=int)
-    if len(gt) < 2:
-        return xy, lv, np.zeros(len(t), dtype=bool)
-    k = np.searchsorted(gt[:, 0], t, side="right") - 1
-    ok = (k >= 0) & (k < len(gt) - 1)
-    k = np.clip(k, 0, len(gt) - 2)
-    ok &= gt[k, 3] == gt[k + 1, 3]
-    t0, t1 = gt[k, 0], gt[k + 1, 0]
-    u = np.clip((t - t0) / np.maximum(t1 - t0, 1e-9), 0, 1)
-    xy[:, 0] = gt[k, 1] + u * (gt[k + 1, 1] - gt[k, 1])
-    xy[:, 1] = gt[k, 2] + u * (gt[k + 1, 2] - gt[k, 2])
-    lv[:] = gt[k, 3]
-    return xy, lv, ok
 
 
 # --------------------------------------------------------------------------------------------
@@ -293,51 +274,6 @@ def training_scans(train: list[tuple[Walk, np.ndarray]]) -> list[tuple[int, floa
     return out
 
 
-def fit_radio_map(samples: dict[str, list], box, elev: dict, known: dict[str, tuple[float, float, int]], args):
-    """Each transmitter is placed on the floor where it is heard strongest (median of its five
-    strongest readings) and fitted on that floor's samples. The other floors' samples then give the
-    loss per slab: median over transmitters of the median excess loss divided by the slabs between."""
-    by_level: dict[int, dict[str, list]] = {}
-    home = {}
-    for tid, rows in samples.items():
-        arr = np.array(rows)
-        if tid in known:
-            o = known[tid][2]
-        else:
-            best = {}
-            for o in np.unique(arr[:, 2]).astype(int):
-                r = np.sort(arr[arr[:, 2] == o, 3])[::-1][:5]
-                if len(r) >= 3:
-                    best[o] = float(np.median(r))
-            if not best:
-                continue
-            o = max(best, key=best.get)
-        o = int(o)
-        home[tid] = o
-        by_level.setdefault(o, {})[tid] = [(x, y, r) for x, y, lv, r in rows if int(lv) == o]
-    txs: list[Transmitter] = []
-    for o, smp in sorted(by_level.items()):
-        kn = {tid: known[tid][:2] for tid in smp if tid in known}
-        for tx in fit_samples(smp, box, args.min_samples, args.min_spread, args.max_rms, kn):
-            tx.level = o
-            txs.append(tx)
-    # Floor loss, from Wi-Fi when there is any (BLE devices can move between floors).
-    per_tx = []
-    ref = [t for t in txs if t.id.startswith("w:")] or txs
-    for tx in ref:
-        arr = np.array(samples[tx.id])
-        other = arr[arr[:, 2].astype(int) != tx.level]
-        if len(other) < 10:
-            continue
-        dz = np.array([elev[int(o)] - elev[tx.level] for o in other[:, 2]])
-        d = np.sqrt((other[:, 0] - tx.x) ** 2 + (other[:, 1] - tx.y) ** 2 + dz ** 2)
-        slabs = np.abs(np.array([sorted(elev).index(int(o)) - sorted(elev).index(tx.level) for o in other[:, 2]]))
-        excess = (path_loss(d, tx.tx_power, tx.path_loss_exp) - other[:, 3]) / np.maximum(slabs, 1)
-        per_tx.append(float(np.median(excess)))
-    floor_loss = float(np.median(per_tx)) if per_tx else 15.0
-    return txs, floor_loss, len(per_tx)
-
-
 def known_beacons(cfg: dict, raw: Path, frame: maps.Frame) -> dict[str, tuple[float, float, int]]:
     """Surveyed beacons (BLE_Locations.csv: BLEk -> the MAC ending in :0k)."""
     if "beacons" not in cfg:
@@ -398,8 +334,10 @@ def reachability(levels: dict, bounds, connectors: list, gts: list[tuple[str, np
 # Output
 
 
-def write_trace(path: Path, w: Walk, gt: np.ndarray, name: str, offset: float, known: set[str], wifi: bool,
-                scans: bool, level_index: dict, elev: dict) -> dict:
+def write_trace(path: Path, w: Walk, gt: np.ndarray, name: str, offset: float, known: set[str] | None, wifi: bool,
+                scans: bool, level_index: dict, elev: dict, ble: bool = True) -> dict:
+    """`known` are the transmitters whose readings are written; None writes every reading: every Wi-Fi
+    reading, and with `ble` every BLE packet (a site without BLE infrastructure leaves them out)."""
     tw = TraceWriter(name, f"ipin {w.name} ({w.model})")
     r = rotation_matrices(w.quat)
     acc_w = np.einsum("nij,nj->ni", r, w.acc)
@@ -416,14 +354,14 @@ def write_trace(path: Path, w: Walk, gt: np.ndarray, name: str, offset: float, k
             tw.baro(t, p)
     packets = 0
     for t, mac, rssi in w.ble:
-        if "b:" + mac in known and t >= 0:
+        if ("b:" + mac in known if known is not None else ble) and t >= 0:
             tw.ble(t, "b:" + mac, rssi)
             packets += 1
     n_scans = 0
     if wifi:
         by_scan: dict[float, list] = {}
         for t, mac, rssi, scan in w.wifi:
-            if "w:" + mac in known and t >= 0:
+            if (known is None or "w:" + mac in known) and t >= 0:
                 by_scan.setdefault(scan, []).append((t, mac, rssi))
         for k, (scan, readings) in enumerate(sorted(by_scan.items()), start=1):
             t_batch = max(rd[0] for rd in readings)
@@ -487,7 +425,8 @@ def convert_site(site: str, cfg: dict, args) -> tuple[list, list, list, dict]:
     # The 2022 building has no BLE infrastructure (technical annex): its BLE packets come from
     # unknown, possibly moving devices, so sites.json can leave BLE out.
     samples = radio_samples(gts["train"], args.wifi, cfg.get("ble", True))
-    txs, floor_loss, n_floor = fit_radio_map(samples, tuple(bounds), elev, known, args)
+    txs, floor_loss, n_floor = fit_levels(samples, tuple(bounds), elev, known, args.min_samples, args.min_spread,
+                                          args.max_rms, prefer={tid for tid in samples if tid.startswith("w:")})
     report["transmitters"] = {"ble": sum(t.id.startswith("b:") for t in txs), "wifi": sum(t.id.startswith("w:") for t in txs),
                               "surveyed_ble": sum(t.id in known for t in txs)}
     report["fit_rms_db_median"] = float(np.median([t.rms_db for t in txs])) if txs else float("nan")
@@ -581,10 +520,17 @@ def convert_site(site: str, cfg: dict, args) -> tuple[list, list, list, dict]:
                 continue
             name = f"{site}_{w.name}"
             trace_path = site_out / f"{w.name}.csv"
-            stats = write_trace(trace_path, w, gt, name, offset, known_ids, args.wifi, args.scans, level_index, elev)
+            stats = write_trace(trace_path, w, gt, name, offset, None if args.all_readings else known_ids, args.wifi,
+                                args.scans, level_index, elev, cfg.get("ble", True))
             entries[split].append({"name": name, "group": f"{site}_{split}", "venue": str(venue_path.relative_to(args.out)),
                                    "trace": str(trace_path.relative_to(args.out)), **stats})
     report["test_traces"] = {k: len(v) for k, v in entries.items()}
+    if args.train_traces:
+        (site_out / "train").mkdir(exist_ok=True)
+        for w, gt in gts["train"]:
+            if len(gt) >= 2:
+                write_trace(site_out / "train" / f"{w.name}.csv", w, gt, f"{site}_{w.name}", offset, None, args.wifi,
+                            args.scans, level_index, elev, cfg.get("ble", True))
     return entries["tune"] + entries["holdout"], entries["tune"], entries["holdout"], report
 
 
@@ -608,6 +554,12 @@ def main():
                     help="with --fingerprints, keep access points without a fitted transmitter as fingerprint-only beacons")
     ap.add_argument("--min-fingerprint-scans", type=int, default=10,
                     help="training scans an access point without a fitted transmitter must appear in")
+    ap.add_argument("--train-traces", action="store_true",
+                    help="also write the training walks as traces with every reading (<site>/train/), the input "
+                         "of datasets/fit_radio_map.py")
+    ap.add_argument("--all-readings", action="store_true",
+                    help="write every reading to the test traces, not only those of the venue's transmitters: for "
+                         "replaying them on a venue with other transmitters")
     ap.add_argument("--data", type=Path, help="also write each site's venue here as <site>.json (data/ipin)")
     args = ap.parse_args()
     if args.scans and not args.wifi:
