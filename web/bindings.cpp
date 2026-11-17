@@ -16,6 +16,7 @@
 
 #include "ipe/config.hpp"
 #include "ipe/eval.hpp"
+#include "ipe/live_session.hpp"
 #include "ipe/simulator.hpp"
 #include "ipe/trace.hpp"
 #include "ipe/trace_player.hpp"
@@ -298,112 +299,66 @@ class Demo {
   std::size_t truth_seen_ = 0;  ///< Truth samples consumed so far.
 };
 
-/// The engine fed live, one sensor event at a time (live.js, from a phone's own sensors). Everything it is
-/// fed is kept as a trace, rounded to the trace file's precision before it reaches the engine, so that
-/// replaying the saved trace with ipe-replay gives exactly what the page showed.
+/// The engine fed live, one sensor event at a time (live.js, from a phone's own sensors): ipe::LiveSession,
+/// which keeps everything it is fed as a trace, so that replaying the saved trace with ipe-replay gives
+/// exactly what the page showed.
 class Live {
  public:
   /// `config_patch` (may be empty) on the config the venue calls for.
-  Live(const std::string& venue_json, const std::string& config_patch) : venue_(ipe::parse_venue(venue_json)) {
-    ipe::EngineConfig cfg = ipe::recommended_config(venue_);
-    ipe::apply_config_patch(cfg, config_patch);
-    engine_ = std::make_unique<ipe::PositioningEngine>(venue_, cfg);
-    trace_.metadata["source"] = "web live";
-    trace_.metadata["venue"] = venue_.name();
+  Live(const std::string& venue_json, const std::string& config_patch)
+      : session_(ipe::parse_venue(venue_json), config_patch) {
+    session_.set_metadata("source", "web live");
   }
 
   /// One inertial sample in the engine's frame (docs/formats.md): m/s^2, rad/s with z the rate about the
   /// vertical, and a magnetic field whose horizontal part gives the heading on the map, or zero for none.
   void onImu(double t, double ax, double ay, double az, double gx, double gy, double gz, double mx, double my,
              double mz) {
-    ipe::ImuSample s;
-    s.t = stamp(t);
-    s.accel = {q(ax, 1e4), q(ay, 1e4), q(az, 1e4)};
-    s.gyro = {q(gx, 1e5), q(gy, 1e5), q(gz, 1e5)};
-    s.mag = {q(mx, 1e3), q(my, 1e3), q(mz, 1e3)};
-    trace_.imu.push_back(s);
-    engine_->on_imu(s);
+    session_.on_imu(t, {ax, ay, az}, {gx, gy, gz}, {mx, my, mz});
   }
 
-  void onBle(double t, const std::string& beacon_id, double rssi) {
-    trace_.ble.push_back({stamp(t), beacon_id, q(rssi, 1.0), 0});
-    engine_->on_ble(trace_.ble.back().t, beacon_id, trace_.ble.back().rssi);
-  }
+  void onBle(double t, const std::string& beacon_id, double rssi) { session_.on_ble(t, beacon_id, rssi); }
 
-  void onPressure(double t, double hpa) {
-    trace_.baro.push_back({stamp(t), q(hpa, 1e4)});
-    engine_->on_pressure(trace_.baro.back().t, trace_.baro.back().hpa);
-  }
+  void onPressure(double t, double hpa) { session_.on_pressure(t, hpa); }
 
   /// A position known from outside: the tap that says "I am here, start from this".
   void onPositionFix(double t, double x, double y, int level, double sigma_m) {
-    const ipe::FixSample fix{stamp(t), {q(x, 1e3), q(y, 1e3)}, level, q(sigma_m, 1e3)};
-    trace_.fixes.push_back(fix);
-    engine_->on_position_fix(fix.t, fix.pos, fix.level, fix.sigma_m);
+    session_.on_position_fix(t, {x, y}, level, sigma_m);
   }
 
   /// A place the user says they are at, kept as ground truth and not shown to the engine. Returns the
   /// estimate's distance from it, or -1 without a fix or on another floor.
-  double mark(double t, double x, double y, int level) {
-    ipe::TruthSample truth;
-    truth.t = stamp(t);
-    truth.pos = {q(x, 1e3), q(y, 1e3)};
-    truth.level = std::clamp(level, 0, venue_.level_count() - 1);
-    truth.z = q(venue_.level(truth.level).elevation_m, 1e3);
-    trace_.truth.push_back(truth);
-    const ipe::Estimate e = engine_->estimate();
-    return e.valid && e.level == truth.level ? ipe::distance(e.pos, truth.pos) : -1.0;
-  }
+  double mark(double t, double x, double y, int level) { return session_.mark(t, {x, y}, level); }
 
   /// What to draw: {valid, x, y, level, sigma, heading}.
   val estimate() const {
-    const ipe::Estimate e = engine_->estimate();
+    const ipe::Estimate e = session_.estimate();
     val o = val::object();
     o.set("valid", e.valid);
     o.set("x", e.pos.x);
     o.set("y", e.pos.y);
     o.set("level", e.level);
     o.set("sigma", e.sigma_radius());
-    o.set("heading", engine_->raw_estimate().heading);
+    o.set("heading", session_.engine().raw_estimate().heading);
     return o;
   }
 
-  val gridCells() { return cells_.view(*engine_); }
-  double time() const { return last_t_; }
-  int steps() const { return static_cast<int>(engine_->step_count()); }
-  int levelCount() const { return venue_.level_count(); }
-  double gridCellSize() const { return engine_->map().cell_m(); }
-  int gridCellCount() const { return static_cast<int>(engine_->map().size()); }
+  val gridCells() { return cells_.view(session_.engine()); }
+  double time() const { return session_.time(); }
+  int steps() const { return static_cast<int>(session_.engine().step_count()); }
+  int levelCount() const { return session_.venue().level_count(); }
+  double gridCellSize() const { return session_.engine().map().cell_m(); }
+  int gridCellCount() const { return static_cast<int>(session_.engine().map().size()); }
 
   /// Adds a `# key: value` line to the saved trace.
-  void setMetadata(const std::string& key, const std::string& value) { trace_.metadata[key] = value; }
+  void setMetadata(const std::string& key, const std::string& value) { session_.set_metadata(key, value); }
 
   /// Everything fed so far as a trace file (docs/formats.md). ipe-replay scores it up to the last mark.
-  std::string trace() const {
-    std::ostringstream out;
-    ipe::write_trace(out, trace_);
-    return out.str();
-  }
+  std::string trace() const { return session_.trace_csv(); }
 
  private:
-  /// Rounds to the precision the trace file keeps.
-  static double q(double v, double scale) { return std::round(v * scale) / scale; }
-
-  /// Event time in whole milliseconds, strictly after the previous event: a replay orders events by time
-  /// alone, so two events of one millisecond would be fed in the trace player's order, not in this one.
-  double stamp(double t) {
-    const double ms = std::max(std::round(t * 1000.0), last_ms_ + 1.0);
-    last_ms_ = ms;
-    last_t_ = ms / 1000.0;
-    return last_t_;
-  }
-
-  ipe::Venue venue_;
-  std::unique_ptr<ipe::PositioningEngine> engine_;
-  ipe::Trace trace_;
+  ipe::LiveSession session_;
   CellPicker cells_;
-  double last_ms_ = -1.0;
-  double last_t_ = 0.0;
 };
 
 }  // namespace

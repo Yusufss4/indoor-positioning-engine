@@ -17,6 +17,7 @@ add_executable(ipe_tests
   test_georef.cpp
   test_import.cpp
   test_level_selector.cpp
+  test_live_session.cpp
   test_map_estimate.cpp
   test_pdr.cpp
   test_reachable_area.cpp

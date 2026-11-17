@@ -18,6 +18,7 @@ add_library(ipe_core STATIC
   src/grid_map.cpp
   src/georef.cpp
   src/level_selector.cpp
+  src/live_session.cpp
   src/map_estimate.cpp
   src/reachable_area.cpp
   src/pdr.cpp
