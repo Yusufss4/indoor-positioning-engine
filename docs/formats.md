@@ -145,6 +145,9 @@ gt,t,x,y,heading,level,z
 - `ble` rows with the optional `scan` column (a positive integer) are readings delivered together in one
   Wi-Fi scan. The rows of a scan share `t` and are contiguous; replay hands them to the engine as one
   batch (`PositioningEngine::on_scan`). Rows without the column are single packets, as before.
+- A `ble` row may name a transmitter the venue does not list. Replay ignores it, so a walk recorded before
+  the venue has a radio map can keep every reading; `datasets/fit_radio_map.py` fits the map from such
+  walks ([extending.md](extending.md#your-own-building)).
 - `baro` rows are optional phone barometer samples in hPa (Android `TYPE_PRESSURE`, iOS `CMAltimeter`
   reports kPa). Only pressure changes matter; the absolute value is never trusted.
 - `fix` rows are optional positions given to the engine from outside (`PositioningEngine::on_position_fix`):

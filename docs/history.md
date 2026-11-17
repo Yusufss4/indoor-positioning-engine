@@ -35,6 +35,7 @@ settings, and most of those values are parameters or constants in the code.
 | 21 | Does the active floor delay convergence on real Wi-Fi? | The delay was inside the metric's noise; the background was too light under the compass | Background blocks with a heading row that move with the steps; `datasets/fidelity.py` |
 | 22 | Should the active floor be the default? | Decided on the numbers of 21; the gates pass unchanged | `filter.active_floor` 1e-9 by default |
 | 23 | How many settings does the engine need? | 15 of 68; the venue chooses their values, so no config files | `EngineConfig`, `recommended_config`, `"radio_map": "fitted"` |
+| 24 | Can a radio map be fitted from someone's own walks, without a converter? | Yes: from traces with `gt` rows, within 0.1 m of the converters on the malls | `datasets/fit_radio_map.py` |
 
 ## 2. A moved beacon hijacking the estimate (`office_field_issue`)
 
@@ -425,6 +426,33 @@ and ignored the venue; `--set` patched what the venue called for).
   The `--set` commands of older entries for those keys (experiment 21's `teleport_rate_per_s`,
   `step_length_rel_sigma` and `heading_sigma_deg`) are rejected as unknown keys. Mall data converted
   before this entry has no marker and must be converted again.
+
+## 24. A radio map from traces alone
+
+The fit of access points and fingerprints was shared code, but only the two dataset converters called
+it, and they read their datasets' own files. Someone with a building of their own had no way to get from
+a map to a venue the engine can use on Wi-Fi.
+
+- **The tool.** `datasets/fit_radio_map.py` takes a venue with the map and traces with `gt` rows, and
+  writes the venue with access points, fingerprints and `"radio_map": "fitted"`. A reading is placed on
+  the straight line between the `gt` rows around it. The per-floor fit and the slab loss moved from the
+  IPIN converter into `datasets/common/`; both converters write the same files as before (every venue,
+  manifest and trace compared).
+- **Against the converters** ([datasets.md](datasets.md#a-radio-map-without-a-converter)): on the malls'
+  109 held-out walks 5.27 / 8.90 m median CEP50 / CEP95, where the converter's radio map gives
+  5.18 / 8.94 m; on the six IPIN scoring walks a median of 6.54 m in the competition's metric against
+  6.68 m, with the floor right for 95.5% against 95.7%. Single walks move by up to 0.7 m either way.
+- **The first run was worse**: 5.65 / 8.30 m on the malls. The suspect was time: a trace gives all
+  readings of a scan the scan's time. Making the converter do the same changed nothing (5.18 / 8.91 m).
+  Swapping parts between the two venues showed the fingerprint table carried the difference, and the
+  tables differed in the readings an Android scan repeats from before the walk began, which the trace
+  writer left out and the converter's fingerprints keep.
+- **Simulated**, as the CTest `fit_radio_map`: beacons taken out of the office venues and fitted back
+  from five or six walks with a tap every 5 s. 10 or 11 of 12 on one floor and 22 of 24 on two are
+  fitted, all on the right floor, with a median position error of 0.9 to 1.2 m. A walk the fit never
+  saw replays with a CEP50 of 0.5 to 0.7 m and a CEP95 of 1.3 to 1.9 m. The test's bounds are about twice
+  those numbers.
+- **Not measured:** walks tapped by a person. Every `gt` row above is a surveyor's or the simulator's.
 
 ## Open questions
 

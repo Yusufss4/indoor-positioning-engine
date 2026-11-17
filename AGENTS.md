@@ -43,6 +43,10 @@ accuracy. [docs/design.md](docs/design.md) explains the engine and maps each con
   - `common` - what the converters share; `offline.py` holds the offline steps (two-pass replay, gap
     filling, waypoint snapping). `evaluate.py` scores a manifest with the competitions' metrics;
     `fidelity.py` compares the tracks of two configurations on a manifest.
+  - `fit_radio_map.py` - a venue's radio map (access points and fingerprints) from traces with `gt` rows,
+    for a building that is not a data set. It uses the converters' fit (`common/radiomap.py`). The CTest
+    `fit_radio_map` runs it on simulated walks and is skipped without numpy and scipy;
+    `refit_converted.py` compares it with the converters on their own training walks.
   - Raw data and converter output (`raw/`, `out*/`) are git-ignored.
 
 ## Build and test
@@ -107,6 +111,8 @@ Sanitizers: `-DIPE_SANITIZE=address,undefined` with `CMAKE_BUILD_TYPE=Debug`.
 ./build/tools/ipe-replay --print-config                                                         # every setting
 ./build/tools/ipe-replay --venue data/ipin/nuremberg.json --print-config                        # a venue's values
 .venv/bin/python datasets/evaluate.py datasets/ipin/out_fp/manifest_tune.json                   # real walks
+.venv/bin/python datasets/fit_radio_map.py --venue walls.json --traces walks/*.csv \
+    --out venue.json --cross-validate                                                           # a radio map
 .venv/bin/python datasets/fidelity.py datasets/ipin/out_fp/manifest_tune.json \
     --b '{"rssi": {"sigma_db": 8.01}}'                                                          # their noise
 ```
