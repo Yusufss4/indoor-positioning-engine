@@ -36,6 +36,7 @@ settings, and most of those values are parameters or constants in the code.
 | 22 | Should the active floor be the default? | Decided on the numbers of 21; the gates pass unchanged | `filter.active_floor` 1e-9 by default |
 | 23 | How many settings does the engine need? | 15 of 68; the venue chooses their values, so no config files | `EngineConfig`, `recommended_config`, `"radio_map": "fitted"` |
 | 24 | Can a radio map be fitted from someone's own walks, without a converter? | Yes: from traces with `gt` rows, within 0.1 m of the converters on the malls | `datasets/fit_radio_map.py` |
+| 25 | Does the engine run in an Android app? | Yes, after one change for the NDK's library; on an emulator it agrees with the native build to 0.6 mm | `ipe::LiveSession`, `android/` |
 
 ## 2. A moved beacon hijacking the estimate (`office_field_issue`)
 
@@ -453,6 +454,32 @@ a map to a venue the engine can use on Wi-Fi.
   saw replays with a CEP50 of 0.5 to 0.7 m and a CEP95 of 1.3 to 1.9 m. The test's bounds are about twice
   those numbers.
 - **Not measured:** walks tapped by a person. Every `gt` row above is a surveyor's or the simulator's.
+
+## 25. The engine on Android
+
+The engine was C++ with a WebAssembly binding. The live page was the only example of feeding it from a
+phone, and a browser gets no Wi-Fi or Bluetooth, so nothing could record the walks experiment 24 needs.
+
+- **`ipe::LiveSession`** is what the live page's binding did, moved into the core: the engine plus a
+  trace of everything it was fed, with times and values rounded as the trace file keeps them. It gained
+  `on_scan` and keeps readings of transmitters the venue does not list. A unit test replays a session's
+  saved trace: identical estimates at every mark.
+- **`android/ipe`** is a JNI bridge over it and a Kotlin class. Its `SensorFrame` makes the engine's
+  inertial sample from Android's sensors: the turn rate is the gyroscope's rate about gravity, so the
+  phone need not lie flat, and the heading is the rotation vector's direction of the top edge.
+- **`android/example`** shows a venue and the estimate, scans Wi-Fi and iBeacons, takes taps as ground
+  truth and saves the walk as a trace.
+- **What the first build found.** The trace reader parsed numbers with floating-point `from_chars`,
+  which the NDK's standard library (r28) does not have. It now falls back to a stream in the classic
+  locale there. With the fallback forced on the host, the unit tests pass and a replay of a mall walk
+  is identical.
+- **On an emulator** (x86_64, Android 17): a recorded mall walk through the Kotlin API scores a mean
+  error of 3.24 m over 19 truth rows, and the native `ipe-replay` of the recording the device kept gives
+  the same positions to 0.6 mm (`android/check_device.py`). The app starts, takes taps and scans, and a
+  walk saved through the system's dialog replays natively to the error the app showed.
+- **Not measured:** a walk. The emulator does not move, has one simulated access point and no beacons.
+  The heading in a hand, the scan rate a real phone allows and the radio map from tapped walks are
+  untested.
 
 ## Open questions
 

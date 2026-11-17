@@ -159,6 +159,8 @@ gt,t,x,y,heading,level,z
 - On equal timestamps replay feeds IMU, then radio, then pressure, then a fix, and scores truth last.
 - A phone logger that writes this format can be replayed directly. The live web page (`web/live.html`)
   is one: its "Save recording" writes this file, with the taps that mark the true position as `gt` rows.
+  The Android example (`android/`) is another, and its files also hold the Wi-Fi scans and iBeacon
+  packets the phone heard (`w:<bssid>`, `b:<uuid>_<major>_<minor>`).
   `datasets/msil/convert.py` is a worked example for an Android logger: it rotates the sensor data into
   the expected frame (see [datasets.md](datasets.md#conversion-datasetsmsilconvertpy)).
 
