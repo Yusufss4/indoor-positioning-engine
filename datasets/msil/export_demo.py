@@ -8,9 +8,8 @@ its GeoJSON export (for the 3D view), the floor image and the trace, plus data/d
 which the demo reads to fill its scenario menu.
 
 The venues carry the shop walls with inferred doorways (see docs/datasets.md), the shop outlines as
-rooms, and the floor's training scans as position fingerprints, which the demo's config
-(data/configs/fingerprint.json) uses. The sample data is MIT-licensed; its licence is copied next to the
-files.
+rooms, and the floor's training scans as position fingerprints, which the engine uses when a venue has
+them. The sample data is MIT-licensed; its licence is copied next to the files.
 
     .venv/bin/python datasets/msil/convert.py --wifi --scans --walls doors --fingerprints \
         --out datasets/msil/out_doors_fp
@@ -87,7 +86,6 @@ def main():
             "geojson": f"{group}/venue.geojson",
             "image": f"{group}/floor.png",
             "trace": f"{group}/{src_trace.name}",
-            "config": "../../configs/fingerprint.json",
             "view": view_box(venue["bounds"], pts, VIEW_PAD_M),
             "duration_s": round(t["duration_s"], 1),
             "waypoints": len(pts),
@@ -95,7 +93,7 @@ def main():
                 f"{site} {floor}: a {t['duration_s']:.0f} s walk through a shopping mall with a real Android phone "
                 f"(IMU + Wi-Fi), held out from fitting and tuning. Squares are the surveyor's waypoints, the only "
                 f"ground truth; the black path is interpolated between them, and the live error is measured against "
-                f"it. The engine uses data/configs/fingerprint.json: {scans} training scans of this floor as "
+                f"it. The engine uses {scans} training scans of this floor as "
                 f"position fingerprints, next to the log-distance model of {fitted} located access points (purple). "
                 f"The other {len(venue['beacons']) - fitted} access points (pale) fit no such model and count in "
                 f"the fingerprints only. The shop walls are the plan's, with doorways inferred from the training "

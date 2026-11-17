@@ -488,6 +488,7 @@ def convert_floor(site: str, floor_name: str, floor_dir: Path, paths: list[PathD
         "name": name,
         "bounds": [0, 0, round(floor.width, 3), round(floor.height, 3)],
         "wall_attenuation_db": args.wall_attenuation_db,
+        "radio_map": "fitted",
         "georef": georef(floor),
         "walls": [[round(float(v), 3) for v in w] for w in wall_sets[mode]],
         "rooms": room_list(floor),

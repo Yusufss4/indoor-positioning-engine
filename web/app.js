@@ -136,22 +136,18 @@ async function loadSimulated(name) {
   const scenario = JSON.parse(scenarioText);
   const venueUrl = new URL(scenario.venue, scenarioUrl);
   const venueText = await loadJson(venueUrl);
-  const configText = scenario.demo_config ? await loadJson(new URL(scenario.demo_config, scenarioUrl)) : "";
   venue = normalizeVenue(JSON.parse(venueText));
   geojsonUrl = new URL(venueUrl.href.replace(/\/venues\/([^/]+)\.json$/, "/geojson/$1.geojson"));
   backgrounds = null;
   waypoints = [];
-  // The real-building tour explains itself on the map; the synthetic scenarios name the effect they inject.
-  el("description").textContent = scenario.demo_config ? "" : scenario.description || "";
-  return { venue: venueText, scenario: scenarioText, config: configText };
+  el("description").textContent = scenario.description || "";
+  return { venue: venueText, scenario: scenarioText, config: "" };
 }
 
 /// Loads a recording; returns the worker's start message.
 async function loadRecording(entry) {
   const at = (path) => new URL(path, entry.base);
-  const [venueText, traceText, configText] = await Promise.all([
-    loadJson(at(entry.venue)), loadJson(at(entry.trace)), entry.config ? loadJson(at(entry.config)) : "",
-  ]);
+  const [venueText, traceText] = await Promise.all([loadJson(at(entry.venue)), loadJson(at(entry.trace))]);
   venue = normalizeVenue(JSON.parse(venueText));
   // One plan per floor (`images`, by ordinal), one for a single floor (`image`), or none.
   const byOrdinal = entry.images || (entry.image ? { [venue.levels[0].ordinal]: entry.image } : {});
@@ -163,7 +159,7 @@ async function loadRecording(entry) {
     `${entry.title} with a real Android phone (IMU + Wi-Fi), held out from fitting and tuning. Squares are ` +
     `the surveyor's waypoints, the only ground truth; the black path is interpolated between them, and the ` +
     `live error is measured against it. Purple dots are Wi-Fi access points located from other walks.`;
-  return { venue: venueText, trace: traceText, config: configText };
+  return { venue: venueText, trace: traceText, config: "" };
 }
 
 /// Starts a worker on `job` (the start message) and resolves once its first frames have arrived.

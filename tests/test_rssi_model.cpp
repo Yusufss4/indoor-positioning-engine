@@ -33,7 +33,7 @@ TEST(RssiModel, RobustLikelihoodHasFloor) {
   EXPECT_GT(m.log_likelihood(0.0), m.log_likelihood(5.0));
   // A 60 dB outlier must not be infinitely unlikely; it saturates at the
   // uniform component instead of dominating the particle weights.
-  const double floor = std::log(m.config().outlier_prob / m.config().outlier_range_db);
+  const double floor = std::log(kRssiOutlierProb / kRssiOutlierRangeDb);
   EXPECT_NEAR(m.log_likelihood(60.0), floor, 1e-6);
   EXPECT_NEAR(m.log_likelihood(-60.0), floor, 1e-6);
 }

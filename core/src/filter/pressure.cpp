@@ -20,28 +20,28 @@ void GridFilter::on_pressure(double t, double hpa) {
   if (!baro_ready_) {
     for (std::size_t c = 0; c < n; ++c) {
       baro_mu_[c] = altitude_ - elevation(map_->cell(c).level);
-      baro_var_[c] = cfg_.baro_offset_sigma_m * cfg_.baro_offset_sigma_m;
+      baro_var_[c] = prior_baro_offset_var();
     }
     for (std::size_t b = 0; b < bg_baro_mu_.size(); ++b) {
       bg_baro_mu_[b] = altitude_ - elevation(map_->block_level(b));
-      bg_baro_var_[b] = cfg_.baro_offset_sigma_m * cfg_.baro_offset_sigma_m;
+      bg_baro_var_[b] = prior_baro_offset_var();
     }
     baro_ready_ = true;
     last_baro_update_t_ = t;
     return;
   }
-  if (t - last_baro_update_t_ < cfg_.baro_update_interval_s) return;
+  if (t - last_baro_update_t_ < kBaroUpdateIntervalS) return;
   last_baro_update_t_ = t;
 
-  change_levels(cfg_.level_change_prob_baro);
-  const double noise_var = cfg_.baro_sigma_m * cfg_.baro_sigma_m;
-  const double walk2 = cfg_.baro_offset_walk_m * cfg_.baro_offset_walk_m;
+  change_levels(kLevelChangeProbBaro);
+  const double noise_var = kBaroSigmaM * kBaroSigmaM;
+  const double walk2 = kBaroOffsetWalkM * kBaroOffsetWalkM;
   for (const std::uint32_t c : active_) {
     if (mass_[c] <= 0.0) continue;
     baro_var_[c] += walk2;
     const double res = altitude_ - baro_mu_[c] - elevation(map_->cell(c).level);
     double resp = 0.0;
-    const double lik = mixture(res, noise_var + baro_var_[c], cfg_.baro_outlier_prob, 1.0 / 20.0, resp);
+    const double lik = mixture(res, noise_var + baro_var_[c], kBaroOutlierProb, 1.0 / 20.0, resp);
     loglik_[c] = std::log(lik);
     adf_update(baro_mu_[c], baro_var_[c], res, noise_var, resp);
   }
@@ -50,7 +50,7 @@ void GridFilter::on_pressure(double t, double hpa) {
     bg_baro_var_[b] += walk2;
     const double res = altitude_ - bg_baro_mu_[b] - elevation(map_->block_level(b));
     double resp = 0.0;
-    const double lik = mixture(res, noise_var + bg_baro_var_[b], cfg_.baro_outlier_prob, 1.0 / 20.0, resp);
+    const double lik = mixture(res, noise_var + bg_baro_var_[b], kBaroOutlierProb, 1.0 / 20.0, resp);
     block_loglik_[b] = std::log(lik);
     adf_update(bg_baro_mu_[b], bg_baro_var_[b], res, noise_var, resp);
   }

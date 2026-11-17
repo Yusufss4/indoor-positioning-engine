@@ -411,10 +411,8 @@ TEST(GridFilter, IsDeterministic) {
 
 TEST(Engine, RoomProbabilityIsTheMassInTheRoom) {
   const Venue v = test::two_room_venue_with_rooms();
-  GridFilterConfig cfg;
-  auto map = std::make_shared<const GridMap>(v, cfg);
-  EngineConfig engine_cfg;
-  engine_cfg.filter = cfg;
+  const EngineConfig engine_cfg;
+  auto map = std::make_shared<const GridMap>(v, filter_params(engine_cfg));
   PositioningEngine engine(v, engine_cfg, map);
   const RssiModel model(v);
   const Vec2 p{4.0, 6.0};
@@ -441,10 +439,10 @@ TEST(Engine, StepsFromOutsideGiveTheSameFilterStateAsTheBuiltInDetector) {
   const Venue venue = load_venue_file(sc.venue_path);
   const Trace trace = sim::simulate(sc, venue);
   const EngineConfig cfg;
-  auto map = std::make_shared<const GridMap>(venue, cfg.filter);
+  auto map = std::make_shared<const GridMap>(venue, filter_params(cfg));
   PositioningEngine built_in(venue, cfg, map);
   PositioningEngine fed(venue, cfg, map);
-  PdrProcessor pdr(cfg.pdr);  // stands in for a motion model of the caller's own
+  PdrProcessor pdr;  // stands in for a motion model of the caller's own
   for (const ImuSample& sample : trace.imu) {
     if (sample.t > 20.0) break;
     built_in.on_imu(sample);
@@ -784,7 +782,7 @@ TEST(Engine, AnActiveFloorFollowsTheWalksOfTheExactFilter) {
     EngineConfig exact_cfg, floor_cfg;
     exact_cfg.filter.active_floor = 0.0;
     floor_cfg.filter.active_floor = 1e-9;
-    auto map = std::make_shared<const GridMap>(venue, exact_cfg.filter);
+    auto map = std::make_shared<const GridMap>(venue, filter_params(exact_cfg));
     PositioningEngine exact(venue, exact_cfg, map), with_floor(venue, floor_cfg, map);
     TracePlayer a(venue, trace), b(venue, trace);
     double worst = 0.0;

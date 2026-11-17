@@ -19,7 +19,7 @@ void GridFilter::maybe_teleport(double t) {
     return;
   }
   const double dt = t - last_teleport_t_;
-  if (dt < cfg_.teleport_period_s) return;
+  if (dt < kTeleportPeriodS) return;
   last_teleport_t_ = t;
   mix_uniform(std::min(1.0 - std::exp(-std::max(cfg_.teleport_rate_per_s, 0.0) * dt), 1.0));
 }
@@ -28,8 +28,8 @@ void GridFilter::mix_uniform(double rho) {
   if (rho <= 0.0) return;
   const std::size_t n = map_->size();
   const double u = rho / static_cast<double>(n);
-  const double dev_var0 = cfg_.estimate_rssi_offset ? cfg_.rssi_offset_sigma * cfg_.rssi_offset_sigma : 0.0;
-  const double baro_var0 = cfg_.baro_offset_sigma_m * cfg_.baro_offset_sigma_m;
+  const double dev_var0 = prior_rssi_offset_var();
+  const double baro_var0 = prior_baro_offset_var();
   const auto row = static_cast<std::size_t>(bins_);
   const double prior = 1.0 / bins_;
   for (std::size_t b = 0; b < (sparse_ ? bg_mass_.size() : 0); ++b) {

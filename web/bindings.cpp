@@ -101,14 +101,14 @@ class CellPicker {
 class Demo {
  public:
   /// Simulates the scenario and runs the grid filter on it, with `config_patch` (may be empty) on top of the
-  /// default engine config.
+  /// config the venue calls for.
   Demo(const std::string& venue_json, const std::string& scenario_json, unsigned seed, const std::string& config_patch)
       : venue_(ipe::parse_venue(venue_json)) {
     trace_ = ipe::sim::simulate(ipe::sim::parse_scenario(scenario_json), venue_, seed);
     init(config_patch);
   }
 
-  /// Replays a recorded trace. `config_patch` (may be empty) is applied on top of the default engine config.
+  /// Replays a recorded trace, with `config_patch` (may be empty) on top of the config the venue calls for.
   static Demo* replay(const std::string& venue_json, const std::string& trace_csv, const std::string& config_patch) {
     std::istringstream in(trace_csv);
     return new Demo(ipe::parse_venue(venue_json), ipe::read_trace(in), config_patch);
@@ -242,15 +242,10 @@ class Demo {
   }
 
   void init(const std::string& config_patch) {
-    // A recording's own config patch on the engine's defaults, or else what the venue calls for. The
-    // lattice is built here and kept, so the page can draw it.
-    ipe::EngineConfig cfg;
-    if (config_patch.empty()) {
-      cfg = ipe::recommended_config(venue_);
-    } else {
-      ipe::apply_config_patch(cfg, config_patch);
-    }
-    grid_map_ = std::make_shared<const ipe::GridMap>(venue_, cfg.filter);
+    // What the venue calls for, patched. The lattice is built here and kept, so the page can draw it.
+    ipe::EngineConfig cfg = ipe::recommended_config(venue_);
+    ipe::apply_config_patch(cfg, config_patch);
+    grid_map_ = std::make_shared<const ipe::GridMap>(venue_, ipe::filter_params(cfg));
     grid_ = std::make_unique<ipe::PositioningEngine>(venue_, cfg, grid_map_);
     // venue_ and trace_ are members and the Demo is never moved, so the player's references stay valid.
     player_.emplace(venue_, trace_);
@@ -308,14 +303,10 @@ class Demo {
 /// replaying the saved trace with ipe-replay gives exactly what the page showed.
 class Live {
  public:
-  /// `config_patch` (may be empty) on the engine's defaults; without one, the config the venue calls for.
+  /// `config_patch` (may be empty) on the config the venue calls for.
   Live(const std::string& venue_json, const std::string& config_patch) : venue_(ipe::parse_venue(venue_json)) {
-    ipe::EngineConfig cfg;
-    if (config_patch.empty()) {
-      cfg = ipe::recommended_config(venue_);
-    } else {
-      ipe::apply_config_patch(cfg, config_patch);
-    }
+    ipe::EngineConfig cfg = ipe::recommended_config(venue_);
+    ipe::apply_config_patch(cfg, config_patch);
     engine_ = std::make_unique<ipe::PositioningEngine>(venue_, cfg);
     trace_.metadata["source"] = "web live";
     trace_.metadata["venue"] = venue_.name();

@@ -274,53 +274,65 @@ TEST(Eval, OnlyTheGridFilter) {
 
 TEST(Eval, ConfigOverridesMergeAndRejectTypos) {
   EngineConfig cfg;
-  apply_config_patch(cfg, R"({"filter": {"heading_bins": 72}, "rssi": {"sigma_db": 7.5}})");
-  EXPECT_EQ(cfg.filter.heading_bins, 72);
+  apply_config_patch(cfg, R"({"filter": {"cell_m": 0.25}, "rssi": {"sigma_db": 7.5}})");
+  EXPECT_DOUBLE_EQ(cfg.filter.cell_m, 0.25);
   EXPECT_DOUBLE_EQ(cfg.rssi.sigma_db, 7.5);
-  EXPECT_TRUE(cfg.filter.map_consistent_estimate);  // untouched keys keep their values
-  EXPECT_THROW(apply_config_patch(cfg, R"({"filter": {"heading_binz": 10}})"), std::invalid_argument);
+  EXPECT_TRUE(cfg.filter.beacon_integrity);  // untouched keys keep their values
+  const std::string before = config_to_json(cfg);
+  apply_config_patch(cfg, "");  // an empty patch changes nothing
+  EXPECT_EQ(config_to_json(cfg), before);
+  EXPECT_THROW(apply_config_patch(cfg, R"({"filter": {"cell_n": 1.0}})"), std::invalid_argument);
   EXPECT_THROW(apply_config_patch(cfg, R"({"filter": "nope"})"), std::invalid_argument);
+}
+
+TEST(Eval, OnlyTheSettingsAreConfig) {
+  // The components' own parameters are not settings: a patch cannot reach them.
+  for (const char* gone : {R"({"filter": {"heading_bins": 72}})", R"({"filter": {"teleport_rate_per_s": 0.0}})",
+                           R"({"baro": {"lowpass_tau_s": 2.0}})", R"({"mag_heading_sigma_deg": 20.0})",
+                           R"({"pdr": {"peak_threshold": 1.5}})", R"({"rooms": {"enter_dwell_s": 3.0}})"}) {
+    EngineConfig cfg;
+    EXPECT_THROW(apply_config_patch(cfg, gone), std::invalid_argument) << gone;
+  }
+  // The defaults of the settings are the components' defaults.
+  EXPECT_TRUE(filter_params(EngineConfig{}) == GridFilterConfig{});
+  EngineConfig cfg;
+  cfg.filter.cell_m = 1.0;
+  cfg.filter.fingerprint_weight = 3.0;
+  EXPECT_DOUBLE_EQ(filter_params(cfg).cell_m, 1.0);
+  EXPECT_DOUBLE_EQ(filter_params(cfg).fingerprint_weight, 3.0);
 }
 
 TEST(Eval, ConfigJsonRoundTrip) {
   EngineConfig cfg;
-  cfg.filter.heading_bins = 48;
+  cfg.filter.cell_m = 1.0;
   cfg.rssi.wall_aware = false;
   EngineConfig copy;
   apply_config_patch(copy, config_to_json(cfg));
-  EXPECT_EQ(copy.filter.heading_bins, 48);
+  EXPECT_DOUBLE_EQ(copy.filter.cell_m, 1.0);
   EXPECT_FALSE(copy.rssi.wall_aware);
   // Keys of the removed filters are rejected like any typo.
   EXPECT_THROW(apply_config_patch(copy, R"({"ekf": {"rssi_min_dbm": -80}})"), std::invalid_argument);
 }
 
-TEST(Eval, ShippedConfigPatchesApply) {
-  for (const char* name : {"msil_wifi.json", "ipin.json", "fingerprint.json"}) {
-    std::ifstream in(test::data_path(std::string("configs/") + name));
-    ASSERT_TRUE(in) << name;
-    std::stringstream text;
-    text << in.rdbuf();
-    EngineConfig cfg;
-    EXPECT_NO_THROW(apply_config_patch(cfg, text.str())) << name;
-  }
-}
-
-TEST(Eval, RecommendedConfigIsTheShippedPatchThatFitsTheVenue) {
-  const auto shipped = [](const char* name) {
-    std::ifstream in(test::data_path(std::string("configs/") + name));
-    std::stringstream text;
-    text << in.rdbuf();
-    return config_to_json(config_from_json(text.str()));
-  };
-  const auto recommended = [](const char* venue) {
-    return config_to_json(recommended_config(load_venue_file(test::data_path(venue))));
-  };
-  // Surveyed beacons, no training scans: the engine as shipped.
-  EXPECT_EQ(recommended("venues/office_floor.json"), config_to_json(EngineConfig{}));
-  EXPECT_EQ(recommended("venues/office_two_floor.json"), config_to_json(EngineConfig{}));
+TEST(Eval, RecommendedConfigFollowsWhatTheVenueContains) {
+  const auto recommended = [](const Venue& venue) { return config_to_json(recommended_config(venue)); };
+  const auto patched = [](const char* patch) { return config_to_json(config_from_json(patch)); };
+  // Surveyed beacons, no training scans: the engine's defaults.
+  Venue office = load_venue_file(test::data_path("venues/office_floor.json"));
+  EXPECT_EQ(recommended(office), config_to_json(EngineConfig{}));
+  EXPECT_EQ(recommended(load_venue_file(test::data_path("venues/office_two_floor.json"))),
+            config_to_json(EngineConfig{}));
+  // A radio map fitted from walks, without the walks' scans.
+  const char* fitted = R"({"rssi": {"sigma_db": 8.0}, "smoothing": {"max_correction_mps": 1.5}})";
+  office.set_radio_map_fitted(true);
+  EXPECT_EQ(recommended(office), patched(fitted));
   // Training scans with a floor only, then with positions.
-  EXPECT_EQ(recommended("ipin/nuremberg.json"), shipped("ipin.json"));
-  EXPECT_EQ(recommended("demo/msil/site1_F2/venue.json"), shipped("fingerprint.json"));
+  EXPECT_EQ(recommended(load_venue_file(test::data_path("ipin/nuremberg.json"))),
+            patched(R"({"rssi": {"sigma_db": 8.0}, "smoothing": {"max_correction_mps": 1.5},
+                        "filter": {"floor_prior_weight": 3.0}})"));
+  EXPECT_EQ(recommended(load_venue_file(test::data_path("demo/msil/site1_F2/venue.json"))),
+            patched(R"({"rssi": {"sigma_db": 8.0}, "smoothing": {"max_correction_mps": 1.5},
+                        "filter": {"floor_prior_weight": 3.0, "fingerprint_weight": 3.0}})"));
 }
 
 TEST(Eval, EngineWithoutAConfigUsesTheRecommendedOne) {

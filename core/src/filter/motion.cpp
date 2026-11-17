@@ -335,7 +335,7 @@ void GridFilter::settle_background() {
 
 void GridFilter::on_heading(double t, double heading, double sigma) {
   now_ = t;
-  const double eps = cfg_.heading_outlier_prob;
+  const double eps = kHeadingOutlierProb;
   const double norm = 1.0 / (sigma * std::sqrt(kTwoPi));
   for (int k = 0; k < bins_; ++k) {
     const double z = wrap_angle(heading - (yaw_ + kTwoPi * k / bins_)) / sigma;

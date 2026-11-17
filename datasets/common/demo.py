@@ -1,7 +1,7 @@
 """What the web demo's recording exporters share (datasets/*/export_demo.py).
 
 A recordings folder is data/demo/<name>/ with a demos.json index: per recording a venue, its GeoJSON
-export for the 3D view, a floor image, a trace and the engine config to run it with, all as paths relative
+export for the 3D view, a floor image and a trace, all as paths relative
 to the folder. web/app.js lists the folders it reads in RECORDING_SOURCES and skips the ones that are
 missing.
 """

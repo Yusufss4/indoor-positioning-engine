@@ -451,6 +451,11 @@ Venue parse_venue(std::string_view json_text) {
               std::move(connectors), j.value("wall_attenuation_db", 3.0), j.value("floor_attenuation_db", 15.0), georef,
               std::move(footprint), std::move(rooms));
   venue.set_floor_fingerprints(std::move(fingerprints));
+  const auto radio_map = j.value("radio_map", std::string("surveyed"));
+  if (radio_map != "surveyed" && radio_map != "fitted") {
+    throw std::runtime_error("venue: radio_map is \"surveyed\" or \"fitted\", not \"" + radio_map + "\"");
+  }
+  venue.set_radio_map_fitted(radio_map == "fitted");
   return venue;
 }
 

@@ -32,6 +32,7 @@ std::string venue_to_json(const Venue& v) {
     << "],\n";
   o << "  \"wall_attenuation_db\": " << number(v.wall_attenuation_db()) << ",\n";
   o << "  \"floor_attenuation_db\": " << number(v.floor_attenuation_db()) << ",\n";
+  if (v.radio_map_fitted()) o << "  \"radio_map\": \"fitted\",\n";
   if (const auto& g = v.georef()) {
     o << "  \"georef\": {\"origin_lat\": " << number(g->origin_lat) << ", \"origin_lon\": " << number(g->origin_lon)
       << ", \"rotation_deg\": " << number(g->rotation_deg) << "},\n";
@@ -112,13 +113,15 @@ std::string export_geojson(const Venue& v, const ExportOptions& opts) {
   const GeoRef& g = require_georef(v);
   std::vector<ojson> fs;
   const std::vector<Vec2> outline = v.footprint().empty() ? bounds_ring(v.bounds()) : v.footprint();
-  fs.push_back(feature(polygon(g, outline), {{"feature_type", "venue"},
-                                             {"name", v.name()},
-                                             {"wall_attenuation_db", v.wall_attenuation_db()},
-                                             {"floor_attenuation_db", v.floor_attenuation_db()},
-                                             {"origin_lat", g.origin_lat},
-                                             {"origin_lon", g.origin_lon},
-                                             {"rotation_deg", g.rotation_deg}}));
+  ojson venue_props = {{"feature_type", "venue"},
+                       {"name", v.name()},
+                       {"wall_attenuation_db", v.wall_attenuation_db()},
+                       {"floor_attenuation_db", v.floor_attenuation_db()},
+                       {"origin_lat", g.origin_lat},
+                       {"origin_lon", g.origin_lon},
+                       {"rotation_deg", g.rotation_deg}};
+  if (v.radio_map_fitted()) venue_props["radio_map"] = "fitted";
+  fs.push_back(feature(polygon(g, outline), std::move(venue_props)));
   for (const Level& l : v.levels()) {
     // A level smaller than the building (its own footprint) is drawn at its size.
     const std::vector<Vec2> level_outline = l.footprint.empty() ? bounds_ring(v.bounds()) : l.footprint;
@@ -551,6 +554,7 @@ ImportResult import_geojson(std::string_view geojson, const Mapping& m, const Im
   std::optional<GeoRef> georef = opts.georef;
   std::optional<double> wall_att = opts.wall_attenuation_db;
   std::optional<double> floor_att = opts.floor_attenuation_db;
+  bool radio_map_fitted = false;
   double lat_sum = 0.0, lon_sum = 0.0;
   std::size_t n_pos = 0;
   for (const auto& f : features) {
@@ -560,6 +564,7 @@ ImportResult import_geojson(std::string_view geojson, const Mapping& m, const Im
       if (name.empty()) name = prop_string(props, m.name_property).value_or("");
       if (!wall_att) wall_att = prop_number(props, "wall_attenuation_db");
       if (!floor_att) floor_att = prop_number(props, "floor_attenuation_db");
+      radio_map_fitted = prop_string(props, "radio_map").value_or("") == "fitted";
       const auto lat = prop_number(props, "origin_lat");
       const auto lon = prop_number(props, "origin_lon");
       if (!georef && lat && lon) georef = GeoRef{*lat, *lon, prop_number(props, "rotation_deg").value_or(0.0)};
@@ -694,6 +699,7 @@ ImportResult import_geojson(std::string_view geojson, const Mapping& m, const Im
   result.venue =
       Venue(name.empty() ? "imported" : name, bounds, std::move(levels), std::move(beacons), std::move(connectors),
             wall_att.value_or(3.5), floor_att.value_or(15.0), georef, std::move(local.footprint), std::move(rooms));
+  result.venue.set_radio_map_fitted(radio_map_fitted);
   return result;
 }
 

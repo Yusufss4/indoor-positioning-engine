@@ -19,10 +19,9 @@ JSON. With --scenario the trace is simulated in memory first.
 
 options:
   --filter NAME          grid, the only filter (kept for existing scripts)
-  --config FILE          JSON merge patch applied to the default config. Without it, the config
-                         recommended for the venue is used: the Wi-Fi fingerprint settings when
-                         the venue has training scans
-  --set JSON             inline JSON merge patch, e.g. '{"filter":{"heading_bins":72}}'
+  --config FILE          JSON merge patch from a file, applied before --set
+  --set JSON             JSON merge patch, e.g. '{"filter":{"cell_m":0.25}}'. The run uses the
+                         settings the venue calls for (--print-config shows them), patched
   --warmup SECONDS       exclude the first seconds from error stats (default 5)
   --out FILE             per-truth-sample estimates CSV
   --track FILE           the estimate every 0.2 s of trace time, CSV (what the smoothness metrics use)
@@ -52,14 +51,10 @@ int main(int argc, char** argv) {
     }
 
     ipe::eval::check_filter_name(args.get("filter", ipe::eval::kFilterName));
-    // The config: a --config file on the engine's defaults, or else what the venue calls for; then --set.
+    // The config: what the venue calls for (without a venue, the defaults), then --config, then --set.
     const auto config_for = [&](const ipe::Venue* venue) {
-      ipe::EngineConfig cfg;
-      if (args.has("config")) {
-        ipe::apply_config_patch(cfg, read_file(args.get("config")));
-      } else if (venue != nullptr) {
-        cfg = ipe::recommended_config(*venue);
-      }
+      ipe::EngineConfig cfg = venue != nullptr ? ipe::recommended_config(*venue) : ipe::EngineConfig{};
+      if (args.has("config")) ipe::apply_config_patch(cfg, read_file(args.get("config")));
       if (args.has("set")) ipe::apply_config_patch(cfg, args.get("set"));
       return cfg;
     };

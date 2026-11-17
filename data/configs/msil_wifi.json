@@ -1,8 +1,0 @@
-{
-  "rssi": {
-    "sigma_db": 8.0
-  },
-  "smoothing": {
-    "max_correction_mps": 1.5
-  }
-}

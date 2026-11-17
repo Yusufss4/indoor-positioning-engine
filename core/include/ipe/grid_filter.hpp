@@ -22,20 +22,17 @@
 
 namespace ipe {
 
-/// Settings of the grid filter, the engine's filter (docs/design.md): the posterior on a lattice of the
-/// venue's walkable cells.
+/// Parameters of the grid filter, the engine's filter (docs/design.md): the posterior on a lattice of the
+/// venue's walkable cells. The engine sets the few that are settings (EngineConfig::Filter) and leaves the
+/// rest at these values; a test of the filter on its own changes what it needs to.
 struct GridFilterConfig {
   // The lattice (GridMap). Changing these builds another map.
-  double cell_m = 0.5;        ///< Cell size [m]; coarser when the walkable area needs more than max_cells.
-  double max_cells = 200000;  ///< Walkable cells over all levels, at most.
-  double max_reach_m = 2.0;   ///< Longest move of one step from a cell centre (transition mask radius).
+  /// Cell size [m]; coarser when the walkable area would need more than 200,000 cells.
+  double cell_m = 0.5;
   /// Rooms nobody can walk into are not cells. The walls split each level into connected regions; one of at
-  /// least `closed_region_min_m2`, smaller than `closed_region_fraction` of its level's largest and without
-  /// a stairwell or lift is closed (a room without a door, an island drawn as an outline). 0 turns it off.
+  /// least 10 m², smaller than `closed_region_fraction` of its level's largest and without a stairwell or
+  /// lift is closed (a room without a door, an island drawn as an outline). 0 turns it off.
   double closed_region_fraction = 0.1;
-  double closed_region_min_m2 = 10.0;
-  /// Side of the blocks the lattice is cut into for `active_floor` [m]; at least the reach of a step.
-  double background_block_m = 4.0;
 
   /// Update only where the mass is. A block of cells is updated cell by cell when one of its cells holds at
   /// least this share of the heaviest cell's mass, or when it is next to such a block. Every other block is
@@ -47,7 +44,6 @@ struct GridFilterConfig {
 
   int heading_bins = 36;  ///< Bins of the heading offset from the gyro-integrated yaw.
   double heading_sigma_deg = 3.0;
-  double heading_outlier_prob = 0.15;
 
   double step_length_sigma = 0.08;  ///< Along-track noise per step [m].
   /// Along-track noise per step, relative to the step length. It also stands in for a per-user step-length
@@ -55,46 +51,30 @@ struct GridFilterConfig {
   double step_length_rel_sigma = 0.2;
 
   bool estimate_rssi_offset = true;  ///< Device RSSI offset, a Gaussian per cell.
-  double rssi_offset_sigma = 8.0;
-  double rssi_offset_walk = 0.05;  ///< Random walk per RSSI update [dB].
 
-  /// Recovery: uniform mass mixed in at this rate (a walker "kidnapped" anywhere), at most every
-  /// teleport_period_s. Kept tiny: the mass is everywhere at once, so a misbehaving beacon or one Wi-Fi scan
+  /// Recovery: uniform mass mixed in at this rate (a walker "kidnapped" anywhere), at most every 0.5 s.
+  /// Kept tiny: the mass is everywhere at once, so a misbehaving beacon or one Wi-Fi scan
   /// finds a foothold in it wherever the map allows one (experiment 14: 1e-3 to 1e-4 cost the moved-beacon
   /// walk and the IPIN buildings; 1e-8 keeps a way back from a wrong lock at no measurable cost).
   double teleport_rate_per_s = 1e-8;
-  double teleport_period_s = 0.5;
 
-  double level_change_prob_step = 0.08;
-  double level_change_prob_baro = 0.1;
-  double baro_update_interval_s = 0.5;
-  double baro_sigma_m = 0.8;
-  double baro_outlier_prob = 0.05;
-  double baro_offset_sigma_m = 0.3;
-  double baro_offset_walk_m = 0.05;
+  double level_change_prob_step = 0.08;  ///< Share of a connector cell's mass that changes level per step.
 
   double level_smoothing_s = 0.5;
   double level_hysteresis = 0.1;
-  bool map_consistent_estimate = true;
 
-  bool beacon_integrity = true;
-  double integrity_threshold_db = 10.0;
-  double integrity_alpha = 0.1;
-  int integrity_min_samples = 8;
-  double integrity_max_sigma_m = 3.0;
+  bool beacon_integrity = true;  ///< Stop using beacons whose readings keep disagreeing with the estimate.
 
   /// Floor prior from the k-NN classifier over the venue's Wi-Fi floor fingerprints, applied per scan as
   /// `floor_prior_weight * log p(level)` on every cell. The radio model's 2-4 dB per slab barely separates
   /// floors, and the barometer only reports changes, so without it nothing rejects mass that has walked the
   /// same path one floor up. 0 (or a venue without fingerprints) turns it off.
   double floor_prior_weight = 0.0;
-  int floor_prior_k = 5;
-  double floor_prior_eps = 0.1;
 
   /// Fingerprint likelihood, for venues whose fingerprints carry positions (training scans). Each scan's
   /// `fingerprint_k` nearest training scans, compared over its `fingerprint_strongest` strongest readings,
   /// form a kernel density over position and level: Gaussians of `fingerprint_sigma_m` around the
-  /// neighbours, mixed with `fingerprint_eps` of the uniform prior. It is applied per scan as
+  /// neighbours, mixed with 5% of the uniform prior. It is applied per scan as
   /// `fingerprint_weight * log density` on every cell. `fingerprint_model_weight` scales the log-distance
   /// model's log-likelihood in a scan that has neighbours: both read the same scan, and counting it twice in
   /// full makes the posterior too sure. 0 (or a venue without such fingerprints) turns it off.
@@ -102,8 +82,9 @@ struct GridFilterConfig {
   int fingerprint_k = 10;
   int fingerprint_strongest = 40;
   double fingerprint_sigma_m = 4.0;
-  double fingerprint_eps = 0.05;
   double fingerprint_model_weight = 0.3;
+
+  friend bool operator==(const GridFilterConfig&, const GridFilterConfig&) = default;
 };
 
 /// The venue as a lattice of cells, built once and shared read-only by every GridFilter on that venue.
@@ -169,7 +150,7 @@ class GridMap {
   /// Cells with a connector link (up or down), for the level-change loop.
   [[nodiscard]] std::span<const std::uint32_t> connector_cells() const { return connector_cells_; }
 
-  /// Blocks: squares of the lattice of GridFilterConfig::background_block_m, per level, each with at least
+  /// Blocks: squares of the lattice with a side of 4 m, per level, each with at least
   /// one cell. A step from a cell ends in the cell's block or in one of the block's neighbours.
   [[nodiscard]] std::size_t block_count() const { return block_level_.size(); }
   [[nodiscard]] std::uint32_t block_of(std::size_t cell) const { return block_of_[cell]; }
@@ -233,8 +214,7 @@ class GridMap {
 /// magnetometer update (docs/design.md).
 class GridFilter {
  public:
-  GridFilter(std::shared_ptr<const GridMap> map, GridFilterConfig cfg, RssiModelConfig rssi_cfg,
-             BaroConfig baro_cfg = {});
+  GridFilter(std::shared_ptr<const GridMap> map, GridFilterConfig cfg, RssiModelConfig rssi_cfg);
 
   void on_step(const StepEvent& step);
   void on_heading(double t, double heading, double sigma);
@@ -278,12 +258,15 @@ class GridFilter {
   void initialize_uniform();
   /// The state of prior and recovery mass: at the cell's centre, any heading, the prior offsets.
   void reset_cell_to_prior(std::size_t cell, double mass);
+  /// Spread of the prior of a cell's device RSSI offset [dB], and of its barometer offset [m].
+  static constexpr double kRssiOffsetSigma = 8.0;
+  static constexpr double kBaroOffsetSigmaM = 0.3;
   [[nodiscard]] double prior_rssi_offset_var() const {
-    return cfg_.estimate_rssi_offset ? cfg_.rssi_offset_sigma * cfg_.rssi_offset_sigma : 0.0;
+    return cfg_.estimate_rssi_offset ? kRssiOffsetSigma * kRssiOffsetSigma : 0.0;
   }
   /// The barometer offset that puts the current altitude on `level`.
   [[nodiscard]] double prior_baro_offset(int level) const { return baro_ready_ ? altitude_ - elevation(level) : 0.0; }
-  [[nodiscard]] double prior_baro_offset_var() const { return cfg_.baro_offset_sigma_m * cfg_.baro_offset_sigma_m; }
+  [[nodiscard]] double prior_baro_offset_var() const { return kBaroOffsetSigmaM * kBaroOffsetSigmaM; }
   /// Chooses the blocks that are updated cell by cell from where the mass is (`active_floor`).
   void refresh_active_set();
   void activate_block(std::size_t block);

@@ -39,44 +39,13 @@ consteval std::size_t name_count(std::string_view names) {
                 #Type ": list every field here, or config patches cannot reach it (core/src/config.cpp)"); \
   NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Type, __VA_ARGS__)
 
-IPE_CONFIG_JSON(PdrConfig, gravity, lowpass_alpha, peak_threshold, valley_threshold, min_step_interval, weinberg_k,
-                min_step_length, max_step_length)
-IPE_CONFIG_JSON(RssiModelConfig, sigma_db, outlier_prob, outlier_range_db, min_distance, wall_aware)
-IPE_CONFIG_JSON(BaroConfig, lowpass_tau_s, sea_level_hpa)
-IPE_CONFIG_JSON(GridFilterConfig, cell_m, max_cells, max_reach_m, closed_region_fraction, closed_region_min_m2,
-                background_block_m, active_floor, heading_bins, heading_sigma_deg, heading_outlier_prob,
-                step_length_sigma, step_length_rel_sigma, estimate_rssi_offset, rssi_offset_sigma, rssi_offset_walk,
-                teleport_rate_per_s, teleport_period_s, level_change_prob_step, level_change_prob_baro,
-                baro_update_interval_s, baro_sigma_m, baro_outlier_prob, baro_offset_sigma_m, baro_offset_walk_m,
-                level_smoothing_s, level_hysteresis, map_consistent_estimate, beacon_integrity, integrity_threshold_db,
-                integrity_alpha, integrity_min_samples, integrity_max_sigma_m, floor_prior_weight, floor_prior_k,
-                floor_prior_eps, fingerprint_weight, fingerprint_k, fingerprint_strongest, fingerprint_sigma_m,
-                fingerprint_eps, fingerprint_model_weight)
-IPE_CONFIG_JSON(TrackSmootherConfig, enabled, tau_s, max_correction_mps, snap_m, extrapolate_steps, max_step_interval_s)
-IPE_CONFIG_JSON(RoomEventConfig, enter_prob, exit_prob, enter_dwell_s, exit_dwell_s, update_period_s)
-
-// The sections of EngineConfig. A new section goes into both functions below and into this count.
-static_assert(field_count<EngineConfig>() == 7, "EngineConfig: register the new field in to_json and from_json");
-
-void to_json(nlohmann::json& j, const EngineConfig& c) {
-  j = nlohmann::json{{"pdr", c.pdr},
-                     {"rssi", c.rssi},
-                     {"baro", c.baro},
-                     {"filter", c.filter},
-                     {"rooms", c.rooms},
-                     {"smoothing", c.smoothing},
-                     {"mag_heading_sigma_deg", c.mag_heading_sigma_deg}};
-}
-
-void from_json(const nlohmann::json& j, EngineConfig& c) {
-  j.at("pdr").get_to(c.pdr);
-  j.at("rssi").get_to(c.rssi);
-  if (j.contains("baro")) j.at("baro").get_to(c.baro);
-  j.at("filter").get_to(c.filter);
-  if (j.contains("rooms")) j.at("rooms").get_to(c.rooms);
-  if (j.contains("smoothing")) j.at("smoothing").get_to(c.smoothing);
-  j.at("mag_heading_sigma_deg").get_to(c.mag_heading_sigma_deg);
-}
+IPE_CONFIG_JSON(EngineConfig::Pdr, weinberg_k)
+IPE_CONFIG_JSON(EngineConfig::Rssi, sigma_db, wall_aware)
+IPE_CONFIG_JSON(EngineConfig::Filter, cell_m, active_floor, estimate_rssi_offset, beacon_integrity, floor_prior_weight,
+                fingerprint_weight)
+IPE_CONFIG_JSON(EngineConfig::Smoothing, enabled, tau_s, max_correction_mps, snap_m)
+IPE_CONFIG_JSON(EngineConfig::Rooms, enter_prob, exit_prob)
+IPE_CONFIG_JSON(EngineConfig, pdr, rssi, filter, smoothing, rooms)
 
 namespace {
 
@@ -96,6 +65,7 @@ void check_known_keys(const nlohmann::json& base, const nlohmann::json& patch, c
 }  // namespace
 
 void apply_config_patch(EngineConfig& cfg, std::string_view json_patch) {
+  if (json_patch.find_first_not_of(" \t\r\n") == std::string_view::npos) return;
   nlohmann::json j = cfg;
   const auto patch = nlohmann::json::parse(json_patch);
   check_known_keys(j, patch, "");

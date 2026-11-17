@@ -33,7 +33,7 @@ sys.path.insert(0, str(ROOT / "viz"))
 import ipeviz  # noqa: E402
 
 RUNS = [
-    ("grid", "grid", ROOT / "data" / "configs" / "msil_wifi.json", "engine (Wi-Fi config)"),
+    ("grid", "grid", None, "engine"),
 ]
 
 

@@ -89,7 +89,6 @@ def main():
             "venue": f"{rel}/venue.json",
             "geojson": f"{rel}/venue.geojson",
             "trace": f"{rel}/{src_trace.name}",
-            "config": "../../configs/fingerprint.json",
         }
         image = args.raw / "metadata" / site / floor / "floor_image.png"
         if image.exists():
@@ -109,7 +108,7 @@ def main():
                 f"Kaggle Indoor Location & Navigation, building …{site[-6:]}, floor {floor}: a {t['duration_s']:.0f} s "
                 f"walk with a real Android phone (IMU + Wi-Fi), held out from fitting and tuning. Squares are the "
                 f"surveyor's waypoints, the only ground truth; the black path is interpolated between them. The "
-                f"engine uses data/configs/fingerprint.json: {scans} training scans of this floor as position "
+                f"engine uses {scans} training scans of this floor as position "
                 f"fingerprints, next to the log-distance model of {fitted} located access points (purple). The "
                 f"other {len(beacons) - fitted} access points (pale) fit no such model and count in the "
                 f"fingerprints only. This is the live, causal estimate; the competition score in "

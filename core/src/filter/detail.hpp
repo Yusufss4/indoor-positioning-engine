@@ -17,6 +17,34 @@ inline constexpr double kPointFloorRel = 1e-3;
 /// Share of the uniform prior mixed in before a position fix is applied (position_fix.cpp).
 inline constexpr double kFixPriorShare = 0.01;
 
+// The filter's constants: values no deployment and no test changes. Changing one is a change of the
+// filter, measured like any other (AGENTS.md).
+
+/// Share of a magnetometer heading that is taken as wrong whatever it reads (a field bent by steel).
+inline constexpr double kHeadingOutlierProb = 0.15;
+/// Random walk of a cell's device RSSI offset per RSSI update [dB].
+inline constexpr double kRssiOffsetWalk = 0.05;
+/// Recovery mass is mixed in at most this often [s].
+inline constexpr double kTeleportPeriodS = 0.5;
+/// Barometer: an update at most this often [s], with this share of a connector cell's mass changing level,
+/// this spread of the altitude [m], this share of outliers, and this random walk of a cell's offset [m].
+inline constexpr double kBaroUpdateIntervalS = 0.5;
+inline constexpr double kLevelChangeProbBaro = 0.1;
+inline constexpr double kBaroSigmaM = 0.8;
+inline constexpr double kBaroOutlierProb = 0.05;
+inline constexpr double kBaroOffsetWalkM = 0.05;
+/// Beacon integrity: a beacon is distrusted when its averaged residual (factor `alpha`, after this many
+/// samples, while the estimate's spread is under this many metres) exceeds the threshold [dB].
+inline constexpr double kIntegrityThresholdDb = 10.0;
+inline constexpr double kIntegrityAlpha = 0.1;
+inline constexpr int kIntegrityMinSamples = 8;
+inline constexpr double kIntegrityMaxSigmaM = 3.0;
+/// Floor vote: neighbours of the k-NN classifier, and the share of the uniform prior mixed into its vote.
+inline constexpr int kFloorPriorK = 5;
+inline constexpr double kFloorPriorEps = 0.1;
+/// Share of the uniform prior mixed into the fingerprint density.
+inline constexpr double kFingerprintEps = 0.05;
+
 /// A background block is updated cell by cell again when its mass per cell reaches this many times the
 /// active floor: the gap keeps a block at the floor from being folded and unfolded at every update.
 inline constexpr double kActivateRatio = 16.0;

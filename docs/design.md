@@ -61,8 +61,9 @@ A motion model of your own can replace this stage: `PositioningEngine::on_step` 
 
 The engine holds the posterior as probability mass on a lattice of the venue's walkable cells (0.5 m by
 default), with a distribution over heading in every cell. There are no particles and no random numbers:
-the same inputs give the same estimate, on every platform. Its settings are `GridFilterConfig`
-(`core/include/ipe/grid_filter.hpp`), the `filter` section of the config.
+the same inputs give the same estimate, on every platform. Its parameters are `GridFilterConfig`
+(`core/include/ipe/grid_filter.hpp`); the few a deployment changes are the `filter` section of the
+[settings](formats.md#settings), and the names in backticks below are the parameters' names.
 
 ![the posterior converging on a simulated office walk](img/convergence.gif)
 
@@ -76,20 +77,20 @@ room probability is simply the mass of a room's cells.
 Built once per venue and shared read-only by every engine on it.
 
 - **Cells.** One lattice over the venue bounds, 0.5 m cells (`cell_m`), coarser when the walkable area
-  would need more than `max_cells` (200,000). A cell exists on a level when its centre is inside the venue's
+  would need more than 200,000 cells. A cell exists on a level when its centre is inside the venue's
   bounds, its `footprint` polygon if it has one, and the level's own footprint, and outside closed regions.
-- **Closed regions** (`closed_region_fraction` 0.1, `closed_region_min_m2` 10). The walls split each level
+- **Closed regions** (`closed_region_fraction` 0.1). The walls split each level
   into connected regions. A region of at least 10 m^2, smaller than a tenth of its level's largest and
   without a stairwell or lift is closed: a room without a door, an island drawn as an outline. Its cells do
   not exist, so no Wi-Fi scan can pull the estimate in.
-- **Moves.** Each cell has one bit per lattice offset within `max_reach_m` (2 m): set when the segment
+- **Moves.** Each cell has one bit per lattice offset within 2 m: set when the segment
   between the two centres crosses no wall and the target cell exists. A step's wall test is one bit.
 - **Radio.** The walls between each cell's centre and each beacon are counted the first time the beacon is
   heard, by filling each wall's shadow as seen from the beacon lattice row by lattice row (1–10 ms per
   beacon). The result is exactly `Venue::count_wall_crossings`.
 - **Floors and rooms.** Cells inside a connector (stairwell, lift, escalator) link to the cell at the same
   place on the levels next to it. Each cell lists the rooms its centre is in.
-- **Blocks.** The lattice is also cut into squares of `background_block_m` (4 m, 8 by 8 cells), per level,
+- **Blocks.** The lattice is also cut into squares of 4 m (8 by 8 cells), per level,
   each with its neighbours: the blocks a step or a level change from its cells can end in. They are what
   the active set below is made of.
 
@@ -126,15 +127,15 @@ bin exactly; only the 3° per step process noise moves mass between bins.
   - *Beacon integrity.* Once converged, the monitor averages each beacon's residual at the estimate and
     stops using beacons whose bias exceeds 10 dB (re-admitted below 5 dB, never more than a third of the
     beacons). It catches beacons that were moved or died.
-  - *Fingerprints* (`fingerprint_weight`, off by default; 3 in `fingerprint.json`). On venues whose
-    training scans carry positions, `FingerprintMap` returns a scan's 10 nearest training scans, compared
+  - *Fingerprints* (`fingerprint_weight`, 0 by default; 3 on a venue whose training scans carry
+    positions). `FingerprintMap` returns a scan's 10 nearest training scans, compared
     over its 40 strongest readings (missing ones at -100 dBm), with weights 1 / (RMS difference + 1 dB).
     They form a kernel density over position and level: 4 m Gaussians around the neighbours plus 5% of the
     uniform prior. Every cell gets `fingerprint_weight` times its logarithm, and the log-distance term of
     that scan is scaled by `fingerprint_model_weight` (0.3), since both read the same scan. Beacons with
     `"model": false` are fingerprint dimensions only.
-  - *Floor vote* (`floor_prior_weight`, off by default; 3 in `ipin.json` and `fingerprint.json`). A k-NN
-    vote of the scan over the training scans gives p(level), applied as `weight · log p(level)` on every
+  - *Floor vote* (`floor_prior_weight`, 0 by default; 3 on a venue with training scans). A k-NN vote
+    of the scan over the training scans gives p(level), applied as `weight · log p(level)` on every
     cell. The radio model's 2–4 dB per slab barely separates floors on real Wi-Fi.
 - **Barometer** (`pressure.cpp`). Every 0.5 s: the altitude against the cell's level and offset, scored
   with a Gaussian plus a 5% uniform part over 20 m, then an update of the cell's offset. The first sample
@@ -199,7 +200,7 @@ without blocks, bit for bit.
   to another one only when that one leads by 0.1 (`level_hysteresis`), or at once when no mass is left on
   the reported level. A posterior split between floors then does not flicker with every packet.
 - **Position.** Mean and covariance of the centroids on the reported level, plus the spread within a cell.
-- **On the map** (`map_consistent_estimate`, on). The mean of a posterior split across a wall can fall on
+- **On the map.** The mean of a posterior split across a wall can fall on
   the wall or in an empty room. If the mean is outside the walkable area or a wall separates it from its
   nearest cell, the reported position is the mean of the dominant group instead: the heaviest 3x3 block of
   a 2 m weight histogram, keeping the block's cells on the same side of the walls.
@@ -217,7 +218,7 @@ filter learned:
   step comes for 1.2 s, the walker has stopped.
 - **Corrections.** Every other change of the estimate is glided towards: after `dt`, the gap left is
   `exp(-dt / tau_s)` of what it was (`tau_s` 0.5 s). `max_correction_mps` caps the glide's speed; it is off
-  by default and 1.5 m/s in the Wi-Fi configs, where one scan can move the estimate several metres.
+  by default and 1.5 m/s on a fitted radio map, where one scan can move the estimate several metres.
 - **Jumps.** The dot jumps when the estimate is more than 10 m away (`snap_m`) and when the level changes.
   An estimate behind a wall is glided towards only as far as the wall; the dot never slides through one.
 

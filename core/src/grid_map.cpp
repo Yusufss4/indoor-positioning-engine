@@ -15,6 +15,15 @@ namespace {
 
 std::uint8_t clamp_count(int n) { return static_cast<std::uint8_t>(std::clamp(n, 0, 255)); }
 
+/// Walkable cells over all levels, at most: a larger venue gets larger cells.
+constexpr double kMaxCells = 200000.0;
+/// Longest move of one step from a cell centre [m] (the radius of the transition masks).
+constexpr double kMaxReachM = 2.0;
+/// A region smaller than this [m²] is never taken for a closed room (GridFilterConfig::closed_region_fraction).
+constexpr double kClosedRegionMinM2 = 10.0;
+/// Side of the blocks the lattice is cut into for the active set [m]; at least the reach of a step.
+constexpr double kBackgroundBlockM = 4.0;
+
 /// A wall, an endpoint or the beacon closer than this [m] to what it is measured against makes the wall's
 /// shadow degenerate; its cells then get the exact test.
 constexpr double kDegenerateM = 1e-2;
@@ -57,19 +66,19 @@ std::optional<std::array<HalfPlane, 3>> shadow(Vec2 b, const Segment& w) {
 GridMap::GridMap(const Venue& venue, const GridFilterConfig& cfg) : venue_(&venue) {
   std::optional<ReachableArea> reach;
   if (cfg.closed_region_fraction > 0.0) {
-    reach.emplace(venue, cfg.closed_region_fraction, cfg.closed_region_min_m2);
+    reach.emplace(venue, cfg.closed_region_fraction, kClosedRegionMinM2);
     if (!reach->any_closed()) reach.reset();
   }
   const int levels = std::max(venue.level_count(), 1);
   double area = 0.0;
   for (int l = 0; l < levels; ++l) area += venue.walkable_area(l) - (reach ? reach->closed_area(l) : 0.0);
-  cell_m_ = std::max(cfg.cell_m, std::sqrt(std::max(area, 0.0) / std::max(cfg.max_cells, 1.0)));
+  cell_m_ = std::max(cfg.cell_m, std::sqrt(std::max(area, 0.0) / kMaxCells));
 
   const Bounds& b = venue.bounds();
   origin_ = {b.min_x, b.min_y};
   nx_ = std::max(1, static_cast<int>(std::ceil(b.width() / cell_m_)));
   ny_ = std::max(1, static_cast<int>(std::ceil(b.height() / cell_m_)));
-  radius_ = static_cast<int>(std::ceil(cfg.max_reach_m / cell_m_));
+  radius_ = static_cast<int>(std::ceil(kMaxReachM / cell_m_));
   if (radius_ > kMaxRadius) radius_ = kMaxRadius;
   if (radius_ < 1) radius_ = 1;
 
@@ -137,7 +146,7 @@ GridMap::GridMap(const Venue& venue, const GridFilterConfig& cfg) : venue_(&venu
   room_begin_[cells_.size()] = static_cast<std::uint32_t>(room_list_.size());
 
   // Blocks, in the order their first cell appears: level by level.
-  const int side = std::max({radius_, static_cast<int>(std::ceil(cfg.background_block_m / cell_m_)), 1});
+  const int side = std::max({radius_, static_cast<int>(std::ceil(kBackgroundBlockM / cell_m_)), 1});
   const int bnx = (nx_ + side - 1) / side, bny = (ny_ + side - 1) / side;
   const std::size_t blocks_per_level = static_cast<std::size_t>(bnx) * static_cast<std::size_t>(bny);
   std::vector<std::int32_t> block_at(blocks_per_level * static_cast<std::size_t>(levels), -1);

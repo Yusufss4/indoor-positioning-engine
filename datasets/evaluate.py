@@ -13,8 +13,10 @@ to CEP50/CEP95:
 The engine is causal, and so is everything above by default. --two-pass, --fill and --snap are offline
 post-processing for competitions scored offline (Kaggle); they are not what a phone can show live.
 
-    python3 datasets/evaluate.py datasets/ipin/out_scans/manifest_tune.json \
-        --config data/configs/fingerprint.json [--set JSON] [--json out.json]
+Every walk runs with the settings its venue calls for (`ipe-replay --venue V --print-config`); --set
+and --config patch them.
+
+    python3 datasets/evaluate.py datasets/ipin/out_fp/manifest_tune.json [--set JSON] [--json out.json]
 """
 
 from __future__ import annotations

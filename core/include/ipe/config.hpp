@@ -7,12 +7,12 @@
 
 namespace ipe {
 
-/// The engine's settings as JSON. `EngineConfig{}` is the engine as shipped; everything else is a patch on
-/// top of it (data/configs/*.json, `--config`, `--set`). recommended_config(venue) in engine.hpp picks the
-/// shipped patch that fits a venue.
+/// The engine's settings as JSON. recommended_config(venue) in engine.hpp gives the settings a venue calls
+/// for; a patch changes single values of them (`--set`, `--config`).
 
-/// Applies an RFC 7386 merge patch to `cfg`, e.g. `{"filter": {"heading_bins": 72}}`. Unknown keys throw
-/// std::invalid_argument, so a typo fails loudly instead of silently leaving a default in place.
+/// Applies an RFC 7386 merge patch to `cfg`, e.g. `{"filter": {"cell_m": 0.25}}`. Unknown keys throw
+/// std::invalid_argument, so a typo fails loudly instead of silently leaving a value in place. An empty
+/// patch changes nothing.
 void apply_config_patch(EngineConfig& cfg, std::string_view json_patch);
 
 /// The default config with `json_patch` applied.

@@ -23,10 +23,9 @@ options:
   --json FILE         write the current results as JSON
   --tolerance REL     allowed relative increase (default 0.10)
   --serial            disable parallel execution
-  --config FILE       JSON merge patch file applied to the default config (before --set).
-                      Without it, each venue runs with the config recommended for it:
-                      the Wi-Fi fingerprint settings when it has training scans
-  --set JSON          merge patch applied on top, for A/B experiments
+  --config FILE       JSON merge patch from a file, applied before --set
+  --set JSON          JSON merge patch, for A/B experiments. Each venue runs with the
+                      settings it calls for (see ipe-replay --print-config), patched
   --no-baseline       only print results, do not compare
 )";
 }  // namespace
@@ -44,7 +43,6 @@ int main(int argc, char** argv) {
     opts.seeds = std::stoi(args.get("seeds", "3"));
     opts.parallel = !args.has("serial");
     if (args.has("presets")) check_filter_name(args.get("presets"));
-    opts.venue_config = !args.has("config");
     if (args.has("config")) {
       std::ifstream cfg(args.get("config"));
       if (!cfg) throw std::runtime_error("cannot open " + args.get("config"));

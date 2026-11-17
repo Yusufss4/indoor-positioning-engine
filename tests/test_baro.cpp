@@ -21,7 +21,7 @@ TEST(Baro, OneFloorIsAboutHalfAHectopascal) {
 }
 
 TEST(Baro, AltimeterReportsRelativeAltitude) {
-  BaroAltimeter alt({0.5, 1013.25});
+  BaroAltimeter alt(0.5);
   const double p0 = 1002.0;  // weather and device offset make absolute values meaningless
   EXPECT_DOUBLE_EQ(alt.process(0.0, p0), 0.0);
   double h = 0.0;
@@ -30,7 +30,7 @@ TEST(Baro, AltimeterReportsRelativeAltitude) {
 }
 
 TEST(Baro, LowPassSuppressesShortSpikes) {
-  BaroAltimeter alt({1.0, 1013.25});
+  BaroAltimeter alt(1.0);
   alt.process(0.0, 1000.0);
   double peak = 0.0;
   for (int i = 1; i <= 50; ++i) {

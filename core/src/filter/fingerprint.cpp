@@ -22,7 +22,7 @@ void GridFilter::add_fingerprint_loglik() {
   for (std::size_t b = 0; b < blocks; ++b) block_loglik_[b] *= cfg_.fingerprint_model_weight;
   const double s2 = cfg_.fingerprint_sigma_m * cfg_.fingerprint_sigma_m;
   const double norm = 1.0 / (2.0 * std::numbers::pi * s2);
-  const double eps = std::clamp(cfg_.fingerprint_eps, 1e-9, 1.0);
+  const double eps = kFingerprintEps;
   const double uniform = eps / (static_cast<double>(n) * map_->cell_m() * map_->cell_m());
   const auto term = [&](double x, double y, int level) {
     double sum = 0.0;

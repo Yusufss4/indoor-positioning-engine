@@ -518,6 +518,7 @@ def convert_site(site: str, cfg: dict, args) -> tuple[list, list, list, dict]:
         "bounds": bounds,
         "wall_attenuation_db": args.wall_attenuation_db,
         "floor_attenuation_db": round(floor_loss, 2),
+        "radio_map": "fitted",
         "georef": frame.georef.as_json(),
         "levels": [{"ordinal": o, "name": f"Floor {o}", "elevation_m": round(elev[o], 3),
                     "walls": [[round(float(v), 3) for v in w] for w in levels[o]],

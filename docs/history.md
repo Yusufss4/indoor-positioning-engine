@@ -7,7 +7,9 @@ full log with every table is in the repository's history
 (`git show 627d995:docs/experiments.md`, and `real_data.md`, `ipin.md`, `benchmarks.md`, `grid.md`,
 `uji_ble.md` next to it).
 
-Numbers are means over seeds on the simulated scenarios unless a dataset is named.
+Numbers are means over seeds on the simulated scenarios unless a dataset is named. Entries before 23 name
+config files (`data/configs/*.json`) and settings that no longer exist: since 23 the venue chooses the
+settings, and most of those values are parameters or constants in the code.
 
 ## What was kept, in one table
 
@@ -32,6 +34,7 @@ Numbers are means over seeds on the simulated scenarios unless a dataset is name
 | 20 | Must every update touch every cell? | No: 300 cells hold the mass; the rest can be coarse blocks | `filter.active_floor`, on by default since 22 |
 | 21 | Does the active floor delay convergence on real Wi-Fi? | The delay was inside the metric's noise; the background was too light under the compass | Background blocks with a heading row that move with the steps; `datasets/fidelity.py` |
 | 22 | Should the active floor be the default? | Decided on the numbers of 21; the gates pass unchanged | `filter.active_floor` 1e-9 by default |
+| 23 | How many settings does the engine need? | 15 of 68; the venue chooses their values, so no config files | `EngineConfig`, `recommended_config`, `"radio_map": "fitted"` |
 
 ## 2. A moved beacon hijacking the estimate (`office_field_issue`)
 
@@ -397,6 +400,31 @@ Held out, replayed once with the final code at 1e-9 (all walks pooled):
 - **Not repeated with the default:** the Kaggle held-out table and the submission (made with the exact
   filter), the demo-walk table in datasets.md, the timing in WebAssembly, and a phone.
 - `active_floor` 0 is the exact filter, as before.
+
+## 23. How many settings does the engine need?
+
+The engine's config was the union of every component's parameters: 68 values in 7 sections, three patch
+files in `data/configs/`, and two rules for building a config (`--config FILE` started from the defaults
+and ignored the venue; `--set` patched what the venue called for).
+
+- **What was used.** The three files set 4 values between them, the same 4 that `recommended_config`
+  already picked from the venue. About 27 of the 68 were never set by a test, a tool, a data file or a doc.
+- **Settings: 15**, with the names and sections they had ([formats.md](formats.md#settings)): what a
+  deployment changes. Of the other 53, 34 are named constants next to their use, 18 stay parameters of
+  their component because a test of that component changes them (no noise, no recovery, another number of
+  heading bins), and one switch nobody turned is gone (`map_consistent_estimate`, always on).
+- **No files.** A venue whose radio map was fitted from walks says so (`"radio_map": "fitted"`), which was
+  the one case a file was needed for; training scans are recognised as before.
+- **One rule.** A config is `recommended_config(venue)`, then every patch in order: `--config`, `--set`,
+  the WebAssembly module's patch.
+- **Results:** identical to before on the 12 scenarios (10 seeds), the 27 IPIN tune walks with and
+  without position fingerprints, and the mall tune walks of both conversions; the three baselines pass
+  unchanged. One core, 10 seeds: 31.5–74.3 µs per sensor update before and 32.2–77.6 after, where two
+  runs of one binary differ by 2–4%.
+- **What it costs.** An A/B test of one of the 53 is a code change and a rebuild, where it was a `--set`.
+  The `--set` commands of older entries for those keys (experiment 21's `teleport_rate_per_s`,
+  `step_length_rel_sigma` and `heading_sigma_deg`) are rejected as unknown keys. Mall data converted
+  before this entry has no marker and must be converted again.
 
 ## Open questions
 

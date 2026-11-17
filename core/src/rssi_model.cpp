@@ -22,8 +22,8 @@ double RssiModel::log_likelihood(double residual_db) const {
   const double s = cfg_.sigma_db;
   const double z = residual_db / s;
   const double gauss = std::exp(-0.5 * z * z) / (s * std::sqrt(2.0 * std::numbers::pi));
-  const double uniform = 1.0 / cfg_.outlier_range_db;
-  return std::log((1.0 - cfg_.outlier_prob) * gauss + cfg_.outlier_prob * uniform);
+  const double uniform = 1.0 / kRssiOutlierRangeDb;
+  return std::log((1.0 - kRssiOutlierProb) * gauss + kRssiOutlierProb * uniform);
 }
 
 }  // namespace ipe
