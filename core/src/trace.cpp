@@ -5,7 +5,9 @@
 #include <cstdio>
 #include <fstream>
 #include <istream>
+#include <locale>
 #include <ostream>
+#include <sstream>
 #include <stdexcept>
 #include <string_view>
 
@@ -26,10 +28,16 @@ std::vector<std::string_view> split(std::string_view line, char sep) {
 
 double to_double(std::string_view s, std::size_t line_no) {
   double v = 0.0;
-  const auto res = std::from_chars(s.data(), s.data() + s.size(), v);
-  if (res.ec != std::errc{}) {
-    throw std::runtime_error("trace line " + std::to_string(line_no) + ": bad number '" + std::string(s) + "'");
-  }
+#if defined(__cpp_lib_to_chars) && !defined(IPE_NO_FLOAT_FROM_CHARS)
+  const bool ok = std::from_chars(s.data(), s.data() + s.size(), v).ec == std::errc{};
+#else
+  // A standard library without from_chars for floating point (the Android NDK's, up to r28). The classic
+  // locale reads the same text to the same number, whatever the program's locale is.
+  std::istringstream in{std::string(s)};
+  in.imbue(std::locale::classic());
+  const bool ok = !s.empty() && s.front() != '+' && s.front() != ' ' && static_cast<bool>(in >> v);
+#endif
+  if (!ok) throw std::runtime_error("trace line " + std::to_string(line_no) + ": bad number '" + std::string(s) + "'");
   return v;
 }
 
