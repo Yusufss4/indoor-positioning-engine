@@ -94,7 +94,9 @@ target_link_libraries(app PRIVATE ipe::core)
 
 **Your own building.** A venue is a JSON file of walls, floors and beacons in local metres
 ([docs/formats.md](docs/formats.md)). `ipe-import` converts GeoJSON exports of indoor-mapping platforms,
-and `datasets/osm/convert.py` converts OpenStreetMap indoor data.
+and `datasets/osm/convert.py` converts OpenStreetMap indoor data. Where nobody knows the access points'
+positions, `datasets/fit_radio_map.py` fits them, and the Wi-Fi fingerprints, from walks recorded in the
+building ([docs/extending.md](docs/extending.md#your-own-building)).
 
 **Settings.** There are 15, and the venue chooses their values: one with training scans runs with Wi-Fi
 fingerprints, one with surveyed beacons with the defaults. To change one, patch it with JSON:

@@ -227,6 +227,39 @@ leaderboard: Hu et al., "The Wisdom of 1,170 Teams", MobiCom 2023.
 `datasets/kaggle/export_demo.py` writes one held-out walk per floor to `data/demo/kaggle/` (git-ignored),
 which adds 24 building groups to the menu of a locally built demo.
 
+## A radio map without a converter
+
+`datasets/fit_radio_map.py` fits a venue's access points and fingerprints from traces with `gt` rows: the
+route for a building that is not a data set ([extending.md](extending.md#your-own-building)). It uses the
+converters' fit. This table checks it against them. `--train-traces` makes a converter also write its
+training walks as traces, `datasets/refit_converted.py` fits every venue again from those traces alone,
+and the same test walks are replayed once on both radio maps.
+
+| Walks | Radio map from the converter | From `fit_radio_map.py` |
+|---|---|---|
+| Malls, 109 held-out: median CEP50 / CEP95 [m] | 5.18 / 8.94 | 5.27 / 8.90 |
+| Malls, the same with every BSSID as its own access point (`--raw-bssids`) | 5.30 / 8.63 | 5.54 / 8.44 |
+| IPIN, 6 scoring walks: competition metric [m] | 6.8, 5.2, 9.2, 5.5, 7.6, 6.6 | 6.1, 5.8, 8.9, 5.0, 7.5, 6.9 |
+| IPIN scoring walks: median of the metric, floor right | 6.68 m, 95.7% | 6.54 m, 95.5% |
+| IPIN, 27 validation walks: median CEP50 / CEP95 [m], median of the metric | 3.34 / 11.05, 7.15 | 3.58 / 11.01, 6.92 |
+
+- **What differs.** The converter places each Wi-Fi reading where the phone was when the access point was
+  heard; a trace gives a scan one time, so the tool places all its readings where the scan was delivered.
+  With that one change the converter itself gives 5.18 / 8.91 m on the malls. The tool fits a surveyed
+  beacon's position like any other transmitter's unless the input venue lists it (Nuremberg's four).
+- **Virtual access points.** The mall converter merges the BSSIDs of one radio; the tool takes ids as
+  recorded. The second row is that case, and what a phone logger that writes BSSIDs gets.
+- **What a training trace must keep.** An Android scan also reports access points heard a while ago.
+  The converters' fingerprints keep those readings (5% and 9% of all on the two floors counted). With them left out of the
+  training traces the tool's mall result was 5.65 / 8.30 m: a logger should write a scan as the phone
+  reports it. The mall test traces do leave out those heard before the walk's first IMU sample, as before.
+- **BLE packets of passing devices** are fitted as if they were beacons. On UMinho, which has no BLE
+  infrastructure, a training trace with them gave 1,224 fitted transmitters where 99 are access points.
+  The result barely moved, but such packets do not belong in a walk: the IPIN converter leaves them out
+  (`"ble": false` in `sites.json`).
+- With every reading in the test traces (`--all-readings`) the converter's mall medians are unchanged and
+  its mean CEP50 moves from 7.29 to 7.30 m.
+
 ## Against the leaderboards
 
 | Competition | Winner | Podium | Engine |
@@ -290,6 +323,16 @@ datasets/kaggle/fetch.sh
     --two-pass --fill --snap 6
 .venv/bin/python datasets/kaggle/submit.py --converted datasets/kaggle/out_fp \
     --two-pass --snap 6 --out datasets/kaggle/out_fp/submission.csv
+
+# fit_radio_map.py against the converters (the table "A radio map without a converter")
+.venv/bin/python datasets/msil/convert.py --wifi --scans --fingerprints --train-traces --all-readings \
+    --out datasets/msil/out_train                          # add --raw-bssids for the second row
+.venv/bin/python datasets/refit_converted.py datasets/msil/out_train datasets/msil/out_refit
+./build/tools/ipe-regress --traces datasets/msil/out_refit/manifest_holdout.json --no-baseline
+.venv/bin/python datasets/ipin/convert.py --wifi --scans --fingerprints --positions --unmodelled \
+    --train-traces --all-readings --out datasets/ipin/out_train
+.venv/bin/python datasets/refit_converted.py datasets/ipin/out_train datasets/ipin/out_refit
+.venv/bin/python datasets/evaluate.py datasets/ipin/out_refit/manifest_holdout.json
 
 # Recordings for the web demo
 .venv/bin/python datasets/msil/convert.py --wifi --scans --walls doors --fingerprints \

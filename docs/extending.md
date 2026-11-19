@@ -142,6 +142,56 @@ Whole-walk (offline) processing lives outside the engine, in `datasets/common/of
 replay, gap filling and snapping work on the replay's per-sample output and must never be quoted as live
 results.
 
+## Your own building
+
+The engine needs a venue: the map, and what the radio looks like on it.
+
+1. **The map.** Walls, and for several floors the levels and the stairs and lifts
+   ([formats.md](formats.md#venue-datavenuesjson)). `ipe-import` and `datasets/osm/convert.py` convert
+   existing maps.
+2. **The radio.** Beacons you installed go into the venue by hand, with their positions. For Wi-Fi, where
+   nobody knows where the access points are, record walks and fit the radio map from them:
+
+```bash
+.venv/bin/python datasets/fit_radio_map.py --venue walls.json --traces walks/*.csv --out venue.json \
+    --cross-validate
+```
+
+**What a walk must contain.** A trace ([formats.md](formats.md#trace-csv)) with:
+
+- `ble` rows for what the phone heard, under any id. The readings of one Wi-Fi scan share a time and a
+  scan number; only those become fingerprints.
+- `gt` rows where the walker's true position is known. A reading is placed on the straight line between
+  the `gt` rows before and after it, so **a walk needs one at every turn**. Readings before the first,
+  after the last, and between two on different floors are not used.
+- IMU rows, if `--cross-validate` is to replay the walk.
+
+Two things a logger should do, both measured on the datasets
+([datasets.md](datasets.md#a-radio-map-without-a-converter)): write a Wi-Fi scan as the phone reports it,
+including the access points it heard a while ago; and leave out BLE packets of devices that are not
+installed beacons, because every id heard often enough is fitted as a transmitter.
+
+**What the tool writes.** The input venue with:
+
+- a beacon per transmitter it could fit: position, power at 1 m and path-loss exponent. A transmitter
+  needs 30 readings from places at least 3 m apart, and a fit within 8 dB (`--min-samples`,
+  `--min-spread`, `--max-rms`). On several floors it goes on the floor where it is heard strongest, and
+  the loss per slab is fitted from the other floors;
+- `floor_fingerprints`: every scan with its floor and position. Transmitters without a fit that appear in
+  10 scans stay as fingerprint dimensions (`"model": false`);
+- `"radio_map": "fitted"`, from which the engine picks its settings ([formats.md](formats.md#settings)).
+
+Beacons the input venue already lists are kept as they are and not fitted. A venue that already has a
+fitted radio map is refused: fit again from the venue without it.
+
+**How good is it.** `--cross-validate` leaves a fifth of the walks out (`--folds`), fits on the rest and
+replays the ones left out, until every walk has been scored on a radio map it had no part in. Its median
+CEP50 and CEP95 are the accuracy to expect from these walks in this building. More walks, and taps at
+every turn, are what improve it.
+
+The CTest `fit_radio_map` (`tests/fit_radio_map_check.py`) takes the beacons out of the simulated office
+venues and fits them back.
+
 ## A dataset
 
 A converter turns recordings into the three things every tool reads:
@@ -157,8 +207,8 @@ A converter turns recordings into the three things every tool reads:
 
 | Module | What it gives |
 |---|---|
-| `trace.py` | `TraceWriter` for the CSV, `write_manifests` |
-| `radiomap.py` | fitting access points (`fit_samples`), merging virtual access points |
+| `trace.py` | `TraceWriter` for the CSV, `write_manifests`; `read_walk` and `interp_same_level` for a trace's radio and truth |
+| `radiomap.py` | fitting access points (`fit_samples`, `fit_levels` for several floors), merging virtual access points |
 | `fingerprints.py` | the venue's `floor_fingerprints` table and fingerprint-only beacons |
 | `geom.py` | wall crossings, cutting doorways, the heading offset between phone and map |
 | `georef.py` | local metres to WGS84 |

@@ -64,8 +64,9 @@ def _xyz(cols, start):
     return [float(cols[start]), float(cols[start + 1]), float(cols[start + 2])]
 
 
-def parse_path(path: Path) -> PathData:
-    """Reads one path file. Timestamps are milliseconds; returned in seconds."""
+def parse_path(path: Path, merge_aps: bool = True) -> PathData:
+    """Reads one path file. Timestamps are milliseconds; returned in seconds. With `merge_aps` the BSSIDs
+    of one radio count as one access point (common.radiomap); without, every BSSID is its own."""
     acc, gyro, rot, wifi, ble, wps = {}, {}, {}, [], [], []
     seen_wifi = set()
     with open(path, encoding="utf-8", errors="replace") as f:
@@ -90,7 +91,7 @@ def parse_path(path: Path) -> PathData:
                     if (bssid, last_seen) in seen_wifi:
                         continue
                     seen_wifi.add((bssid, last_seen))
-                    wifi.append((last_seen, physical_ap(bssid), rssi, t))
+                    wifi.append((last_seen, physical_ap(bssid) if merge_aps else bssid, rssi, t))
                 elif kind == "TYPE_BEACON" and len(cols) >= 7:
                     ble.append((t / 1000.0, f"{cols[2]}_{cols[3]}_{cols[4]}", float(cols[6])))
                 elif kind == "TYPE_WAYPOINT":
@@ -113,7 +114,8 @@ def parse_path(path: Path) -> PathData:
     if wifi and abs(float(np.median([seen - t for seen, _, _, t in wifi]))) > CLOCK_MISMATCH_MS:
         shift = max(seen - t for seen, _, _, t in wifi)
         wifi = [(seen - shift, ap, rssi, t) for seen, ap, rssi, t in wifi]
-    pd.wifi = merge_virtual_aps([(seen / 1000.0, ap, rssi, t / 1000.0) for seen, ap, rssi, t in wifi])
+    pd.wifi = [(seen / 1000.0, ap, rssi, t / 1000.0) for seen, ap, rssi, t in wifi]
+    pd.wifi = merge_virtual_aps(pd.wifi) if merge_aps else sorted(pd.wifi)
     pd.ble = sorted(ble)
     pd.waypoints = np.array(sorted(wps)) if wps else np.zeros((0, 3))
     return pd
@@ -376,9 +378,13 @@ def training_scans(train: list[PathData]) -> list[tuple[int, float, float, dict[
 # Output
 
 
-def write_trace(path: Path, pd: PathData, name: str, offset: float, known: set[str], wifi: bool,
-                scans: bool = False) -> dict:
-    t0 = pd.imu_t[0]
+def write_trace(path: Path, pd: PathData, name: str, offset: float, known: set[str] | None, wifi: bool,
+                scans: bool = False, stale: bool = False) -> dict:
+    """`known` are the transmitters whose readings are written; None writes every reading. Time counts
+    from the first IMU sample (from the first waypoint in a training walk without IMU). A scan also
+    reports access points last heard before that moment: they are left out, or with `stale` kept in
+    their scan, as the fingerprints of the venue keep them (`training_scans`)."""
+    t0 = pd.imu_t[0] if len(pd.imu_t) else pd.waypoints[0, 0]
     r = rotation_matrices(pd.rotvec)
     acc_w = np.einsum("nij,nj->ni", r, pd.acc)
     gyro_w = np.einsum("nij,nj->ni", r, pd.gyro)
@@ -400,7 +406,7 @@ def write_trace(path: Path, pd: PathData, name: str, offset: float, known: set[s
     packets = 0
     for prefix, stream in streams:
         for t, tid, rssi, *_ in stream:
-            if prefix + tid in known and t >= t0:
+            if (known is None or prefix + tid in known) and t >= t0:
                 rows.append((t - t0, f"ble,{t - t0:.3f},{prefix}{tid},{rssi:.0f}"))
                 packets += 1
     n_scans = 0
@@ -409,9 +415,9 @@ def write_trace(path: Path, pd: PathData, name: str, offset: float, known: set[s
         # contiguous (the sort below is stable), which is how replay recognises the scan.
         by_scan: dict[float, list] = {}
         for t, tid, rssi, t_scan in pd.wifi:
-            if "w:" + tid in known and t >= t0:
+            if (known is None or "w:" + tid in known) and (t >= t0 or (stale and t_scan >= t0)):
                 by_scan.setdefault(t_scan, []).append((t, tid, rssi))
-        batches = sorted((max(r[0] for r in readings), t_scan, readings) for t_scan, readings in by_scan.items())
+        batches = sorted((max(t0, max(r[0] for r in readings)), t_scan, readings) for t_scan, readings in by_scan.items())
         for n_scans, (t_batch, _, readings) in enumerate(batches, start=1):
             for _, tid, rssi in sorted(readings, key=lambda r: r[1]):
                 rows.append((t_batch - t0, f"ble,{t_batch - t0:.3f},w:{tid},{rssi:.0f},{n_scans}"))
@@ -427,7 +433,7 @@ def write_trace(path: Path, pd: PathData, name: str, offset: float, known: set[s
         f.write(f"# ipe-trace v1\n# scenario: {name}\n# source: msil path {pd.path_id}\n")
         for _, line in rows:
             f.write(line + "\n")
-    stats = {"duration_s": float(pd.imu_t[-1] - t0), "packets": packets, "waypoints": len(wp)}
+    stats = {"duration_s": float(pd.imu_t[-1] - t0) if len(pd.imu_t) else 0.0, "packets": packets, "waypoints": len(wp)}
     if scans:
         stats["scans"] = n_scans
     return stats
@@ -523,9 +529,16 @@ def convert_floor(site: str, floor_name: str, floor_dir: Path, paths: list[PathD
         if len(pd.imu_t) < 100 or len(pd.waypoints) < 2:
             continue
         trace_path = floor_out / f"{pd.path_id}.csv"
-        stats = write_trace(trace_path, pd, f"{name}_{pd.path_id}", offset, known, args.wifi, args.scans)
+        stats = write_trace(trace_path, pd, f"{name}_{pd.path_id}", offset, None if args.all_readings else known, args.wifi,
+                            args.scans)
         entries.append({"name": f"{name}_{pd.path_id}", "group": name, "venue": str(venue_path.relative_to(out)), "trace": str(trace_path.relative_to(out)), **stats})
     report["test_traces"] = len(entries)
+    if args.train_traces:
+        (floor_out / "train").mkdir(exist_ok=True)
+        for pd in train:
+            if len(pd.waypoints) >= 2:
+                write_trace(floor_out / "train" / f"{pd.path_id}.csv", pd, f"{name}_{pd.path_id}", offset, None, args.wifi,
+                            args.scans, stale=True)
     return entries, report
 
 
@@ -559,7 +572,7 @@ def site_floors(args) -> list[tuple[str, list[tuple[str, Path, list[Path]]]]]:
 
 def convert_site(job) -> tuple[list, list, list[str]]:
     site, floors, args = job
-    parsed = {name: [parse_path(p) for p in files] for name, _, files in floors}
+    parsed = {name: [parse_path(p, not args.raw_bssids) for p in files] for name, _, files in floors}
     # Map north is a property of the site: fit it on every floor's training paths.
     train_all = [p for ps in parsed.values() for p in ps if not is_test(p.path_id, args.test_every)]
     offset, spread, segments = fit_heading_offset(train_all)
@@ -595,6 +608,14 @@ def main():
                          "access points the fit rejected as fingerprint-only beacons")
     ap.add_argument("--min-fingerprint-scans", type=int, default=10,
                     help="training scans an access point without a fitted transmitter must appear in")
+    ap.add_argument("--train-traces", action="store_true",
+                    help="also write the training walks as traces with every reading (<floor>/train/), the input "
+                         "of datasets/fit_radio_map.py")
+    ap.add_argument("--all-readings", action="store_true",
+                    help="write every reading to the test traces, not only those of the venue's transmitters: for "
+                         "replaying them on a venue with other transmitters")
+    ap.add_argument("--raw-bssids", action="store_true",
+                    help="keep every BSSID as its own access point (by default the BSSIDs of one radio are merged)")
     ap.add_argument("--walls", choices=["auto", "none", "boundary", "units", "doors"], default="auto",
                     help="doors: shop outlines with gaps where training walks cross them")
     ap.add_argument("--door-width", type=float, default=3.0, help="metres; gap cut per doors crossing")

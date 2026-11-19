@@ -29,6 +29,8 @@ jobs:
             cxx: clang++
     steps:
       - uses: actions/checkout@v4
+      - name: Python packages of the dataset tools (the fit_radio_map test is skipped without them)
+        run: sudo apt-get update && sudo apt-get install -y python3-numpy python3-scipy
       - name: Configure
         run: >
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release

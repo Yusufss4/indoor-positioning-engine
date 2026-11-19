@@ -57,6 +57,13 @@ if(IPE_BUILD_TOOLS AND IPE_INSTALL AND NOT IPE_SANITIZE)
 endif()
 
 if(IPE_BUILD_TOOLS)
+  # datasets/fit_radio_map.py on simulated walks: beacons taken out of a venue and fitted back. It needs a
+  # Python with numpy and scipy, the repository's .venv when there is one, and is skipped without.
+  add_test(NAME fit_radio_map
+           COMMAND sh -c "if [ -x \"$0/.venv/bin/python\" ]; then py=\"$0/.venv/bin/python\"; else py=python3; fi; exec \"$py\" \"$0/tests/fit_radio_map_check.py\" --build \"$1\""
+                   ${PROJECT_SOURCE_DIR} ${CMAKE_BINARY_DIR})
+  set_tests_properties(fit_radio_map PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 900)
+
   set(IPE_REGRESSION_SEEDS 3 CACHE STRING "Seeds per scenario in the accuracy regression test")
   add_test(NAME accuracy_regression
            COMMAND ipe-regress --scenarios ${PROJECT_SOURCE_DIR}/data/scenarios
