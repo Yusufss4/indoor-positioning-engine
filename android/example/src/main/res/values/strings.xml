@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">IPE example</string>
+    <string name="open_venue">Open venue…</string>
+    <string name="start">Start</string>
+    <string name="stop">Stop</string>
+    <string name="save">Save walk</string>
+    <string name="taps_correct">Taps correct the position</string>
+    <string name="pick_venue">Choose a venue and press Start.</string>
+    <string name="starting">Loading the venue…</string>
+    <string name="waiting_for_sensors">Waiting for the motion sensors…</string>
+    <string name="tap_start">Tap the map where you are.</string>
+    <string name="walk">Walk. Tap the map where you really are, at every turn.</string>
+    <string name="stopped">Stopped. Save the walk, or press Start for a new one.</string>
+    <string name="throttled">Android is limiting Wi-Fi scans: switch off “Wi-Fi scan throttling” in Developer options.</string>
+    <string name="no_radio_permission">Without the location permission the app sees no Wi-Fi or Bluetooth.</string>
+    <string name="saved">Saved. Replay it with ipe-replay --venue VENUE.json --trace the file.</string>
+    <string name="nothing_to_save">Nothing recorded yet.</string>
+    <string name="bad_venue">This file is not a venue: %1$s</string>
+</resources>

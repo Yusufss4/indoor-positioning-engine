@@ -52,11 +52,17 @@ const ipe::Estimate fix = engine.estimate();   // position, level, covariance, v
   it to every engine on that venue (`PositioningEngine`'s third constructor argument).
 - The estimate is valid once a radio reading or a position fix has arrived. Without radio, a fix at the
   start is what the engine walks on from, with steps and the map.
+- An app on a phone wants the engine and a recording of what it was fed. `ipe::LiveSession`
+  (`ipe/live_session.hpp`) is both: the engine's calls with radio by id (`on_scan`, `on_ble`), `mark` for
+  a tap that says where the user really is, and `trace_csv`. Replaying the trace it saves gives exactly
+  the estimates it gave.
 - In the browser, `web/bindings.cpp` has two embind classes: `Demo` replays a trace or a scenario, and
-  `Live` is the engine fed one event at a time (`onImu`, `onBle`, `onPressure`, `onPositionFix`), keeping
-  what it was fed as a trace. `web/live.js` feeds it from a phone's motion sensors and is the place to
-  see how browser sensor data becomes the engine's frame; `web/check_live.py` tests the page without a
-  phone. A native app does the same against `PositioningEngine` directly.
+  `Live` wraps a `LiveSession`. `web/live.js` feeds it from a phone's motion sensors;
+  `web/check_live.py` tests the page without a phone.
+- On Android, `android/ipe` wraps a `LiveSession` as the Kotlin class `PositioningEngine`, and its
+  `SensorFrame` turns Android's sensors into the engine's frame. `android/example` is an app built on
+  them, and `android/check_device.py` compares the Android build with the native one on a device
+  ([android/README.md](../android/README.md)).
 
 ## A setting, or a parameter
 
@@ -150,7 +156,9 @@ The engine needs a venue: the map, and what the radio looks like on it.
    ([formats.md](formats.md#venue-datavenuesjson)). `ipe-import` and `datasets/osm/convert.py` convert
    existing maps.
 2. **The radio.** Beacons you installed go into the venue by hand, with their positions. For Wi-Fi, where
-   nobody knows where the access points are, record walks and fit the radio map from them:
+   nobody knows where the access points are, record walks and fit the radio map from them. The Android
+   example ([android/README.md](../android/README.md)) records such walks: open the venue in it, walk,
+   and tap the map where you are at every turn.
 
 ```bash
 .venv/bin/python datasets/fit_radio_map.py --venue walls.json --traces walks/*.csv --out venue.json \

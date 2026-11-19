@@ -92,11 +92,20 @@ add_subdirectory(indoor-positioning-engine)   # or FetchContent; builds the libr
 target_link_libraries(app PRIVATE ipe::core)
 ```
 
+**On Android.** [`android/`](android/README.md) has the engine as a Kotlin library, with the conversion
+from Android's sensors to the engine's input, and a small app that shows your position on a venue and
+records walks.
+
 **Your own building.** A venue is a JSON file of walls, floors and beacons in local metres
 ([docs/formats.md](docs/formats.md)). `ipe-import` converts GeoJSON exports of indoor-mapping platforms,
 and `datasets/osm/convert.py` converts OpenStreetMap indoor data. Where nobody knows the access points'
-positions, `datasets/fit_radio_map.py` fits them, and the Wi-Fi fingerprints, from walks recorded in the
-building ([docs/extending.md](docs/extending.md#your-own-building)).
+positions:
+
+1. Walk the building with the Android app, tapping your position on the map at every turn.
+2. `datasets/fit_radio_map.py` fits the access points and the Wi-Fi fingerprints from those walks.
+3. Open the venue it writes in the app.
+
+[docs/extending.md](docs/extending.md#your-own-building) has the detail.
 
 **Settings.** There are 15, and the venue chooses their values: one with training scans runs with Wi-Fi
 fingerprints, one with surveyed beacons with the defaults. To change one, patch it with JSON:

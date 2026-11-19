@@ -24,6 +24,11 @@ accuracy. [docs/design.md](docs/design.md) explains the engine and maps each con
 - `web/` - Emscripten bindings, the browser demo (`index.html`, replays) and the live page (`live.html`,
   the engine fed by a phone's motion sensors). `web/check_live.py` tests the live page in headless Chrome.
   `viz/` - figures and the README GIF.
+- `android/` - a Gradle project: `ipe`, the engine as a Kotlin library (a JNI bridge over
+  `ipe::LiveSession`, and `SensorFrame`, Android's sensors to the engine's frame), and `example`, an app
+  that shows the position and records walks. `android/check_device.py` compares the Android build with
+  the native one on a device or emulator. The engine must keep compiling with the NDK's standard
+  library, which lacks some of C++20's library (floating-point `from_chars`, for one).
 - `data/venues`, `data/scenarios` - inputs. `data/geojson` is generated from `data/venues` by `ipe-import`;
   a unit test fails when it is stale.
 - Settings: `EngineConfig` (`core/include/ipe/engine.hpp`) has 15, listed in
@@ -113,6 +118,8 @@ Sanitizers: `-DIPE_SANITIZE=address,undefined` with `CMAKE_BUILD_TYPE=Debug`.
 .venv/bin/python datasets/evaluate.py datasets/ipin/out_fp/manifest_tune.json                   # real walks
 .venv/bin/python datasets/fit_radio_map.py --venue walls.json --traces walks/*.csv \
     --out venue.json --cross-validate                                                           # a radio map
+(cd android && ./gradlew :example:assembleDebug :ipe:testDebugUnitTest)                         # Android
+python3 android/check_device.py --serial emulator-5554                                          # on a device
 .venv/bin/python datasets/fidelity.py datasets/ipin/out_fp/manifest_tune.json \
     --b '{"rssi": {"sigma_db": 8.01}}'                                                          # their noise
 ```
